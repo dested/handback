@@ -39,7 +39,7 @@ async function dashboardLoader({ context }: LoaderFunctionArgs): Promise<RootLoa
   if (typeof window === 'undefined') {
     const ctx = context as SsrLoaderContext
     if (!ctx.session) throw redirect('/sign-in')
-    await ctx.queryClient.prefetchQuery(ctx.trpc.posts.list.queryOptions())
+    await ctx.queryClient.prefetchQuery(ctx.trpc.orgs.mine.queryOptions())
     return { session: ctx.session }
   }
   const session = await fetchClientSession()

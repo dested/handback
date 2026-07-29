@@ -6,6 +6,7 @@ import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { auth } from './server/auth'
 import { env } from './server/env'
+import { ingestRouter } from './server/ingest'
 import { formatError, log, requestLogger, startupBanner } from './server/logger'
 import { prisma } from './server/prisma'
 import { appRouter } from './server/router'
@@ -43,6 +44,10 @@ async function createServer() {
   // better-auth handler — mounted BEFORE express.json() (better-auth reads
   // the raw body itself).
   app.all('/api/auth/*splat', toNodeHandler(auth))
+
+  // Token-authed upload surface for the CLI / extension / MCP. Parses its own
+  // JSON bodies; keep it after the auth mount, which needs the raw stream.
+  app.use('/api/ingest', ingestRouter)
 
   app.use(
     '/api/trpc',
