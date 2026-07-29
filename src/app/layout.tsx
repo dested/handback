@@ -2,67 +2,140 @@ import {
   Link,
   NavLink,
   Outlet,
+  useLocation,
   useNavigate,
   useRevalidator,
   useRouteLoaderData,
 } from 'react-router-dom'
+import { Wordmark } from '~/components/logo'
 import { authClient } from '~/lib/auth-client'
+import { OrgProvider, useActiveOrg } from '~/lib/org'
+import { cn } from '~/lib/utils'
 import type { RootLoaderData } from './routes'
+
+const APP_PREFIXES = ['/app', '/gripes', '/team', '/projects']
 
 export function Layout() {
   const data = useRouteLoaderData('root') as RootLoaderData | undefined
   const session = data?.session ?? null
+  const location = useLocation()
+  const inApp = session !== null && APP_PREFIXES.some((p) => location.pathname.startsWith(p))
+
+  return (
+    <OrgProvider enabled={session !== null}>
+      {inApp ? <AppHeader email={session!.user.email} /> : <MarketingHeader signedIn={!!session} />}
+      <main className={inApp ? 'mx-auto w-full max-w-6xl px-6 py-8' : ''}>
+        <Outlet />
+      </main>
+      {!inApp && <MarketingFooter />}
+    </OrgProvider>
+  )
+}
+
+function MarketingHeader({ signedIn }: { signedIn: boolean }) {
+  return (
+    <header className="border-border border-b">
+      <nav className="mx-auto flex max-w-6xl items-center gap-6 px-6 py-4">
+        <Link to="/" aria-label="Inloop home">
+          <Wordmark />
+        </Link>
+        <div className="ml-auto flex items-center gap-5 text-sm">
+          {signedIn ? (
+            <Link
+              to="/app"
+              className="bg-primary text-primary-foreground rounded-md px-4 py-2 font-medium hover:opacity-90">
+              Open the inbox
+            </Link>
+          ) : (
+            <>
+              <Link to="/sign-in" className="text-muted-foreground hover:text-foreground">
+                Sign in
+              </Link>
+              <Link
+                to="/sign-up"
+                className="bg-primary text-primary-foreground rounded-md px-4 py-2 font-medium hover:opacity-90">
+                Get started
+              </Link>
+            </>
+          )}
+        </div>
+      </nav>
+    </header>
+  )
+}
+
+function AppHeader({ email }: { email: string }) {
   const navigate = useNavigate()
   const revalidator = useRevalidator()
+  const { orgs, org, setActiveOrgId } = useActiveOrg()
 
   async function signOut() {
     await authClient.signOut()
-    // Land on home first, then re-run loaders so the cleared session is
-    // reflected (mirrors the revalidate in the sign-in/up flows).
     navigate('/', { replace: true })
     revalidator.revalidate()
   }
 
+  const tab = ({ isActive }: { isActive: boolean }) =>
+    cn(
+      'rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+      isActive ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground'
+    )
+
   return (
-    <>
-      <header className="border-b">
-        <nav className="mx-auto flex max-w-5xl items-center gap-6 px-6 py-4">
-          <Link to="/" className="font-semibold">
-            inloop
-          </Link>
-          <NavLink
-            to="/dashboard"
-            className={({ isActive }) =>
-              isActive
-                ? 'text-foreground text-sm'
-                : 'text-muted-foreground hover:text-foreground text-sm'
-            }>
-            Dashboard
+    <header className="border-border bg-card border-b">
+      <nav className="mx-auto flex max-w-6xl items-center gap-4 px-6 py-3">
+        <Link to="/app" aria-label="Inloop inbox">
+          <Wordmark />
+        </Link>
+        {orgs.length > 1 && org && (
+          <select
+            aria-label="Organization"
+            className="border-input bg-background text-foreground rounded-md border px-2 py-1 text-sm"
+            value={org.id}
+            onChange={(e) => setActiveOrgId(e.target.value)}>
+            {orgs.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.name}
+              </option>
+            ))}
+          </select>
+        )}
+        {orgs.length === 1 && org && (
+          <span className="text-muted-foreground text-sm font-medium">{org.name}</span>
+        )}
+        <div className="ml-2 flex items-center gap-1">
+          <NavLink to="/app" className={tab} end>
+            Inbox
           </NavLink>
-          <div className="ml-auto flex items-center gap-3 text-sm">
-            {session ? (
-              <>
-                <span className="text-muted-foreground">{session.user.email}</span>
-                <button type="button" className="hover:underline" onClick={signOut}>
-                  Sign out
-                </button>
-              </>
-            ) : (
-              <>
-                <Link to="/sign-in" className="hover:underline">
-                  Sign in
-                </Link>
-                <Link to="/sign-up" className="hover:underline">
-                  Sign up
-                </Link>
-              </>
-            )}
-          </div>
-        </nav>
-      </header>
-      <main className="mx-auto max-w-5xl px-6 py-8">
-        <Outlet />
-      </main>
-    </>
+          <NavLink to="/projects" className={tab}>
+            Projects
+          </NavLink>
+          <NavLink to="/team" className={tab}>
+            Team
+          </NavLink>
+        </div>
+        <div className="ml-auto flex items-center gap-3 text-sm">
+          <span className="text-muted-foreground hidden sm:inline">{email}</span>
+          <button
+            type="button"
+            className="text-muted-foreground hover:text-foreground"
+            onClick={signOut}>
+            Sign out
+          </button>
+        </div>
+      </nav>
+    </header>
+  )
+}
+
+function MarketingFooter() {
+  return (
+    <footer className="border-border mt-24 border-t">
+      <div className="text-muted-foreground mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-6 py-8 text-sm">
+        <Wordmark className="text-foreground" />
+        <span>Humans in the loop.</span>
+        <span className="ml-auto">© 2026 Inloop</span>
+      </div>
+    </footer>
   )
 }

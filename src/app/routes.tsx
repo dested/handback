@@ -4,12 +4,16 @@ import type { TRPCOptionsProxy } from '@trpc/tanstack-react-query'
 import { authClient } from '~/lib/auth-client'
 import type { Session } from '../../server/auth'
 import type { AppRouter } from '../../server/router'
-import { DashboardPage } from './dashboard'
+import { InboxPage } from './app'
 import { RouteErrorBoundary } from './error-boundary'
+import { GripePage } from './gripe'
 import { HomePage } from './home'
+import { JoinPage } from './join'
 import { Layout } from './layout'
+import { ProjectsPage } from './projects'
 import { SignInPage } from './sign-in'
 import { SignUpPage } from './sign-up'
+import { TeamPage } from './team'
 
 // Per-request context populated by entry-server.tsx and handed to loaders via
 // createStaticHandler.query(req, { requestContext }). Only available SSR-side.
@@ -35,7 +39,9 @@ async function rootLoader({ context }: LoaderFunctionArgs): Promise<RootLoaderDa
   return { session: await fetchClientSession() }
 }
 
-async function dashboardLoader({ context }: LoaderFunctionArgs): Promise<RootLoaderData> {
+// Signed-in surfaces: bounce to sign-in without a session, and warm the org
+// list on the server so the shell renders with the switcher populated.
+async function appLoader({ context }: LoaderFunctionArgs): Promise<RootLoaderData> {
   if (typeof window === 'undefined') {
     const ctx = context as SsrLoaderContext
     if (!ctx.session) throw redirect('/sign-in')
@@ -52,7 +58,7 @@ async function redirectIfSignedIn({ context }: LoaderFunctionArgs) {
     typeof window === 'undefined'
       ? (context as SsrLoaderContext).session
       : await fetchClientSession()
-  if (session) throw redirect('/dashboard')
+  if (session) throw redirect('/app')
   return null
 }
 
@@ -67,7 +73,12 @@ export const routes: RouteObject[] = [
       { index: true, Component: HomePage },
       { path: 'sign-in', Component: SignInPage, loader: redirectIfSignedIn },
       { path: 'sign-up', Component: SignUpPage, loader: redirectIfSignedIn },
-      { path: 'dashboard', Component: DashboardPage, loader: dashboardLoader },
+      { path: 'join/:inviteId', Component: JoinPage },
+      { path: 'app', Component: InboxPage, loader: appLoader },
+      { path: 'gripes/:gripeId', Component: GripePage, loader: appLoader },
+      { path: 'projects', Component: ProjectsPage, loader: appLoader },
+      { path: 'team', Component: TeamPage, loader: appLoader },
+      { path: 'dashboard', loader: () => redirect('/app') },
     ],
   },
 ]

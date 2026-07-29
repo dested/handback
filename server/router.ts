@@ -366,7 +366,16 @@ const gripesRouter = router({
         transcriber: t.transcriber,
         videoPath: t.videoPath,
       })),
-      files: g.files.map((f) => ({ path: f.path, size: f.size, contentType: f.contentType })),
+      // Presigned per file so the viewer never round-trips per frame; signing
+      // is local HMAC work, cheap even at a few hundred files.
+      files: await Promise.all(
+        g.files.map(async (f) => ({
+          path: f.path,
+          size: f.size,
+          contentType: f.contentType,
+          url: await presignGet(gripeKey(g.orgId, g.id, f.path)),
+        }))
+      ),
     }
   }),
 
