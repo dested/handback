@@ -1,0 +1,6 @@
+node_modules
+dist
+bun.lock
+e2e/__screenshots__
+playwright-report
+test-results

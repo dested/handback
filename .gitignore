@@ -1,0 +1,27 @@
+node_modules
+dist
+.vite
+.cache
+
+# env
+.env
+.env.*
+!.env.example
+
+# editor
+.vscode/*
+!.vscode/extensions.json
+.idea
+
+# os
+.DS_Store
+Thumbs.db
+
+# logs
+*.log
+bun.lockb.bak
+
+# playwright (keep e2e/__screenshots__ baselines, ignore run artifacts)
+test-results
+playwright-report
+/playwright/.cache
