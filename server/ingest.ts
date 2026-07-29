@@ -1,4 +1,4 @@
-// Token-authed REST ingest for the CLI / extension / MCP. Two-phase:
+// Token-authed REST ingest for the CLI / extension / MCP. Two-phase write:
 //
 //   POST /api/ingest/gripes            declare a gripe (metadata + file list)
 //                                      → gripe row + pending files + presigned PUTs
@@ -8,13 +8,27 @@
 // Re-declaring the same (org, slug) replaces the previous upload wholesale:
 // old rows cascade away and the old S3 prefix is deleted. Auth is a bearer
 // ApiToken (`ilp_...`); the token pins the org.
+//
+// The read side is what an agent pulls through `cli/mcp.ts`:
+//
+//   GET  /api/ingest/gripes            the org's finalized gripes, newest first
+//   GET  /api/ingest/gripes/:id        one gripe's full brief (report.md + presigned files)
+//   POST /api/ingest/gripes/:id/status open | in_review | resolved
 
 import { createHash } from 'node:crypto'
 import { Router, json, type Request, type Response } from 'express'
 import { z } from 'zod'
 import { log } from './logger'
 import { prisma } from './prisma'
-import { deletePrefix, gripeKey, gripePrefix, isSafePath, presignPut } from './storage'
+import {
+  deletePrefix,
+  getObjectText,
+  gripeKey,
+  gripePrefix,
+  isSafePath,
+  presignGet,
+  presignPut,
+} from './storage'
 
 const MAX_FILES = 4000
 const MAX_FILE_BYTES = 4 * 1024 * 1024 * 1024 // one webm can be big; presigned PUT caps at 5GB
@@ -50,6 +64,12 @@ const declareSchema = z.object({
     .min(1)
     .max(MAX_FILES),
 })
+
+const statusSchema = z.enum(['open', 'in_review', 'resolved'])
+
+const setStatusSchema = z.object({ status: statusSchema })
+
+const LIST_LIMIT = 100
 
 type TokenAuth = { orgId: string; userId: string; tokenId: string }
 
@@ -192,4 +212,124 @@ ingestRouter.post('/gripes/:id/finalize', async (req, res) => {
   })
   log.info(`[ingest] finalized gripe ${gripe.slug} (${gripe.id})`)
   res.json({ ok: true, gripeId: gripe.id })
+})
+
+// The org's finalized gripes, newest recording first. Deliberately thin — an
+// agent scans this list, then pulls the one gripe it's going to work on.
+ingestRouter.get('/gripes', async (req, res) => {
+  const auth = getAuth(req)
+  const status = req.query.status
+  if (status !== undefined && !statusSchema.safeParse(status).success) {
+    fail(res, 400, `status must be one of ${statusSchema.options.join(', ')}`)
+    return
+  }
+  const rows = await prisma.gripe.findMany({
+    where: {
+      orgId: auth.orgId,
+      finalizedAt: { not: null },
+      ...(typeof status === 'string' ? { status } : {}),
+    },
+    orderBy: { recordedAt: 'desc' },
+    take: LIST_LIMIT,
+    include: {
+      project: { select: { name: true } },
+      _count: { select: { takes: true } },
+    },
+  })
+  res.json(
+    rows.map((g) => ({
+      id: g.id,
+      slug: g.slug,
+      title: g.title,
+      origin: g.origin,
+      status: g.status,
+      recordedAt: g.recordedAt.toISOString(),
+      durationMs: g.durationMs,
+      frameCount: g.frameCount,
+      eventCount: g.eventCount,
+      takeCount: g._count.takes,
+      projectName: g.project?.name ?? null,
+    }))
+  )
+})
+
+// One gripe, everything an agent needs in a single round trip: metadata, the
+// report.md the recorder wrote for it, and a presigned GET per uploaded file.
+ingestRouter.get('/gripes/:id', async (req, res) => {
+  const auth = getAuth(req)
+  const gripe = await prisma.gripe.findUnique({
+    where: { id: req.params.id },
+    include: {
+      takes: { orderBy: { index: 'asc' } },
+      files: { where: { status: 'uploaded' }, orderBy: { path: 'asc' } },
+    },
+  })
+  if (!gripe || gripe.orgId !== auth.orgId || !gripe.finalizedAt) {
+    fail(res, 404, 'Unknown gripe')
+    return
+  }
+
+  // report.md is the whole point of the pull, but a gripe is still usable
+  // without it (bad upload, hand-declared gripe) — degrade to null.
+  const reportMd = await getObjectText(gripeKey(gripe.orgId, gripe.id, 'report.md')).catch(
+    (err: unknown) => {
+      log.warn(`[ingest] report.md unreadable for gripe ${gripe.id}: ${String(err)}`)
+      return null
+    }
+  )
+
+  res.json({
+    id: gripe.id,
+    slug: gripe.slug,
+    title: gripe.title,
+    origin: gripe.origin,
+    status: gripe.status,
+    recordedAt: gripe.recordedAt.toISOString(),
+    durationMs: gripe.durationMs,
+    frameCount: gripe.frameCount,
+    eventCount: gripe.eventCount,
+    takes: gripe.takes.map((t) => ({
+      index: t.index,
+      dir: t.dir,
+      interrupted: t.interrupted,
+      durationMs: t.durationMs,
+      frameCount: t.frameCount,
+      videoPath: t.videoPath,
+    })),
+    reportMd,
+    files: await Promise.all(
+      gripe.files.map(async (f) => ({
+        path: f.path,
+        size: f.size,
+        contentType: f.contentType,
+        url: await presignGet(gripeKey(gripe.orgId, gripe.id, f.path)),
+      }))
+    ),
+  })
+})
+
+// How an agent reports progress: in_review when a fix is up, resolved only
+// after a human signs off.
+ingestRouter.post('/gripes/:id/status', async (req, res) => {
+  const auth = getAuth(req)
+  const parsed = setStatusSchema.safeParse(req.body)
+  if (!parsed.success) {
+    fail(res, 400, parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '))
+    return
+  }
+  const gripe = await prisma.gripe.findUnique({
+    where: { id: req.params.id },
+    select: { id: true, slug: true, orgId: true },
+  })
+  if (!gripe || gripe.orgId !== auth.orgId) {
+    fail(res, 404, 'Unknown gripe')
+    return
+  }
+  const { status } = parsed.data
+  await prisma.gripe.update({
+    where: { id: gripe.id },
+    data: { status, resolvedAt: status === 'resolved' ? new Date() : null },
+  })
+  log.info(`[ingest] gripe ${gripe.slug} (${gripe.id}) → ${status}`)
+  res.json({ ok: true, status })
 })

@@ -1,165 +1,161 @@
-# inloop — CliffNotes
+# Inloop — CliffNotes
 
 > Living map of the project. Read this before any coding session.
-> Last updated: 2026-06-29. Deep briefing → `CLAUDE.md` · human quickstart → `README.md`.
+> Last updated: 2026-07-29 (day one). Visual language → `ui.md` · why → `decisions.md` ·
+> log → `updates.md`.
 
 ## What this is
 
-An SSR React starter template — clone it, run `bun run init <name>`, and build a real product on top. The whole point is a _minimal but bulletproof_ base: Express 5 + Vite SSR, React Router 7, tRPC, Prisma 7, better-auth, Tailwind v4/shadcn. Keep files minimal; add features, don't gold-plate the scaffolding.
+The cloud half of the gripe workflow: a workspace where recorded **gripes** — narrated screen
+walkthroughs produced by the Gripe extension (`G:\code\gripe`) — are uploaded, reviewed by humans,
+routed to projects, and pulled by coding agents. A gripe folder (report.md + MANIFEST.txt +
+`rec-NN/` takes holding walkthrough.webm, keyframes, transcript, recording.json) is pushed via CLI
+into S3 + Postgres; the web app is the review surface; an MCP server lets any Claude Code session
+pull the queue. Pitch: **see it → say it → agent fixes it → a human signs off.**
+
+Brand: **Inloop** — humans in the loop. Light-only editorial UI (`ui.md`), nothing orange, nothing
+dark, nothing visually inherited from the Gripe extension.
 
 ## Quick Reference
 
-- **Dev:** `bun run dev` (http://localhost:3000)
-- **New project:** `bun run init <name>` then `createdb <name>` → `bun run db:push` → `bun run dev`
-- **Entry point:** `server.ts` (Express; same file dev + prod) → SSR via `src/entry-server.tsx`; client hydrates via `src/index.tsx`
+- **Dev:** `bun run dev` → http://localhost:3000 (needs `.env`; see Env below)
 - **Type-check:** `bun run typecheck` (`tsgo --noEmit`)
-- **Build:** `bun run build` → `dist/client` + `dist/server`
-- **Test:** `bun run test:e2e` (Playwright; isolated DB `inloop_test` on :3100, committed screenshots)
-- **Health:** `GET /healthz` (pings the DB)
-- **Day-one fact:** server-only code lives in `./server/` — never import it from `src/*.tsx` except `import type` (it'd ship to the browser / leak secrets).
+- **DB:** local Postgres 18 service; `bun run db:push` after schema edits (+`db:generate`)
+- **E2E:** `E2E_DATABASE_URL=postgres://postgres:<pw>@localhost:5432/inloop_test bun run test:e2e`
+  (isolated DB + port 3100; screenshots committed; `test:e2e:update` to re-baseline)
+- **Seed a dev login:** `bun cli/dev-bootstrap.ts [email] [password] [org]` → prints an `ilp_` token
+- **Push a gripe:** `bun cli/push.ts <gripe-folder> --server http://localhost:3000 --token ilp_…`
+- **MCP:** `claude mcp add inloop --env INLOOP_TOKEN=ilp_… --env INLOOP_SERVER=<url> -- bun <repo>/cli/mcp.ts`
+- **GitHub:** dested/inloop (private). Deploy: intended Drydock → inloop.dested.com (not wired yet).
 
 ## Stack
 
-| Layer             | Choice                          | Notes                                                                                     |
-| ----------------- | ------------------------------- | ----------------------------------------------------------------------------------------- |
-| Runtime / pkg mgr | Bun ≥ 1.3                       | dev + prod                                                                                |
-| Server            | **Express 5** + Vite SSR        | required for `*splat` route wildcards                                                     |
-| Routing           | React Router 7                  | `createBrowserRouter` (client) / `createStaticHandler` (server); explicit `RouteObject[]` |
-| State / data      | TanStack Query + tRPC v11       | `@trpc/tanstack-react-query` (`.queryOptions()`)                                          |
-| API               | tRPC, Express mounts            | `/api/trpc`, `/api/auth/*`, `/healthz`                                                    |
-| Database / ORM    | Postgres + Prisma 7             | `pg` driver adapter (`@prisma/adapter-pg`)                                                |
-| Auth              | better-auth                     | email + password, autoSignIn                                                              |
-| Styling           | Tailwind v4 + shadcn (new-york) | CSS-first, oklch tokens; see `ui.md`                                                      |
-| Tests             | Playwright                      | `e2e/` + committed `__screenshots__` baselines                                            |
-| Deploy            | Render.com blueprint            | `runtime: node` + `BUN_VERSION`                                                           |
+Bun ≥1.3 · Express 5 + Vite SSR (one `server.ts` dev+prod) · React Router 7 (explicit
+`RouteObject[]`) · tRPC v11 (`@trpc/tanstack-react-query`, `.queryOptions()`) · Prisma 7 + Postgres
+(pg adapter) · better-auth (email+password) · Tailwind v4 tokens-in-CSS + shadcn-style primitives ·
+AWS S3 (`@aws-sdk/client-s3`, presigned URLs) · `@modelcontextprotocol/sdk` (stdio MCP) ·
+Playwright e2e. Inherited from dested/sal-starter — its conventions (server-only `./server/*`,
+`~/*`→`src/*` alias, JSON-safe tRPC returns) still hold.
 
 ## Directory structure
 
 ```
-server.ts                Express entry: request logging, /healthz, auth + tRPC mounts,
-                         vite (dev) / static+SSR (prod), startup banner. Dev AND prod.
+server.ts               Express entry: /healthz, auth, ingest, tRPC, vite/SSR, 404s
 server/
-├── env.ts               zod-validated env, parsed at import (throws → no boot)
-├── logger.ts            ANSI request logger, startup banner, formatError
-├── prisma.ts            PrismaClient singleton (HMR-safe) via pg adapter
-├── auth.ts              better-auth instance + Session type
-├── trpc.ts              createContext + initTRPC + public/protectedProcedure
-└── router.ts            appRouter (me, posts.list, posts.create) + AppRouter type
+  env.ts                zod env: DATABASE_URL, BETTER_AUTH_*, AWS_REGION, S3_BUCKET, AWS keys
+  auth.ts               better-auth instance (email+password, autoSignIn)
+  trpc.ts               context (session from headers) + public/protectedProcedure
+  membership.ts         requireMembership(user, org, atLeast) role gate + slugify
+  router.ts             THE tRPC API: orgs, invites, tokens, projects, gripes
+  ingest.ts             Token-authed REST (Bearer ilp_…): two-phase upload + agent reads
+  storage.ts            S3: presignPut/Get, getObjectText, deletePrefix, key layout, isSafePath
+  prisma.ts / logger.ts PrismaClient singleton · ANSI request logger
+cli/
+  push.ts               `inloop push` — walks a gripe folder, declare → PUT xN → finalize
+  mcp.ts                stdio MCP server: list_gripes / get_gripe / set_gripe_status
+  dev-bootstrap.ts      idempotent dev seed: user + org + fresh API token (prints it)
+prisma/schema.prisma    better-auth models + Org/Membership/Invite/Project/Gripe/Take/GripeFile/ApiToken
 src/
-├── index.tsx            client entry — hydrateRoot + createBrowserRouter
-├── entry-server.tsx     SSR entry — createStaticHandler.query + renderToString, returns {html,status,dehydratedState}
-├── App.tsx              providers: QueryClientProvider + HydrationBoundary + TRPCProvider
-├── app/
-│   ├── routes.tsx       RouteObject[] tree + loaders (root/dashboard/redirectIfSignedIn)
-│   ├── layout.tsx       nav + <Outlet/>; sign-out lives here
-│   ├── error-boundary.tsx  root ErrorBoundary → 404 / error UI
-│   ├── home.tsx         /
-│   ├── sign-in.tsx      /sign-in
-│   ├── sign-up.tsx      /sign-up
-│   └── dashboard.tsx    /dashboard (protected; posts list + create form)
-├── components/ui/       shadcn primitives (button, card, input, label)
-├── lib/
-│   ├── auth-client.ts   better-auth React client
-│   ├── trpc.tsx         TRPCProvider + useTRPC
-│   └── utils.ts         cn()
-└── styles/app.css       Tailwind v4 import + shadcn oklch tokens
-public/                  favicon.svg, robots.txt (served by vite dev / express static prod)
-e2e/                     smoke.spec.ts, global-setup.ts (truncates test DB), __screenshots__/
-scripts/init.ts          clone→rename initializer
-index.html               SSR template — <!--app-html--> + <!--app-state--> placeholders
-prisma/schema.prisma     User / Session / Account / Verification + Post
-prisma.config.ts         Prisma 7 CLI config; loads .env itself (Bun/Prisma don't)
-render.yaml              Render blueprint (web service + managed Postgres)
+  app/
+    routes.tsx          All routes + loaders (appLoader guards session, prefetches orgs.mine)
+    layout.tsx          Shell: marketing chrome vs app chrome (org switcher, Inbox/Projects/Team)
+    home.tsx            Landing page (assembles src/components/landing/*)
+    sign-in/up.tsx      Auth cards (better-auth client flows)
+    app.tsx             InboxPage: first-run org creation, filters, gripe list
+    gripe.tsx           GripePage: the viewer (assembles src/components/viewer/*)
+    projects.tsx        Projects list + create (origin hints)
+    team.tsx            Members / Invites / API tokens tabs
+    join.tsx            /join/:inviteId — peek + accept
+  components/
+    logo.tsx            LoopMark + Wordmark — THE identity, never redraw
+    ui/                 button, card, input, label (shadcn new-york style, no asChild)
+    landing/            hero, how-it-works, gripe-manifest, cli-strip, pricing, final-cta, …
+    viewer/             take-section, filmstrip, transcript-panel, events-panel, report-panel,
+                        gripe-header, gripe-controls, status-control, types, format, use-copy
+  lib/
+    org.tsx             OrgProvider/useActiveOrg — active org id in localStorage
+    trpc.tsx / auth-client.ts / utils.ts
+  styles/app.css        ALL design tokens (light only) + .rule/.stamp/.ink-underline utilities
+e2e/                    smoke.spec.ts + committed screenshots (landing, sign-up, app flow)
+index.html              SSR template; Google Fonts (Fraunces/Libre Franklin/IBM Plex Mono)
 ```
-
-## File map (concept → path)
-
-| Concept / task                    | Location                                                      |
-| --------------------------------- | ------------------------------------------------------------- |
-| App providers                     | `src/App.tsx`                                                 |
-| Routing + loaders                 | `src/app/routes.tsx`                                          |
-| New page component                | `src/app/<name>.tsx`                                          |
-| 404 / error UI                    | `src/app/error-boundary.tsx`                                  |
-| tRPC procedures                   | `server/router.ts`                                            |
-| tRPC context / procedure builders | `server/trpc.ts`                                              |
-| DB schema                         | `prisma/schema.prisma`                                        |
-| Auth config                       | `server/auth.ts` (server) · `src/lib/auth-client.ts` (client) |
-| HTTP mounts / SSR / 404 logic     | `server.ts`                                                   |
-| Logging                           | `server/logger.ts`                                            |
-| Env vars                          | `server/env.ts` + `.env.example` + `render.yaml`              |
-| Design tokens                     | `src/styles/app.css` (see `ui.md`)                            |
-| E2E tests                         | `e2e/*.spec.ts`                                               |
 
 ## Routes / URLs
 
-Routes are explicit in `src/app/routes.tsx` (no file-based routing). All page routes nest under the root `Layout`.
+| Route | Serves | File |
+| --- | --- | --- |
+| `/` | Landing (marketing) | `src/app/home.tsx` |
+| `/sign-in` · `/sign-up` | Auth | `src/app/sign-{in,up}.tsx` |
+| `/join/:inviteId` | Invite accept | `src/app/join.tsx` |
+| `/app` | Inbox (gripe list, first-run org creation) | `src/app/app.tsx` |
+| `/gripes/:gripeId` | The viewer | `src/app/gripe.tsx` |
+| `/projects` · `/team` | Projects · Members/Invites/Tokens | `src/app/{projects,team}.tsx` |
+| `/dashboard` | redirect → /app (legacy) | `routes.tsx` |
+| `/healthz` | DB probe | `server.ts` |
+| `/api/auth/*` · `/api/trpc/*` | better-auth · tRPC | `server.ts` |
+| `/api/ingest/*` | Token-authed REST (below) | `server/ingest.ts` |
 
-| Route         | Serves                | File                             | Loader                                   |
-| ------------- | --------------------- | -------------------------------- | ---------------------------------------- |
-| `/`           | Landing               | `src/app/home.tsx`               | `rootLoader` (session)                   |
-| `/sign-in`    | Sign in               | `src/app/sign-in.tsx`            | `redirectIfSignedIn`                     |
-| `/sign-up`    | Sign up               | `src/app/sign-up.tsx`            | `redirectIfSignedIn`                     |
-| `/dashboard`  | Protected app         | `src/app/dashboard.tsx`          | `dashboardLoader` (redirects + prefetch) |
-| `/healthz`    | DB health JSON        | `server.ts`                      | —                                        |
-| `/api/auth/*` | better-auth           | `server.ts` (`toNodeHandler`)    | —                                        |
-| `/api/trpc/*` | tRPC                  | `server.ts` → `server/router.ts` | —                                        |
-| unmatched GET | 404 page (status 404) | `error-boundary.tsx`             | —                                        |
+### /api/ingest (Bearer `ilp_…` token; org comes from the token)
 
-## Architecture
+| Endpoint | Does |
+| --- | --- |
+| `POST /gripes` | Declare: metadata + file list → gripe/take/file rows + presigned PUT per file. Re-declaring an existing (org, slug) deletes the old gripe + S3 prefix first |
+| `POST /gripes/:id/finalize` | Marks files uploaded + sets `finalizedAt` (list only shows finalized) |
+| `GET /gripes` | List for agents (MCP `list_gripes`) |
+| `GET /gripes/:id` | Detail + `reportMd` text + presigned GET for every file (MCP `get_gripe`) |
+| `POST /gripes/:id/status` | open / in_review / resolved (MCP `set_gripe_status`) |
 
-Browser ↔ Express 5 (`server.ts`) ↔ Postgres. One Express server runs in dev (Vite middleware + `ssrLoadModule`) and prod (static `dist/client` + built `dist/server/entry-server.js`), gated on `NODE_ENV`. SSR: `render(req)` builds a Fetch Request, runs `createStaticHandler(routes).query()` to execute loaders (session + tRPC prefetch happen here), `renderToString`s with `<StaticRouterProvider>`, and dehydrates the QueryClient into `window.__SSR_STATE__`. The client rehydrates that cache, so `useQuery` has data on first paint. The SSR-side tRPC options proxy calls procedures **directly** (no HTTP).
+## Data model (Postgres via Prisma)
 
-## Data model
+better-auth's User/Session/Account/Verification, plus: **Org** ← Membership(role
+owner/admin/member, unique org+user) · Invite (id IS the join-link token, 7-day expiry) · Project
+(originHints[] auto-routes uploads by recorded origin) · **Gripe** (unique org+slug; slug = the
+recorder's folder name; status open/in_review/resolved; finalizedAt gates visibility) ← Take
+(rec-NN) + GripeFile (path unique per gripe; S3 key = `orgs/<orgId>/gripes/<gripeId>/<path>`) ·
+ApiToken (sha256 hash only; `ilp_` prefix; lastUsedAt stamped on ingest auth).
 
-`prisma/schema.prisma` — better-auth's required models (`User`, `Session`, `Account`, `Verification`) mapped to lowercase tables via `@@map`; fields are camelCase (better-auth queries by name) with snake_case `@map` columns. App model: `Post` (id, title, content, `authorId` → User `onDelete: Cascade`, createdAt). FK relations to `User` should cascade.
+## Storage (S3)
 
-## Systems
-
-### Auth (better-auth)
-
-Email + password, `autoSignIn` on sign-up. Client (`auth-client.ts`) → `/api/auth/*` (`toNodeHandler`, mounted before `express.json`). SSR reads the session once per request; loaders get it via `requestContext`; the root loader returns `{ session }`, read with `useRouteLoaderData('root')`. **Lives in:** `server/auth.ts`, `src/lib/auth-client.ts`, `src/app/{sign-in,sign-up,layout}.tsx`. Sign-in/up/out all call `revalidator.revalidate()` so the nav reflects the new session.
-
-### tRPC
-
-`publicProcedure` / `protectedProcedure` (401 without session). Context attaches the session from request headers. **Lives in:** `server/trpc.ts`, `server/router.ts`, `src/lib/trpc.tsx`.
-
-### Logging & errors
-
-Dependency-free ANSI logger: one line per request (method · status · path · timing), startup banner, `formatError`. Loader/render errors and unmatched routes render the root `ErrorBoundary`. **Lives in:** `server/logger.ts`, `src/app/error-boundary.tsx`.
-
-## Common tasks (how to modify)
-
-### Add a route
-
-1. Create `src/app/<name>.tsx` exporting `<NamePage>`.
-2. Add `{ path: '<name>', Component: NamePage }` to `routes.tsx` (add a `loader` for auth/data).
-
-### Add a tRPC procedure
-
-Add to `appRouter` in `server/router.ts`; pick public/protected; validate input with zod; return JSON-safe data (dates → ISO strings).
-
-### Add a DB table
-
-Edit `prisma/schema.prisma` → `bun run db:push` → `bun run db:generate` → use `prisma.x` in procedures.
-
-### Add an e2e test
-
-Add `e2e/*.spec.ts`; screenshot only stable views; `bun run test:e2e:update` to write baselines.
+Bucket **inloop-files**, us-west-2, AWS account 114394156384 (profile `dested`), public access
+blocked, CORS allows localhost:3000/3210 + inloop.dested.com. IAM user `inloop-app` scoped to this
+bucket; its keys live in `.env` only. Everything moves via presigned URLs (PUT 1h, GET 1h) —
+`gripes.get` presigns every file in one call so the viewer never round-trips per frame.
 
 ## Gotchas & hard rules
 
-- **Path alias `~/*` → `src/*`** (client only); server uses relative imports.
-- **`./server/*` is server-only** — import into `src/*` only as `import type`.
-- **Express 5 required** — `*splat` wildcards break on Express 4 (symptom: `/api/auth/*` 404s, auth dead).
-- **`.env` loading**: Bun loads `.env` only into its own runtime, not the Prisma CLI (Node subprocess); Prisma 7 dropped auto-loading — `prisma.config.ts` loads it manually. Keep that block.
-- **Run `bun run db:generate` after schema edits** (auto-runs on `bun install`).
-- **JSON-safe tRPC returns** — convert `Date` → ISO string at the procedure, or SSR/hydration markup diverges.
-- **shadcn has no `asChild`** (no `@radix-ui/react-slot`) — style a `Link` with `buttonVariants()`.
-- **No `tailwind.config`** — Tailwind v4, tokens in `app.css`.
-- Use `log.*` from `server/logger.ts`, not raw `console.log`, in server code.
+- **ui.md is law**: light only, no dark mode, no orange. Status colors fixed (open=cobalt,
+  in_review=violet, resolved=green).
+- **`./server/*` never imports into `src/*`** except `import type` (starter rule; leaks secrets).
+- **tRPC returns must be JSON-safe** — Dates → ISO strings at the procedure, `bytes` BigInt →
+  Number, or SSR/hydration markup diverges.
+- **better-auth origin check**: sign-in fails with "Invalid origin" unless `BETTER_AUTH_URL`
+  matches the URL you're browsing on. Dev on a non-3000 port needs
+  `PORT=X BETTER_AUTH_URL=http://localhost:X bun server.ts`.
+- **Ingest paths are validated** (`isSafePath`) — never widen it casually; those strings become S3
+  keys.
+- **Re-pushing a slug replaces the gripe wholesale** (rows + S3 prefix). Viewer links keep working
+  only because gripe ids change — don't cache ids across re-pushes.
+- **`gripes.list` only shows finalized gripes**; a declare without finalize is invisible in the UI
+  by design.
+- **Raw API tokens are shown once** — only the sha256 lands in the DB. The dev-bootstrap script
+  prints a fresh one each run.
+- **Prisma 7**: no `--skip-generate` flag; `prisma.config.ts` hand-loads `.env` — keep that block.
+- **The e2e suite boots its own server** on :3100 against `inloop_test` with dummy S3 creds — any
+  test that actually touches S3 will fail loudly (none do today).
+- **Playwright locators**: the empty-inbox guide contains a "Team → API tokens" link; use
+  `exact: true` for the nav's "Team".
 
 ## Status
 
-- **Done** — SSR + hydration, auth (email/pw), tRPC posts demo, logging, /healthz, 404/error handling, favicon/robots, init script, Playwright e2e + screenshot baselines, Render blueprint. Express 5 + Prisma 7.
-- **Not built** — email verification, OAuth providers, rate limiting, migrations workflow (uses `db push`), CI, dark-mode toggle (tokens exist, unused).
-- **Next:** whatever the cloned product needs — this is a base.
+- **Done (2026-07-29, day one)** — schema + S3 + two-phase ingest + push CLI (verified with a real
+  36MB gripe, 172 files); tRPC API for orgs/invites/tokens/projects/gripes; full web app (landing,
+  auth, inbox with first-run onboarding, viewer with video/filmstrip/transcript/events/report,
+  team, projects, join); token REST reads + stdio MCP (`list_gripes`/`get_gripe`/
+  `set_gripe_status`); e2e smoke suite with committed baselines; README.
+- **Not built** — Drydock deploy (needs the portal; BETTER_AUTH_URL must be set for
+  inloop.dested.com), extension → direct upload (extension still writes local folders; CLI
+  bridges), share links / public gripe URLs, email sending for invites, billing, server-side
+  transcription, org deletion, pagination past 200 gripes.
+- **Next** — wire the Gripe extension to push straight to Inloop (reuse `cli/push.ts` shapes),
+  deploy via Drydock, then the strategy backlog in
+  `G:\code\gripe\plans\2026-07-29-enterprise-strategy.md`.

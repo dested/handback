@@ -1,134 +1,117 @@
-# inloop
+# Inloop
 
-An SSR React starter wired with a current, type-safe stack — clone it, rename it, ship.
+**Your agents ship. You stay in the loop.**
 
-> Already have a project cloned from an older inloop? See [`MIGRATION.md`](./MIGRATION.md) to bring it up to date (it fixes some app-breaking bugs).
+Inloop is the cloud workspace for _gripes_ — ninety-second narrated walkthroughs of something broken. You hit record in the browser extension, talk through the bug in the app where it happens, and the recorder captures the whole thing: screen video, keyframes, a transcript of what you said, the DOM events you triggered, and the console errors that fired while you were speaking. It bundles that into a folder with a `report.md` written for a coding agent rather than a human bug tracker.
 
-| layer             | choice                                                                             |
-| ----------------- | ---------------------------------------------------------------------------------- |
-| runtime / pkg mgr | **Bun** ≥ 1.3 (dev + prod)                                                         |
-| server            | **Express 5** + **Vite** SSR (vite middleware in dev, static + SSR bundle in prod) |
-| routing           | **React Router 7** (`createBrowserRouter` client, `createStaticHandler` server)    |
-| data              | **tRPC v11** + **TanStack Query** (`.queryOptions()` API)                          |
-| db                | **Postgres** + **Prisma 7** (pg driver adapter)                                    |
-| auth              | **better-auth** (email + password, autoSignIn)                                     |
-| styles            | **Tailwind v4** + **shadcn/ui** (new-york, oklch tokens)                           |
-| tests             | **Playwright** e2e with committed screenshot baselines                             |
-| deploy            | **Render.com** blueprint (web service + managed Postgres)                          |
+The `inloop` CLI pushes that folder here, where it lands in a shared inbox and auto-files to the right project by the origin it was recorded on. Your coding agent then pulls the brief over MCP — report, transcript, keyframes, video — opens the fix, and flips the gripe to `in_review`. A human watches the before-video against the fix and marks it `resolved`. See it, say it, the agent fixes it, you sign off. Nothing merges without a person in the loop.
 
-## Quickstart
+## Quickstart (dev)
 
-Requires [Bun](https://bun.sh) ≥ 1.3 and a reachable Postgres.
-
-**Start a new project from this template (recommended):**
+Requires [Bun](https://bun.sh) ≥ 1.3, a reachable Postgres, and an S3 bucket.
 
 ```bash
 bun install
-bun run init my-app          # renames everything + writes a fresh .env (new secret)
-createdb my_app              # or point .env's DATABASE_URL at any Postgres
-bun run db:push              # sync schema to the database
+cp .env.example .env         # then fill in every key from the table below
+createdb inloop
+bun run db:push              # sync prisma/schema.prisma to Postgres
+bun cli/dev-bootstrap.ts     # creates a user + org, prints an ilp_… API token
 bun run dev                  # → http://localhost:3000
 ```
 
-`bun run init my-app --fresh-git` also wipes the template's git history and starts a clean repo.
+`dev-bootstrap` is idempotent and prints a fresh token each run; the default login is `dev@inloop.local` / `inloop-dev-password`. Copy the token — it is only shown once, and everything below needs it.
 
-**Or set it up by hand:**
+The server validates its environment at import (`server/env.ts`), so a missing `S3_BUCKET` or AWS credential means no boot rather than a failure at first upload.
+
+## Pushing a gripe
+
+Point the CLI at a folder the recorder wrote (`report.md` + one `rec-NN/` per take):
 
 ```bash
-bun install
-cp .env.example .env         # then edit: DATABASE_URL + a 32+ char BETTER_AUTH_SECRET
-bun run db:push
-bun run dev
+bun cli/push.ts ./2026-07-29-1412-checkout-hangs \
+  --server http://localhost:3000 \
+  --token ilp_…
 ```
 
-Generate a secret: `openssl rand -base64 32`.
+Both flags fall back to `INLOOP_SERVER` and `INLOOP_TOKEN`, so in practice you export the token once and run `bun cli/push.ts <folder>`. Push is a two-phase upload: it declares the gripe and its file list, `PUT`s every file straight to S3 through presigned URLs (six at a time), then finalizes. Re-pushing the same folder replaces the previous upload wholesale rather than duplicating it. On success it prints the workspace URL for the new gripe.
+
+## Connecting your agent
+
+`cli/mcp.ts` is a stdio MCP server that exposes the workspace to a coding agent. Register it once with an absolute path:
+
+```bash
+claude mcp add inloop \
+  --env INLOOP_TOKEN=ilp_… \
+  --env INLOOP_SERVER=https://inloop.dested.com \
+  -- bun /abs/path/to/cli/mcp.ts
+```
+
+`INLOOP_SERVER` defaults to `https://inloop.dested.com`; `INLOOP_TOKEN` is required. Three tools:
+
+| tool               | what it does                                                                                                                |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| `list_gripes`      | The team's gripes, newest first. Optional `status` filter.                                                                  |
+| `get_gripe`        | One gripe's full brief: metadata, the `report.md` authored for agents, and presigned URLs for video, keyframes, transcript. |
+| `set_gripe_status` | Move a gripe through review — `in_review` when a fix is up, `resolved` after human sign-off.                                |
+
+The token pins the org, so an agent only ever sees its own team's gripes. File URLs are short-lived presigned GETs; the bucket blocks all public access.
+
+## Architecture
+
+```
+browser extension          cli/push.ts              Inloop (Express 5 + Bun)        your agent
+─────────────────          ───────────              ───────────────────────        ──────────
+record + narrate  ──folder──▶  declare  ──────────▶  Postgres (metadata)
+                               PUT files ─────────▶  S3 (video, frames, report)
+                               finalize  ──────────▶  gripe becomes visible
+                                                          │
+                                                     web workspace  ◀── human reviews + signs off
+                                                          │
+                                                     cli/mcp.ts  ◀────── MCP: pull brief, set status
+```
+
+One Express server runs in dev (Vite middleware) and prod (static + SSR bundle). Metadata lives in Postgres via Prisma; no file bytes ever touch the database. Every object sits under `orgs/<orgId>/gripes/<gripeId>/<path>` in S3 and is only ever reachable through a short-lived presigned URL.
+
+Two auth paths, deliberately separate: humans get a better-auth session cookie and talk to tRPC at `/api/trpc/*`; machines (the CLI, the MCP server) carry a bearer `ilp_…` token to the REST router at `/api/ingest/*`.
+
+| surface        | route                                                  | who                   |
+| -------------- | ------------------------------------------------------ | --------------------- |
+| Landing        | `/`                                                    | anyone                |
+| Inbox          | `/app`                                                 | signed-in             |
+| Gripe viewer   | `/gripes/:gripeId`                                     | signed-in             |
+| Projects       | `/projects`                                            | signed-in             |
+| Team + tokens  | `/team`                                                | signed-in             |
+| Ingest (write) | `POST /api/ingest/gripes`, `…/:id/finalize`            | `ilp_…` token         |
+| Ingest (read)  | `GET /api/ingest/gripes`, `…/:id`, `POST …/:id/status` | `ilp_…` token         |
+| Health         | `/healthz`                                             | anyone (pings the DB) |
+
+## Environment
+
+Validated by `server/env.ts` at import — all of these must be set for the server to start.
+
+| key                     | notes                                                   |
+| ----------------------- | ------------------------------------------------------- |
+| `DATABASE_URL`          | Postgres connection string.                             |
+| `BETTER_AUTH_SECRET`    | 32+ random chars. `openssl rand -base64 32`.            |
+| `BETTER_AUTH_URL`       | Public origin. Defaults to `http://localhost:3000`.     |
+| `AWS_REGION`            | Defaults to `us-west-2`.                                |
+| `S3_BUCKET`             | Bucket holding gripe payloads. Block all public access. |
+| `AWS_ACCESS_KEY_ID`     | Credential for that bucket.                             |
+| `AWS_SECRET_ACCESS_KEY` | Credential for that bucket.                             |
+
+The CLI and MCP server read `INLOOP_SERVER` and `INLOOP_TOKEN` instead — they are clients, not the server, and never touch the database directly.
 
 ## Scripts
 
-| script                    | what it does                                              |
-| ------------------------- | --------------------------------------------------------- |
-| `bun run dev`             | dev server with HMR + SSR on :3000                        |
-| `bun run init <name>`     | rename the template to a new project + fresh `.env`       |
-| `bun run build`           | build client (`dist/client`) + SSR bundle (`dist/server`) |
-| `bun run start`           | run the production server (`NODE_ENV=production`)         |
-| `bun run typecheck`       | `tsgo --noEmit` (TypeScript Native Preview)               |
-| `bun run test:e2e`        | Playwright e2e + screenshot comparison                    |
-| `bun run test:e2e:update` | regenerate screenshot baselines                           |
-| `bun run db:push`         | push `prisma/schema.prisma` to Postgres (dev)             |
-| `bun run db:migrate`      | create + apply a migration (dev)                          |
-| `bun run db:generate`     | regenerate the Prisma client (auto-runs on install)       |
-| `bun run db:studio`       | Prisma Studio                                             |
-| `bun run prettier`        | format the repo                                           |
+| script              | what it does                                              |
+| ------------------- | --------------------------------------------------------- |
+| `bun run dev`       | dev server with HMR + SSR on :3000                        |
+| `bun run build`     | build client (`dist/client`) + SSR bundle (`dist/server`) |
+| `bun run start`     | production server                                         |
+| `bun run typecheck` | `tsgo --noEmit`                                           |
+| `bun run test:e2e`  | Playwright e2e + screenshot comparison                    |
+| `bun run db:push`   | push `prisma/schema.prisma` to Postgres (dev)             |
+| `bun run db:studio` | Prisma Studio                                             |
+| `bun run prettier`  | format the repo                                           |
 
-## Layout
-
-```
-server.ts                Express entry — request logging, /healthz, auth + tRPC
-                         mounts, vite/SSR, startup banner. Runs in dev AND prod.
-server/
-├── env.ts               zod-validated env (throws at import if invalid)
-├── logger.ts            color request logging, startup banner, error formatting
-├── prisma.ts            PrismaClient singleton (HMR-safe, pg adapter)
-├── auth.ts              better-auth instance + Session type
-├── trpc.ts              context + initTRPC + public/protected procedures
-└── router.ts            appRouter (exports AppRouter type)
-
-src/
-├── index.tsx            client entry (hydrateRoot + createBrowserRouter)
-├── entry-server.tsx     SSR entry (createStaticHandler + renderToString)
-├── App.tsx              providers (QueryClient + tRPC + hydration)
-├── app/
-│   ├── routes.tsx       RouteObject[] tree + loaders
-│   ├── layout.tsx       root layout (nav + <Outlet/>)
-│   ├── error-boundary.tsx  404 + error UI (root ErrorBoundary)
-│   ├── home.tsx · sign-in.tsx · sign-up.tsx · dashboard.tsx
-├── components/ui/       shadcn primitives
-├── lib/                 auth-client, trpc, utils
-└── styles/app.css       Tailwind v4 + shadcn tokens
-
-public/                  favicon.svg, robots.txt (served statically)
-e2e/                     Playwright specs + committed __screenshots__ baselines
-scripts/init.ts          the clone→rename initializer
-prisma/schema.prisma     User / Session / Account / Verification + Post
-```
-
-## How it fits together
-
-**Auth.** Sign-in/up call `authClient` → POST `/api/auth/*` (mounted via `toNodeHandler(auth)`) → session cookie. On SSR, `entry-server.tsx` reads the session once per request and passes it to loaders, so the first paint already knows who you are (no flicker). On client navigations, loaders re-check via `authClient.getSession()`.
-
-**tRPC.** Components call `useQuery(trpc.posts.list.queryOptions())` → `/api/trpc/*` → `appRouter`. `createContext` attaches the session; `protectedProcedure` 401s without one.
-
-**SSR + hydration.** Loaders prefetch tRPC queries into a per-request `QueryClient` (via a direct, no-HTTP options proxy). The cache is dehydrated into `window.__SSR_STATE__` and rehydrated on the client, so `useQuery` has data on first render. Procedures return JSON-safe types (dates as ISO strings) to keep SSR and client markup identical.
-
-**Logging.** Every request logs one color-coded line (`method · status · path · timing`), with dev asset noise filtered out. The server prints a startup banner (mode, URLs, db host, routes). See `server/logger.ts`.
-
-**404 / errors.** Unknown pages render the root `ErrorBoundary` with a real 404 status; asset-shaped misses (`/favicon.ico`, stray files) 404 fast instead of rendering the SPA; unknown `/api/*` returns JSON.
-
-## Testing
-
-Playwright e2e lives in `e2e/`. `bun run test:e2e` boots the app on port 3100 against an **isolated test database** (`inloop_test`), truncates it for determinism, and runs the smoke suite — home, sign-up → dashboard → create post → sign-out, and the 404 page. Visual baselines are committed under `e2e/__screenshots__/`; update them with `bun run test:e2e:update`.
-
-```bash
-createdb inloop_test
-DATABASE_URL=postgres://.../inloop_test bunx prisma db push
-bun run test:e2e
-```
-
-Screenshots are OS/font specific — regenerate on the platform your CI uses.
-
-## Deploy to Render
-
-1. Push to GitHub.
-2. Render → **Blueprints → New Blueprint Instance**, point at the repo. `render.yaml` provisions managed Postgres + a web service. `/healthz` is the health check.
-3. After the first deploy, set `BETTER_AUTH_URL` to the assigned public URL and redeploy.
-
-`preDeployCommand` runs `prisma db push --accept-data-loss` (fine for a starter — switch to `prisma migrate deploy` with committed migrations for real production). Render uses `runtime: node` with `BUN_VERSION` set, because there's no `runtime: bun` — the Node runtime ships Bun and puts it on PATH.
-
-## Gotchas
-
-- **Express 5 is required** — the route patterns (`/api/auth/*splat`) use named wildcards. Don't downgrade to Express 4.
-- **`.env` loading**: Bun loads `.env` into its own runtime but not into the Prisma CLI (a Node subprocess), and Prisma 7 dropped auto-loading — so `prisma.config.ts` loads `.env` itself. Keep that block if you touch the file.
-- **Server-only code lives in `./server/`** — never import it from `src/*.tsx` except as `import type`, or it lands in the client bundle. See `CLAUDE.md` for the full rules.
-- Path alias `~/*` → `src/*` (client only); server code uses relative imports.
-
-For the deeper "how to extend this" briefing (hard rules, common tasks, architecture flows), read [`CLAUDE.md`](./CLAUDE.md) and [`cliffnotes.md`](./cliffnotes.md).
+Deeper briefing for contributors → [`CLAUDE.md`](./CLAUDE.md) · project map → [`cliffnotes.md`](./cliffnotes.md) · visual language → [`ui.md`](./ui.md).

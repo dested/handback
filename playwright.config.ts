@@ -9,6 +9,15 @@ const baseURL = `http://localhost:${PORT}`
 const DATABASE_URL =
   process.env.E2E_DATABASE_URL ?? 'postgres://postgres:postgres@localhost:5432/inloop_test'
 
+// The server's env schema requires S3 credentials at boot; e2e never uploads,
+// so dummies are fine (any test that touched S3 would fail loudly instead).
+const S3_ENV = {
+  AWS_REGION: process.env.AWS_REGION ?? 'us-west-2',
+  S3_BUCKET: process.env.S3_BUCKET ?? 'inloop-files',
+  AWS_ACCESS_KEY_ID: process.env.AWS_ACCESS_KEY_ID ?? 'e2e-dummy',
+  AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY ?? 'e2e-dummy',
+}
+
 export default defineConfig({
   testDir: './e2e',
   globalSetup: './e2e/global-setup.ts',
@@ -42,6 +51,7 @@ export default defineConfig({
       DATABASE_URL,
       BETTER_AUTH_SECRET: 'e2e-secret-at-least-32-characters-long!!',
       BETTER_AUTH_URL: baseURL,
+      ...S3_ENV,
     },
   },
 })

@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { Link, useNavigate, useRevalidator } from 'react-router-dom'
+import { LoopMark } from '~/components/logo'
 import { authClient } from '~/lib/auth-client'
 import { Button } from '~/components/ui/button'
 import { Input } from '~/components/ui/input'
 import { Label } from '~/components/ui/label'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '~/components/ui/card'
 
 export function SignInPage() {
   const navigate = useNavigate()
@@ -29,49 +29,48 @@ export function SignInPage() {
   }
 
   return (
-    <div className="mx-auto max-w-sm">
-      <Card>
-        <CardHeader>
-          <CardTitle>Sign in</CardTitle>
-          <CardDescription>Enter your email and password to continue.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={onSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                autoComplete="email"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                autoComplete="current-password"
-              />
-            </div>
-            {error && <p className="text-destructive text-sm">{error}</p>}
-            <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? 'Signing in…' : 'Sign in'}
-            </Button>
-            <p className="text-muted-foreground text-center text-sm">
-              No account?{' '}
-              <Link to="/sign-up" className="underline">
-                Sign up
-              </Link>
-            </p>
-          </form>
-        </CardContent>
-      </Card>
+    <div className="mx-auto w-full max-w-sm px-6 py-20 md:py-28">
+      <LoopMark className="h-6" />
+      <h1 className="font-display mt-6 text-3xl font-semibold tracking-tight">Welcome back</h1>
+      <p className="text-muted-foreground mt-2 text-sm">
+        Sign in to pick up the gripes waiting on you.
+      </p>
+      <div className="bg-card mt-8 rounded-lg border p-6">
+        <form onSubmit={onSubmit} className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="email">Email</Label>
+            <Input
+              id="email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              autoComplete="email"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="password">Password</Label>
+            <Input
+              id="password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              autoComplete="current-password"
+            />
+          </div>
+          {error && <p className="text-destructive text-sm">{error}</p>}
+          <Button type="submit" className="w-full" disabled={loading}>
+            {loading ? 'Signing in…' : 'Sign in'}
+          </Button>
+        </form>
+      </div>
+      <p className="text-muted-foreground mt-6 text-sm">
+        No account?{' '}
+        <Link to="/sign-up" className="text-primary underline-offset-4 hover:underline">
+          Create one
+        </Link>
+      </p>
     </div>
   )
 }
