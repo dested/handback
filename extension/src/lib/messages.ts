@@ -5,6 +5,7 @@ import type {
   Settings,
   TimelineMove,
   TimelineRef,
+  TranscriberId,
   TranscriptSegment,
 } from './types';
 
@@ -45,7 +46,14 @@ export type Request =
   // gets sanitized before it reaches the agent.
   | { type: 'timeline:delete'; items: TimelineRef[]; revs?: Record<string, number> }
   // The on-device Whisper pass finished and supersedes the Web Speech lines.
-  | { type: 'recording:transcript'; id: string; transcript: TranscriptSegment[] }
+  // `engine` is which pass produced these — the worker stamps it on the take so
+  // report.md can say who wrote the words.
+  | {
+      type: 'recording:transcript';
+      id: string;
+      transcript: TranscriptSegment[];
+      engine: TranscriberId;
+    }
   // The human read the transcript back and confirmed it.
   | { type: 'recording:reviewed'; id: string }
   // Content script → panel, relayed while a recording is live. `origin` is the

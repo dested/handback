@@ -503,7 +503,7 @@ chrome.runtime.onMessage.addListener((message: Request, _sender, sendResponse) =
           meta: {
             ...rec.meta,
             transcript: message.transcript,
-            transcriber: 'whisper',
+            transcriber: message.engine,
             // New words nobody has read yet — an earlier confirmation doesn't carry over.
             reviewed: false,
             rev: (rec.meta.rev ?? 0) + 1,

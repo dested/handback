@@ -1,11 +1,19 @@
-import type { TranscriptSegment } from '../lib/types';
+import type { Settings, TranscriberId, TranscriptSegment } from '../lib/types';
+import { transcribeInCloud } from './transcribeCloud';
 import type { WorkerIn, WorkerOut } from './transcribeWorker';
 
 /**
  * Main-thread half of the post-recording transcription pass: decode the webm's
- * audio to the 16 kHz mono Float32Array Whisper wants, hand it to the worker,
- * and report progress. Every failure — no mic track, no model, a wedged run —
- * resolves to null; a missing transcript must never sink a saved walkthrough.
+ * audio to a 16 kHz mono Float32Array, then get words out of it.
+ *
+ * Two engines share that decode. By default the audio goes to the workspace and
+ * comes back transcribed in seconds. On-device Whisper is the fallback — when
+ * the upload fails, when there's no token, or when the user has asked for it
+ * because the audio must not leave the machine. It's the same model family,
+ * minutes slower, and it runs the laptop hot; that's the trade being made.
+ *
+ * Every failure resolves to null: a missing transcript must never sink a saved
+ * walkthrough.
  */
 
 const SAMPLE_RATE = 16000;
@@ -14,18 +22,41 @@ const SILENCE_FLOOR = 0.001;
 const TIMEOUT_MS = 15 * 60 * 1000;
 
 export interface TranscribeProgress {
-  stage: 'decode' | 'download' | 'model' | 'transcribe';
+  stage: 'decode' | 'upload' | 'download' | 'model' | 'transcribe';
   pct: number;
+}
+
+export interface TranscribeResult {
+  segments: TranscriptSegment[];
+  /** Which engine actually produced these — the report cites it. */
+  engine: TranscriberId;
 }
 
 export async function transcribeRecording(
   video: Blob,
+  settings: Settings,
   onProgress: (p: TranscribeProgress) => void,
-): Promise<TranscriptSegment[] | null> {
+): Promise<TranscribeResult | null> {
   onProgress({ stage: 'decode', pct: -1 }); // decoding takes real time on long recordings
   const audio = await decode(video).catch(() => null);
   if (!audio) return null;
-  return run(audio, onProgress).catch(() => null);
+
+  if (!settings.onDeviceTranscription) {
+    onProgress({ stage: 'upload', pct: 0 });
+    const cloud = await transcribeInCloud(audio, {
+      serverUrl: settings.serverUrl,
+      apiToken: settings.apiToken,
+      lang: settings.lang,
+      onProgress: (fraction) => onProgress({ stage: 'upload', pct: fraction * 100 }),
+    }).catch(() => null);
+    // A non-null answer is the answer, empty included: an empty transcript means
+    // the speech engine heard nothing, and grinding through a local pass to hear
+    // the same nothing is the worst of both paths.
+    if (cloud) return { segments: cloud, engine: 'groq' };
+  }
+
+  const segments = await run(audio, onProgress).catch(() => null);
+  return segments ? { segments, engine: 'whisper' } : null;
 }
 
 /**

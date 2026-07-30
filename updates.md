@@ -2,6 +2,50 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-07-30 — landing page rebuilt around one worked example
+Asked: "website's really cool but it needs screenshots and examples… these people are lazy and
+scrolling fast… harp on the smartness of the video processing into images, that's the key part…
+the two commands part isn't great." Done: every section now shows the thing instead of describing
+it, and one demo gripe (a promo code that applies to nothing at checkout) runs through all of them
+so a fast scroller meets one bug, not five. New `demo-shot.tsx` draws a keyframe as SVG (grey app,
+cobalt pointer + ink) so the same component serves the hero, the filmstrip, a contact-sheet tile
+and the report's inline still; `demo-data.ts` holds the transcript/events/report blocks in the
+shapes `buildReport` really emits; `mock.tsx` holds Pane / ContactSheet / Filmstrip / PlayerStrip /
+RecordingViewport. Hero now opens on the capture moment (draw-mode frame, dock, live caption)
+instead of the loop diagram — which moved to the final CTA as a watermark. New `distill.tsx` is
+the centrepiece: raw footage → the frames that survived → a 3×3 sheet, with the mechanism named
+(compared against every frame already kept, clicks force a frame, survivors spread across the
+take) and no parameters published. "What's in a gripe" dropped its file-path table for four
+plain-English cards each carrying the real artifact, with the paths demoted to pane captions.
+`cli-strip.tsx` deleted and replaced by `agent-view.tsx` — the MCP call plus a rendered markdown
+report.md viewer, setup reduced to one line at the bottom. Sign-off step gained a real before/after
+(`FIXED_SHOT`, discount lands, $102.40). Verified in Chrome at 1512px and under Playwright at 390px:
+typecheck clean, doc `scrollWidth` 390 with no section overflowing after a `min-w-0` pass.
+Touched: src/components/landing/{demo-shot,demo-data,mock,distill,agent-view}.tsx (new),
+{hero,how-it-works,gripe-manifest,final-cta}.tsx, cli-strip.tsx (deleted), src/app/home.tsx,
+cliffnotes.md, decisions.md.
+Note: commit `8dfa40a web1` swept in three temp Playwright scripts (`.mobile-check.mjs`,
+`.pw-probe.mjs`, `.pw-w.mjs`); they're deleted in the worktree, uncommitted.
+
+## 2026-07-30 — legal pages, and transcription off the user's laptop
+Asked: "i do want the privacy and terms pages on the website... i hate whisper. is there a better
+solution to not spin up the users machine... it has to be perfect." Done: `/privacy` and `/terms`
+as real routes (`src/components/legal.tsx` shell + the two pages, footer links, Arizona law,
+sal@dested.com) stating what's collected, the two transcription modes, AWS + Groq as the only
+processors, and the honest gaps (account deletion is manual, no password reset). Then replaced the
+on-device Whisper wait as the default: `server/transcribe.ts` (Groq whisper-large-v3-turbo, segments
+in ms), `POST /api/ingest/transcribe` (raw WAV body, token-authed, 503s without `GROQ_API_KEY`),
+`extension/src/sidepanel/transcribeCloud.ts` (hand-rolled WAV encode, 8-minute chunks, timings
+offset back onto the recording clock), the shared decode feeding either engine, `TranscriberId` on
+the take + message + report trust line, and a "Transcribe on this device" toggle defaulting off.
+Every failure falls back to the worker. tsc clean both workspaces; web + extension bundles build.
+Still open: a `GROQ_API_KEY` in prod SSM (without it prod silently stays on-device) and an
+end-to-end run against a real recording.
+Touched: src/app/{privacy,terms,routes,layout}.tsx, src/components/legal.tsx, server/{transcribe,
+ingest,env}.ts, extension/src/{lib/{types,messages,report},background/index,sidepanel/{transcribe,
+transcribeCloud,App}}.ts(x), .env.example, cliffnotes.md, decisions.md,
+plans/2026-07-30-transcription.md, plans/2026-07-30-go-live.md.
+
 ## 2026-07-30 — go-live audit: what's required before strangers can sign up
 Asked: "are we all good to send this out to other people to sign up?" → "note that all in a doc
 that is known by cliffnotes." Done: audited the deployed app and wrote

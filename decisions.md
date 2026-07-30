@@ -2,6 +2,27 @@
 
 > ADR-lite: what was decided, why, what was rejected. Append-only.
 
+## 2026-07-30 — Landing examples are live DOM, keyframes are SVG, one demo gripe throughout
+**Why:** Sal wanted screenshots and examples ("go hard man, examples"). There is no real gripe
+folder on disk to screenshot, and a committed PNG goes stale the first time `ui.md` moves.
+Building the mocks as real components keeps them crisp at any density, selectable, responsive,
+and permanently in sync with the tokens. Keyframes specifically are SVG because the same frame has
+to stay legible as a 3×3 contact-sheet tile and blown up in the hero. One demo gripe (promo code
+applies to nothing) carries every section so a fast scroller recognises the same bug each time
+rather than parsing a new example. Inside a frame only the reviewer's cobalt has colour — the
+recorded app is grey — which is what makes nine tiles readable at thumbnail size.
+**Rejected:** real screenshots (blocked on a human doing a live record→upload run, and stale on
+every redesign); a per-section variety of examples (five bugs reads as five products); publishing
+the dedup parameters — the landing page names the mechanism and prints results, never the tuning.
+
+## 2026-07-30 — The landing page sells the distillation, not the install
+**Why:** the frame distillation is what makes an agent able to read a recording at all, and it was
+nowhere on the page; meanwhile two install commands had a section to themselves. `distill.tsx` is
+now the largest section (raw footage → survivors → contact sheet), and `cli-strip.tsx` was replaced
+by `agent-view.tsx`, which shows the brief the agent receives and demotes setup to one line.
+**Rejected:** keeping a setup-focused section (plumbing on a page that should be selling); folding
+MCP into how-it-works (loses the rendered report, which is the most persuasive artifact there is).
+
 ## 2026-07-29 — Named "Inloop", not a Gripe-branded cloud
 **Why:** Sal wanted the human-in-the-loop idea in the name ("we're putting the human into the
 review process"); "Humanloop" is a known LLM-evals company.
@@ -83,3 +104,45 @@ serving the old image — the right failure. There are no `prisma/migrations` ye
 prod. The box's instance role is a fleet-wide credential — a much wider blast radius for presigning.
 **Rejected:** dropping the keys and letting the SDK fall back to the task role (widens what a
 compromised container can reach, and makes local dev and prod behave differently).
+
+## 2026-07-30 — Transcription moves server-side by default; on-device becomes the escape hatch
+**Why:** on-device `whisper-small.en` made every user download ~250 MB of weights once and then pin
+their GPU or CPU after *every* recording — minutes of waiting in the worst possible place, between
+finishing the walkthrough and being done. Hosted `whisper-large-v3-turbo` returns in seconds, is a
+better model, and costs fractions of a cent per gripe. Keeping the local path as an opt-in isn't a
+compromise — it's the free/paid split (their hardware vs ours) and the answer for anyone who can't
+send audio to a third party.
+**Rejected:** Deepgram Nova-3 first (better — word timestamps, keyterm biasing — but ~10× the
+price; Sal chose cheapest-first, and the provider lives behind one module so swapping forward is
+easy while un-swapping wouldn't be), `gpt-4o-transcribe` (no timestamps, and the transcript drives
+timeline seeking), self-hosting whisper.cpp on the Drydock box (one t4g.large already runs 26 tasks;
+CPU inference would starve the fleet).
+
+## 2026-07-30 — Re-encode the decoded audio as WAV rather than record a parallel mic track
+**Why:** an opus track from a second `MediaRecorder` would be ~1 MB per 10 minutes instead of
+~19 MB of WAV, but it means touching the capture engine — the one part that must never break — and
+it wouldn't exist for takes recovered from IndexedDB after a crash. Re-encoding audio the panel has
+already decoded works for every take, including recovered ones, with zero risk to recording. Long
+takes are split into 8-minute chunks client-side and the timings offset back onto the recording's
+clock, because only the client knows where it cut.
+**Rejected:** parallel mic recorder (revisit only if upload time becomes the complaint), sending
+the whole webm (36 MB and over provider limits), server-side chunking (the server would have to
+reconstruct offsets it never saw).
+
+## 2026-07-30 — `GROQ_API_KEY` is optional, and its absence degrades instead of failing
+**Why:** a missing provider key must never be a boot crash or a broken recorder. Unset, the
+endpoint answers 503 and the extension falls back to the on-device pass — a dev with no key gets
+the old slow path, not a dead feature. The cost is that "transcription is slow" now has a silent
+cause, which is why it's written down in cliffnotes' gotchas.
+**Rejected:** requiring the key in the zod env schema (every dev and the e2e suite would need one),
+failing the request loudly (the recorder can't do anything useful with the error).
+
+## 2026-07-30 — /privacy and /terms are real pages, under Arizona law
+**Why:** the Chrome Web Store requires a privacy policy URL for an extension that captures screen
+and microphone, and a product that stores recordings of people's screens owes them a plain
+statement of what's kept and how to delete it. Governing law is Arizona (Sal's call), contact is
+sal@dested.com. The policy names AWS and Groq as the only processors and describes both
+transcription modes — so it stays true whichever way the toggle is set.
+**Rejected:** a generated boilerplate policy (it would describe a product we don't have), deferring
+until the Web Store rejects us (the policy is on the critical path for submission), publishing a
+personal gmail as the contact.

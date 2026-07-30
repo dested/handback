@@ -369,13 +369,7 @@ function transcriptCaveat(recordings: Recording[]): string[] {
       '',
     ];
   }
-  const engines = [
-    ...new Set(
-      spoken.map((r) =>
-        r.meta.transcriber === 'whisper' ? 'Whisper small.en, on-device' : 'live browser dictation',
-      ),
-    ),
-  ];
+  const engines = [...new Set(spoken.map((r) => engineName(r.meta.transcriber)))];
   const some = spoken.some((r) => r.meta.reviewed);
   return [
     some
@@ -710,11 +704,19 @@ export function buildRecordingJson(session: Session, recording: Recording, url?:
   );
 }
 
+/**
+ * Which engine wrote the words. Named plainly, because an agent reading the
+ * report should weigh a large-model pass differently from live dictation.
+ */
+function engineName(transcriber: RecordingMeta['transcriber']): string {
+  if (transcriber === 'groq') return 'Whisper large-v3-turbo, hosted';
+  if (transcriber === 'whisper') return 'Whisper small.en, on-device';
+  return 'live dictation, Web Speech';
+}
+
 /** Where the lines in transcript.txt came from — the agent should weigh them differently. */
 function transcriptSource(rec: RecordingMeta): string {
-  const engine =
-    rec.transcriber === 'whisper' ? 'Whisper small.en, on-device' : 'live dictation, Web Speech';
-  return `${engine} — ${rec.reviewed ? 'read back and corrected by the speaker' : 'NOT checked by the speaker; treat wording as approximate'}`;
+  return `${engineName(rec.transcriber)} — ${rec.reviewed ? 'read back and corrected by the speaker' : 'NOT checked by the speaker; treat wording as approximate'}`;
 }
 
 /** `name  description` with the descriptions lined up. */

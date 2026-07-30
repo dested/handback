@@ -47,7 +47,12 @@ export function transcriptionConfigured(): boolean {
  * chunk, not the recording — the caller owns the offset, because only it knows
  * how the audio was split.
  */
-export async function transcribeChunk(wav: Uint8Array, language?: string): Promise<Segment[]> {
+export async function transcribeChunk(
+  // Explicitly backed by a plain ArrayBuffer: `BlobPart` won't accept the
+  // SharedArrayBuffer case that a bare Uint8Array leaves open.
+  wav: Uint8Array<ArrayBuffer>,
+  language?: string
+): Promise<Segment[]> {
   const key = env.GROQ_API_KEY
   if (!key) throw new TranscribeUnavailable('Server-side transcription is not configured')
 

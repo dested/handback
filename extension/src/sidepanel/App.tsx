@@ -122,6 +122,10 @@ export function App() {
   // The runtime listener is installed once, but the stop path closes over today's
   // state. Keep the latest copy behind a ref.
   const stopRef = useRef<() => void>(() => {});
+  // Transcription runs off a queue, minutes after the settings it needs were read.
+  // A ref keeps it on the current server, token, and on-device choice.
+  const settingsRef = useRef<Settings>(DEFAULT_SETTINGS);
+  settingsRef.current = state.settings;
 
   const session = useMemo(
     () => state.sessions.find((s) => s.id === state.activeSessionId) ?? null,
@@ -182,9 +186,14 @@ export function App() {
     async (id: string) => {
       const video = await blobs.get(`${id}:video`);
       if (!video) return;
-      const segments = await transcribeRecording(video, setWhisper);
-      if (!segments?.length) return;
-      await send({ type: 'recording:transcript', id, transcript: segments });
+      const result = await transcribeRecording(video, settingsRef.current, setWhisper);
+      if (!result?.segments.length) return;
+      await send({
+        type: 'recording:transcript',
+        id,
+        transcript: result.segments,
+        engine: result.engine,
+      });
       await refresh();
     },
     [refresh],
@@ -513,7 +522,8 @@ export function App() {
     const waiting = whisperIds.length > 1 ? ` · ${whisperIds.length - 1} waiting` : '';
     if (!whisper) return `transcribing…${waiting}`;
     if (whisper.stage === 'decode') return `reading the audio…${waiting}`;
-    if (whisper.stage === 'transcribe') return `transcribing the narration…${waiting}`;
+    if (whisper.stage === 'upload') return `transcribing the narration…${waiting}`;
+    if (whisper.stage === 'transcribe') return `transcribing on this device…${waiting}`;
     if (whisper.stage === 'model') return `loading the speech model…${waiting}`;
     return `fetching the speech model — ${Math.round(whisper.pct)}%${waiting}`;
   }, [whisper, whisperIds]);
@@ -835,6 +845,17 @@ function SettingsBlock({
         <i />
         Start recordings with drawing on
       </button>
+      <button
+        className={`toggle ${settings.onDeviceTranscription ? 'on' : ''}`}
+        onClick={() => commit({ onDeviceTranscription: !settings.onDeviceTranscription })}
+      >
+        <i />
+        Transcribe on this device
+      </button>
+      <em>
+        Off, your narration is transcribed by your workspace in seconds. On, it never leaves this
+        machine — but expect minutes and a warm laptop.
+      </em>
       <label className="field">
         <span>The language you narrate in, if it isn't the browser's</span>
         <input

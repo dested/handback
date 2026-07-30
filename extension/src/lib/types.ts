@@ -14,6 +14,14 @@ export interface PageEvent {
   ts: number;
 }
 
+/**
+ * Which engine wrote the transcript that shipped. `groq` is the workspace's
+ * hosted pass (fast, audio leaves the machine); `whisper` is the on-device
+ * fallback — same model family, minutes instead of seconds, nothing uploaded.
+ * The report cites this, so it is a fact about the recording, not a setting.
+ */
+export type TranscriberId = 'whisper' | 'groq';
+
 export interface TranscriptSegment {
   /** ms from recording start — where the speaker *started* the line */
   t: number;
@@ -82,8 +90,8 @@ export interface RecordingMeta {
   sampled: number;
   frames: RecordingFrame[];
   transcript: TranscriptSegment[];
-  /** Set when the on-device Whisper pass replaced the live Web Speech lines; absent = Web Speech or none. */
-  transcriber?: 'whisper';
+  /** Set when a real transcription pass replaced the live Web Speech lines; absent = Web Speech or none. */
+  transcriber?: TranscriberId;
   /** Bumped on every content mutation; a line edit against a stale rev is skipped. */
   rev?: number;
   /** True once a human read the transcript back and said it was right. Reset when Whisper replaces it. */
@@ -148,6 +156,12 @@ export interface Settings {
   serverUrl: string;
   /** Bearer token (ilp_…) minted under Team → API tokens. Stored locally only. */
   apiToken: string;
+  /**
+   * Transcribe in this browser instead of on the workspace. Slower by minutes
+   * and it spins the fan, but no audio ever leaves the machine — the answer for
+   * anyone who can't send a recording to a third party. Off by default.
+   */
+  onDeviceTranscription: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -155,6 +169,7 @@ export const DEFAULT_SETTINGS: Settings = {
   lang: '',
   serverUrl: 'https://inloop.dested.com',
   apiToken: '',
+  onDeviceTranscription: false,
 };
 
 /** The reviewer's-pen cobalt — Inloop's one accent. Never orange, never dark UI. */

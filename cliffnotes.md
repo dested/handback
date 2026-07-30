@@ -51,13 +51,15 @@ Playwright e2e. Inherited from dested/sal-starter — its conventions (server-on
 ```
 server.ts               Express entry: /healthz, auth, ingest, tRPC, vite/SSR, 404s
 server/
-  env.ts                zod env: DATABASE_URL, BETTER_AUTH_*, AWS_REGION, S3_BUCKET, AWS keys
+  env.ts                zod env: DATABASE_URL, BETTER_AUTH_*, AWS_REGION, S3_BUCKET, AWS keys,
+                        GROQ_API_KEY (optional — unset means no server-side transcription)
   auth.ts               better-auth instance (email+password, autoSignIn)
   trpc.ts               context (session from headers) + public/protectedProcedure
   membership.ts         requireMembership(user, org, atLeast) role gate + slugify
   router.ts             THE tRPC API: orgs, invites, tokens, projects, gripes
   ingest.ts             Token-authed REST (Bearer ilp_…): two-phase upload + agent reads
   storage.ts            S3: presignPut/Get, getObjectText, deletePrefix, key layout, isSafePath
+  transcribe.ts         speech-to-text via Groq whisper-large-v3-turbo; segments in ms
   prisma.ts / logger.ts PrismaClient singleton · ANSI request logger
 cli/
   push.ts               `inloop push` — walks a gripe folder, declare → PUT xN → finalize
@@ -75,10 +77,15 @@ src/
     projects.tsx        Projects list + create (origin hints)
     team.tsx            Members / Invites / API tokens tabs
     join.tsx            /join/:inviteId — peek + accept
+    privacy.tsx         /privacy — what's collected, where it lives, subprocessors
+    terms.tsx           /terms — alpha status, recording consent, Arizona law
   components/
     logo.tsx            LoopMark + Wordmark — THE identity, never redraw
+    legal.tsx           LegalPage/Section/Terms/Notice — shared chrome for /privacy + /terms
     ui/                 button, card, input, label (shadcn new-york style, no asChild)
-    landing/            hero, how-it-works, gripe-manifest, cli-strip, pricing, final-cta, …
+    landing/            hero, how-it-works, distill, gripe-manifest, agent-view, pricing,
+                        final-cta · demo-shot.tsx (a keyframe as SVG) + demo-data.ts (the one
+                        demo gripe) + mock.tsx (Pane/ContactSheet/Filmstrip/PlayerStrip)
     viewer/             take-section, filmstrip, transcript-panel, events-panel, report-panel,
                         gripe-header, gripe-controls, status-control, types, format, use-copy
   lib/
@@ -97,7 +104,8 @@ extension/              Inloop Recorder — the Chrome MV3 extension (own npm wo
                         db (IndexedDB 'inloop-recorder'), report.md builder, upload (to /api/ingest)
   src/background/       Service worker: hotkeys, dock routing, IndexedDB writes, strip docking
   src/content/          On-page dock (d/c/m/s keys), ink drawing, telemetry; injected.js relay
-  src/sidepanel/        Panel app: recorder (getDisplayMedia + dedup), Whisper transcription,
+  src/sidepanel/        Panel app: recorder (getDisplayMedia + dedup), transcription
+                        (transcribeCloud.ts → the workspace; transcribeWorker.ts → on-device),
                         Timeline editor, grids contact sheets, App.tsx orchestration
   scripts/              make-icons, copy-ort, prune-dist, preview.mjs + preview/ (layout harness)
 ```
@@ -109,6 +117,7 @@ extension/              Inloop Recorder — the Chrome MV3 extension (own npm wo
 | `/` | Landing (marketing) | `src/app/home.tsx` |
 | `/sign-in` · `/sign-up` | Auth | `src/app/sign-{in,up}.tsx` |
 | `/join/:inviteId` | Invite accept | `src/app/join.tsx` |
+| `/privacy` · `/terms` | Legal pages (linked from the marketing footer) | `src/app/{privacy,terms}.tsx` |
 | `/app` | Inbox (gripe list, first-run org creation) | `src/app/app.tsx` |
 | `/gripes/:gripeId` | The viewer | `src/app/gripe.tsx` |
 | `/projects` · `/team` | Projects · Members/Invites/Tokens | `src/app/{projects,team}.tsx` |
@@ -126,6 +135,7 @@ extension/              Inloop Recorder — the Chrome MV3 extension (own npm wo
 | `GET /gripes` | List for agents (MCP `list_gripes`) |
 | `GET /gripes/:id` | Detail + `reportMd` text + presigned GET for every file (MCP `get_gripe`) |
 | `POST /gripes/:id/status` | open / in_review / resolved (MCP `set_gripe_status`) |
+| `POST /transcribe` | 16 kHz mono WAV body in, `{segments:[{t,d?,text}]}` out. Stateless — the recorder chunks and offsets. 503 when `GROQ_API_KEY` is unset |
 
 ## Data model (Postgres via Prisma)
 
@@ -171,6 +181,16 @@ new key never reaches the container on a plain push.
 
 - **ui.md is law**: light only, no dark mode, no orange. Status colors fixed (open=cobalt,
   in_review=violet, resolved=green).
+- **The landing page's screenshots are live DOM, not images.** One demo gripe (`demo-data.ts` —
+  a promo code that applies to nothing) runs through every section; a keyframe is
+  `CheckoutShot` in `demo-shot.tsx`, an SVG so it survives both a 3×3 contact-sheet tile and the
+  hero. Inside a frame the recorded app is **grey** and only the reviewer's cobalt (pointer
+  crosshair, ink) has colour — keep that, it's what makes nine tiles readable at thumbnail size.
+  The contact sheet is the one black surface on the site, because it is a photograph of a JPEG.
+- **Landing grid items need `min-w-0`.** Grid items default to min-content, and the mock panes
+  contain `<pre>` and mono lines that never wrap — a missing `min-w-0` drags the whole page
+  wider than a phone (doc `scrollWidth` 510 at a 390 viewport). Re-check `scrollWidth` at 390
+  after touching any landing grid.
 - **`./server/*` never imports into `src/*`** except `import type` (starter rule; leaks secrets).
 - **tRPC returns must be JSON-safe** — Dates → ISO strings at the procedure, `bytes` BigInt →
   Number, or SSR/hydration markup diverges.
@@ -205,6 +225,13 @@ new key never reaches the container on a plain push.
 - **S3 CORS is an allowlist of exact origins** (`http://localhost:3995`, `http://localhost:3210`,
   `https://inloop.dested.com`, `chrome-extension://*`). Browser uploads from any other origin fail at
   the presigned PUT — update the bucket CORS when a new origin appears.
+- **Transcription is server-side by default** (`transcribeCloud.ts` → `/api/ingest/transcribe` →
+  Groq). On-device Whisper is the fallback and the privacy escape hatch, not the normal path — see
+  `plans/2026-07-30-transcription.md`. Audio leaving the machine is a **privacy-policy fact**: if
+  the provider changes, `/privacy` changes in the same release.
+- **`GROQ_API_KEY` is optional everywhere.** Unset → the endpoint 503s → every recorder silently
+  falls back to on-device. Nothing errors, it just gets slow — so "why is transcription taking
+  minutes" is a missing-key question first.
 - **Extension uploads with the panel's saved `ilp_` token** (settings → serverUrl+apiToken,
   defaults to https://inloop.dested.com) through the same two-phase `/api/ingest` flow as the CLI.
 
@@ -225,7 +252,11 @@ new key never reaches the container on a plain push.
   project created, repo wired (Dockerfile + workflow + drydock.yaml), S3/auth env in SSM, schema
   pushed by the pre-deploy task, CI green, TLS valid, `/healthz` ok. `render.yaml` deleted; the
   dev port moved 3000 → 3995 everywhere.
-- **Not built** — a prod account/API token (no one has signed up yet, so no S3 round-trip has run
+- **Done (2026-07-30, later)** — `/privacy` and `/terms` (real pages, Arizona law, sal@dested.com);
+  **server-side transcription on Groq** replacing the on-device Whisper wait, with an on-device
+  toggle kept as the privacy path (`plans/2026-07-30-transcription.md`).
+- **Not built** — a `GROQ_API_KEY` in prod SSM (without it transcription silently stays on-device),
+  a prod account/API token (no one has signed up yet, so no S3 round-trip has run
   against prod), a real in-Chrome record→upload run (needs a human), share links / public
   gripe URLs, email sending for invites, billing, server-side transcription, org deletion,
   pagination past 200 gripes, Chrome Web Store listing.
@@ -236,6 +267,9 @@ new key never reaches the container on a plain push.
 
 ## Plans
 
+- `plans/2026-07-30-transcription.md` — **active**. Why on-device Whisper stopped being the
+  default, what shipped on Groq, and the open follow-ups (prod key, Haiku cleanup pass, Deepgram
+  if keyterm biasing is ever needed).
 - `plans/2026-07-30-go-live.md` — **active**. What's required before strangers can sign up:
   password reset/email, upload size caps + quotas, the untested prod S3 round trip, and a full
   Chrome Web Store submission guide (cost, review time, why `<all_urls>` is the slow part).

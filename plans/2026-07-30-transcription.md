@@ -1,8 +1,13 @@
 # Transcription: get it off the user's machine
 
-> **Status: active** · opened 2026-07-30. Decision doc for replacing on-device Whisper as the
-> default transcription path. Nothing here is built yet — this is the design and the argument for
-> it. Related: [`2026-07-30-go-live.md`](2026-07-30-go-live.md).
+> **Status: active** · opened 2026-07-30. Why on-device Whisper stopped being the default, and
+> what replaced it. Related: [`2026-07-30-go-live.md`](2026-07-30-go-live.md).
+>
+> **Built 2026-07-30 on Groq** (Sal's call — cheapest first, easier to swap forward to Deepgram
+> than to reverse). Shipped: `server/transcribe.ts`, `POST /api/ingest/transcribe`,
+> `extension/src/sidepanel/transcribeCloud.ts`, and the "Transcribe on this device" toggle.
+> **Still open:** the Haiku cleanup pass, keyterm biasing (Groq has no equivalent — that's the
+> reason to revisit Deepgram), and Deepgram streaming for the live line.
 
 ## The problem, precisely
 
@@ -37,7 +42,14 @@ The free tier keeps the thing that costs nothing to run, and the paid tier's hea
 one a user *feels the first time they use it* — transcript in seconds instead of minutes, no fan.
 That's a much better upgrade prompt than a seat limit.
 
-## Provider: Deepgram Nova-3
+## Provider: Groq today, Deepgram if we need the vocabulary
+
+**Shipped on Groq `whisper-large-v3-turbo`** — roughly 10× cheaper than Deepgram, fast enough that
+the panel just awaits it, and segment-level timestamps, which is all the timeline needs. The
+provider lives behind one module (`server/transcribe.ts`) that returns `{t, d?, text}` in
+milliseconds, so swapping it is a single file. The analysis that follows is why Deepgram is the
+thing to swap *to* if transcription quality on technical vocabulary becomes the complaint.
+
 
 **Timestamps are a hard requirement**, and they eliminate most of the field. The transcript drives
 seeking on the timeline (`Timeline.tsx` positions each line by `t`, and clicking a line seeks the
@@ -46,17 +58,18 @@ useless to us no matter how accurate.
 
 | Option | Timestamps | ~Cost /min | Verdict |
 | --- | --- | --- | --- |
-| **Deepgram Nova-3** | word-level | ~$0.004 | **Pick this.** Fast, word-level timing, and keyterm prompting (below) |
-| Groq `whisper-large-v3-turbo` | segment-level | ~$0.0007 | Cheapest by far and very fast — the budget fallback / second source |
+| **Groq `whisper-large-v3-turbo`** | segment-level | ~$0.0007 | **Shipped.** Cheapest by an order of magnitude, very fast, timestamps good enough for the timeline |
+| Deepgram Nova-3 | word-level | ~$0.004 | The upgrade path. Word-level timing and keyterm prompting (below) |
 | OpenAI `whisper-1` (verbose_json) | segment-level | ~$0.006 | Fine, unremarkable, no edge |
 | OpenAI `gpt-4o-transcribe` | **none** | ~$0.006 | Disqualified — most accurate, but returns no timestamps |
 | whisper.cpp on the Drydock box | segment-level | "free" | **No.** The t4g.large already runs 26 tasks; CPU inference would starve the fleet |
 
-The Deepgram edge that matters for us specifically is **keyterm prompting** — you pass domain
-vocabulary and it biases toward it. Inloop *knows the context of every recording*: the project
-name, the origin hints, the page titles, the console errors that were captured alongside the audio.
-Feeding those in as keyterms means "tee arr pee see" comes back as `tRPC` instead of garbage. No
-generic transcription tool has that context. We do, for free, on every gripe.
+The Deepgram edge, when we want it, is **keyterm prompting** — you pass domain vocabulary and it
+biases toward it. Inloop *knows the context of every recording*: the project name, the origin
+hints, the page titles, the console errors captured alongside the audio. Feeding those in as
+keyterms means "tee arr pee see" comes back as `tRPC` instead of garbage. No generic transcription
+tool has that context; we do, for free, on every gripe. Groq's Whisper endpoint has no equivalent —
+which is exactly why the Haiku cleanup pass below matters more on Groq than it would on Deepgram.
 
 > Prices and latencies above are approximate and from memory — **confirm current numbers against
 > each provider's pricing page when this gets built.** The ranking is unlikely to move; the exact
@@ -65,27 +78,38 @@ generic transcription tool has that context. We do, for free, on every gripe.
 Even at the most expensive option, 1,000 ten-minute gripes a month is under $60. This is not a
 line item worth optimizing before it exists.
 
-## How the flow changes
+## How the flow changes (as built)
 
-Today: stop → decode webm audio to 16 kHz mono → hand a `Float32Array` to the worker → wait.
+Before: stop → decode the webm's audio to 16 kHz mono → hand the `Float32Array` to the worker →
+wait minutes.
 
-Proposed:
+Now, in `extension/src/sidepanel/transcribe.ts`:
 
-1. **Record a mic-only track in parallel.** A second `MediaRecorder` on the mic stream alone yields
-   a small opus blob (~1 MB for 10 minutes) — near-free to produce, and exactly the shape an STT
-   API wants. Beats re-encoding the decoded PCM, which would be ~19 MB of WAV.
-2. **`POST /api/ingest/transcribe`** with the panel's existing `ilp_` token. The server calls the
-   provider and returns `{t, d?, text}[]` — the same segment shape the worker already emits, so
-   `report.ts`, `Timeline.tsx` and the transcript panel need no changes at all.
-3. **The panel awaits it.** At Deepgram/Groq speeds a ten-minute recording comes back in seconds,
-   so the existing edit-the-transcript UX survives intact — no async "transcribing…" state to
-   design, no viewer changes, no half-finished gripes in the inbox.
-4. **Fall back to the worker** if the call fails, or if the org opted into on-device.
+1. **Decode once, as before.** Both engines want the same 16 kHz mono `Float32Array`, so the decode
+   is shared and the fallback costs nothing extra.
+2. **Wrap it as WAV and POST it** to `/api/ingest/transcribe` with the panel's own `ilp_` token
+   (`transcribeCloud.ts`). 16-bit PCM runs ~1.9 MB/minute, so takes are **split into 8-minute
+   chunks** and each chunk's timings are offset back onto the recording's clock — the client does
+   the cutting because only it knows where it cut.
+3. **The server calls Groq** and returns `{t, d?, text}[]` — the exact segment shape the worker
+   already emitted, so `report.ts`, `Timeline.tsx`, and the viewer needed no changes at all.
+4. **The panel awaits it.** Fast enough that the existing edit-the-transcript UX survives intact —
+   no async "transcribing…" state to design, no half-finished gripes in the inbox.
+5. **Any failure falls back to the worker**, as does the on-device setting. Non-null-but-empty from
+   the cloud is treated as a real answer: grinding through a local pass to hear the same silence is
+   the worst of both paths.
 
-The API key lives in SSM and never reaches the extension. The `transcriber` field in
-`extension/src/lib/types.ts` is already `'whisper' | 'webspeech'` and `report.ts` already prints
-the engine on the trust line — adding a third value is a small, well-defined change. The data model
-anticipated this.
+> **Deliberately not built: the parallel mic-only `MediaRecorder`.** An opus track would be ~1 MB
+> per 10 minutes instead of ~19 MB of WAV, but it means touching the capture engine — the one part
+> that must never break — and it wouldn't exist for takes recovered from IndexedDB after a crash.
+> Re-encoding the already-decoded audio works everywhere, for every take, with zero recording-path
+> risk. Revisit if upload time becomes the complaint.
+
+The provider key lives in SSM as `GROQ_API_KEY` and never reaches the extension. Unset, the
+endpoint answers 503 and every recorder falls back to on-device — a dev without a key gets the slow
+path, not a broken one. `transcriber` in `extension/src/lib/types.ts` is now a `TranscriberId`
+union and `report.ts` names the engine on the trust line; the data model had already anticipated a
+second engine.
 
 **Keep the Web Speech live line as-is.** It's free, it's already there, and it only has to be good
 enough to show the speaker that the mic is live. Deepgram streaming could replace it later for a
@@ -118,10 +142,18 @@ see the go-live doc, which already flags the privacy policy as a blocker for oth
 
 ## Order of work
 
-1. Mic-only parallel `MediaRecorder` in the recorder (small, independent, no server needed).
-2. `POST /api/ingest/transcribe` + provider account + key in SSM.
-3. Panel: call it, await it, fall back to the worker on failure.
-4. Settings toggle: "transcribe on this device" — off by default, the privacy escape hatch.
-5. Privacy policy: name the subprocessor.
-6. *(later)* Haiku cleanup pass grounded in console errors + page context.
-7. *(later, optional)* Deepgram streaming for a live line that's actually accurate.
+- [x] `POST /api/ingest/transcribe` + `server/transcribe.ts` (Groq).
+- [x] Panel: WAV-encode, chunk, call it, await it, fall back to the worker on failure.
+- [x] Settings toggle: "Transcribe on this device" — off by default, the privacy escape hatch.
+- [x] Privacy policy names the subprocessor and describes both modes (`/privacy`).
+- [ ] **A `GROQ_API_KEY` in prod SSM.** Until it's set, prod answers 503 and every recorder silently
+      takes the slow path — the feature is shipped but dormant.
+- [ ] Verify end to end against a real recording: check the report's trust line says
+      `Whisper large-v3-turbo, hosted`, and that a multi-chunk take (>8 min) has monotonic
+      timestamps across the seam.
+- [ ] Haiku cleanup pass (`claude-haiku-4-5`, $1/$5 per MTok) grounded in console errors + page
+      context. Matters more on Groq than it would on Deepgram — there's no keyterm biasing to lean
+      on, so this is where technical vocabulary gets fixed.
+- [ ] *(optional)* Mic-only opus track, if the WAV upload turns out to be the slow part.
+- [ ] *(optional)* Deepgram, if keyterm biasing beats the cleanup pass.
+- [ ] *(optional)* Streaming for a live line that's actually accurate.

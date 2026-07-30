@@ -14,6 +14,11 @@
 //   GET  /api/ingest/gripes            the org's finalized gripes, newest first
 //   GET  /api/ingest/gripes/:id        one gripe's full brief (report.md + presigned files)
 //   POST /api/ingest/gripes/:id/status open | in_review | resolved
+//
+// And one stateless helper the recorder leans on so it doesn't have to run
+// Whisper on the user's laptop:
+//
+//   POST /api/ingest/transcribe        16 kHz mono WAV in, timed segments out
 
 import { createHash } from 'node:crypto'
 import { Router, json, raw, type Request, type Response } from 'express'
@@ -339,3 +344,45 @@ ingestRouter.post('/gripes/:id/status', async (req, res) => {
   log.info(`[ingest] gripe ${gripe.slug} (${gripe.id}) → ${status}`)
   res.json({ ok: true, status })
 })
+
+// POST /api/ingest/transcribe — one chunk of 16 kHz mono WAV in, timed segments
+// out. The recorder splits long takes itself and offsets the results, because
+// only it knows where it cut; this endpoint is deliberately stateless and knows
+// nothing about gripes. Raw body, not JSON: base64 would inflate the audio by a
+// third for no reason. `json()` above ignores a non-JSON content type, so the
+// raw parser here is the only one that touches this body.
+const MAX_AUDIO_BYTES = 30 * 1024 * 1024
+
+ingestRouter.post(
+  '/transcribe',
+  raw({ type: ['audio/wav', 'application/octet-stream'], limit: MAX_AUDIO_BYTES }),
+  async (req, res) => {
+    if (!transcriptionConfigured()) {
+      fail(res, 503, 'Server-side transcription is not configured on this server')
+      return
+    }
+    const audio = req.body
+    if (!Buffer.isBuffer(audio) || audio.length === 0) {
+      fail(res, 400, 'Expected a WAV body')
+      return
+    }
+    // A two-letter hint helps Whisper; anything else is noise, so drop it.
+    const langParam = req.query.language
+    const language = typeof langParam === 'string' && /^[a-z]{2}$/.test(langParam) ? langParam : undefined
+
+    try {
+      const segments = await transcribeChunk(new Uint8Array(audio), language)
+      res.json({ segments })
+    } catch (err) {
+      if (err instanceof TranscribeUnavailable) {
+        fail(res, 503, err.message)
+        return
+      }
+      const detail = err instanceof TranscribeFailed ? err.message : 'unknown error'
+      log.warn(`[ingest] transcribe failed: ${detail}`)
+      // The recorder treats any non-2xx as "fall back to on-device", so the
+      // caller never needs the provider's error text.
+      fail(res, 502, 'Transcription provider failed')
+    }
+  }
+)
