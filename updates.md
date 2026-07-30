@@ -2,6 +2,18 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-07-30 — go-live audit: what's required before strangers can sign up
+Asked: "are we all good to send this out to other people to sign up?" → "note that all in a doc
+that is known by cliffnotes." Done: audited the deployed app and wrote
+`plans/2026-07-30-go-live.md` — four blockers (no password reset or email at all in `auth.ts`;
+`presignPut` signs no size limit and there are no per-org quotas; the extension is load-unpacked
+only; no S3 round trip has run on prod), the should-fixes (no rate limiting, pricing sells tiers
+with no billing, no ToS/privacy, no error tracking), an explicit "already fine" list so the tenant
+boundary doesn't get re-audited, and a Chrome Web Store section (the $5 + zip is easy; `<all_urls>`
+plus screen/mic capture is what makes the review slow, and the reviewer needs test credentials).
+Verdict: fine for people you can text, not for a public link.
+Touched: plans/2026-07-30-go-live.md (new), cliffnotes.md (header pointer + Plans section).
+
 ## 2026-07-30 — shipped: inloop.dested.com, deployed by Drydock
 Asked: "can you deploy this with drydock." Done: pushed the pending 3000 → 3995 port change and
 deleted `render.yaml` (Drydock read it once as a detection seed); created the `inloop` project in

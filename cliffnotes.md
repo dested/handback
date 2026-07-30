@@ -1,8 +1,13 @@
 # Inloop — CliffNotes
 
 > Living map of the project. Read this before any coding session.
-> Last updated: 2026-07-29 (day one). Visual language → `ui.md` · why → `decisions.md` ·
+> Last updated: 2026-07-30. Visual language → `ui.md` · why → `decisions.md` ·
 > log → `updates.md`.
+>
+> **Before opening sign-up to anyone you can't text: read
+> [`plans/2026-07-30-go-live.md`](plans/2026-07-30-go-live.md)** — the audit of what's still
+> missing (no password reset, unbounded presigned PUTs, no Web Store listing) and the Chrome Web
+> Store submission notes.
 
 ## What this is
 
@@ -224,5 +229,13 @@ new key never reaches the container on a plain push.
   against prod), a real in-Chrome record→upload run (needs a human), share links / public
   gripe URLs, email sending for invites, billing, server-side transcription, org deletion,
   pagination past 200 gripes, Chrome Web Store listing.
-- **Next** — load-unpacked QA of the extension, deploy via Drydock, then the strategy backlog in
+- **Next** — load-unpacked QA of the extension, then **the go-live blockers in
+  `plans/2026-07-30-go-live.md`** (Chrome Web Store submission first — it's the only queue we don't
+  control), then the strategy backlog in
   `G:\code\gripe\plans\2026-07-29-enterprise-strategy.md`.
+
+## Plans
+
+- `plans/2026-07-30-go-live.md` — **active**. What's required before strangers can sign up:
+  password reset/email, upload size caps + quotas, the untested prod S3 round trip, and a full
+  Chrome Web Store submission guide (cost, review time, why `<all_urls>` is the slow part).
