@@ -16,10 +16,16 @@
 //   POST /api/ingest/gripes/:id/status open | in_review | resolved
 
 import { createHash } from 'node:crypto'
-import { Router, json, type Request, type Response } from 'express'
+import { Router, json, raw, type Request, type Response } from 'express'
 import { z } from 'zod'
 import { log } from './logger'
 import { prisma } from './prisma'
+import {
+  TranscribeFailed,
+  TranscribeUnavailable,
+  transcribeChunk,
+  transcriptionConfigured,
+} from './transcribe'
 import {
   deletePrefix,
   getObjectText,

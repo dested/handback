@@ -134,6 +134,12 @@ function MarketingFooter() {
       <div className="text-muted-foreground mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-6 py-8 text-sm">
         <Wordmark className="text-foreground" />
         <span>Humans in the loop.</span>
+        <Link className="hover:text-foreground" to="/privacy">
+          Privacy
+        </Link>
+        <Link className="hover:text-foreground" to="/terms">
+          Terms
+        </Link>
         <span className="ml-auto">© 2026 Inloop</span>
       </div>
     </footer>

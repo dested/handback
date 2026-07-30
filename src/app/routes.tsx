@@ -10,10 +10,12 @@ import { GripePage } from './gripe'
 import { HomePage } from './home'
 import { JoinPage } from './join'
 import { Layout } from './layout'
+import { PrivacyPage } from './privacy'
 import { ProjectsPage } from './projects'
 import { SignInPage } from './sign-in'
 import { SignUpPage } from './sign-up'
 import { TeamPage } from './team'
+import { TermsPage } from './terms'
 
 // Per-request context populated by entry-server.tsx and handed to loaders via
 // createStaticHandler.query(req, { requestContext }). Only available SSR-side.
@@ -74,6 +76,8 @@ export const routes: RouteObject[] = [
       { path: 'sign-in', Component: SignInPage, loader: redirectIfSignedIn },
       { path: 'sign-up', Component: SignUpPage, loader: redirectIfSignedIn },
       { path: 'join/:inviteId', Component: JoinPage },
+      { path: 'privacy', Component: PrivacyPage },
+      { path: 'terms', Component: TermsPage },
       { path: 'app', Component: InboxPage, loader: appLoader },
       { path: 'gripes/:gripeId', Component: GripePage, loader: appLoader },
       { path: 'projects', Component: ProjectsPage, loader: appLoader },

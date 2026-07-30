@@ -2,17 +2,22 @@ import { ArrowRight } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { buttonVariants } from '~/components/ui/button'
 import { cn } from '~/lib/utils'
-import { LoopDiagram } from './loop-diagram'
+import { SHOTS } from './demo-shot'
+import { RecordingViewport } from './mock'
 import { Section } from './section'
 
 // The page's only entrance: one staggered fade-and-rise on load. Nothing else
 // on the landing page moves on its own.
 const rise = 'animate-in fade-in slide-in-from-bottom-3 fill-mode-both duration-700 ease-out'
 
+// 0:22 — the human has circled the total that never changed. The one frame that
+// explains the whole product without a caption.
+const MARKED = SHOTS[7] ?? SHOTS[0]
+
 export function Hero() {
   return (
-    <Section className="py-20 md:py-28">
-      <div className="grid items-center gap-16 lg:grid-cols-[1.1fr_0.9fr]">
+    <Section className="py-16 md:py-24">
+      <div className="grid items-center gap-14 lg:grid-cols-[0.92fr_1.08fr]">
         <div>
           {/* The stamp carries its own rotate, so the rise animates a wrapper. */}
           <div className={rise}>
@@ -28,29 +33,28 @@ export function Hero() {
           <p
             className={cn(
               rise,
-              'text-muted-foreground mt-7 max-w-2xl text-lg leading-relaxed delay-200'
+              'text-muted-foreground mt-7 max-w-xl text-lg leading-relaxed delay-200'
             )}>
-            Record what's broken, talk through it for ninety seconds, and hand your coding agent a
-            repro-grade brief — video, keyframes, transcript, and the console errors that fired
-            while you spoke. Nothing merges without your sign-off.
+            Talk through the bug in the app where it happens. Inloop turns the recording into
+            something a coding agent can actually read — and nothing merges without your sign-off.
           </p>
-          <div className={cn(rise, 'mt-10 flex flex-wrap items-center gap-x-7 gap-y-4 delay-300')}>
+          <div className={cn(rise, 'mt-9 flex flex-wrap items-center gap-x-7 gap-y-4 delay-300')}>
             <Link to="/sign-up" className={cn(buttonVariants({ size: 'lg' }), 'px-6')}>
               Get started
             </Link>
             <a
-              href="#how"
+              href="#distill"
               className="text-muted-foreground hover:text-foreground group inline-flex items-center gap-1.5 text-sm font-medium transition-colors">
-              See how it works
+              See what the agent gets
               <ArrowRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
             </a>
           </div>
         </div>
-        <LoopDiagram
-          className={cn(
-            rise,
-            'text-muted-foreground hidden w-full max-w-md justify-self-end delay-500 lg:block'
-          )}
+
+        <RecordingViewport
+          shot={MARKED}
+          caption="and nothing. No error, no discount, the total is still a hundred and twenty-eight."
+          className={cn(rise, 'delay-500')}
         />
       </div>
     </Section>
