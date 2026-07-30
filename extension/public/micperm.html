@@ -20,7 +20,7 @@
   button.ghost { background: none; border: 1px solid #e2e0da; color: #6b6a63; }
   button.ghost:hover { color: #23262e; border-color: #c9cbd2; background: none; }
   .state { display: none; }
-  [data-state="asking"] .asking, [data-state="granted"] .granted, [data-state="denied"] .denied { display: block; }
+  [data-state="asking"] .asking, [data-state="granted"] .granted, [data-state="denied"] .denied, [data-state="nodevice"] .nodevice { display: block; }
 </style>
 </head>
 <body data-state="asking">
@@ -41,8 +41,15 @@
       <h1>Microphone blocked</h1>
       <p>Chrome said: <span class="err" id="err"></span></p>
       <p>Allow the mic for this extension in site settings, then try again. On a Mac, also check <b>System Settings → Privacy &amp; Security → Microphone → Chrome</b> — if Chrome itself has no mic access, no site can.</p>
-      <button id="retry">Try again</button>
+      <button class="retry">Try again</button>
       <button id="settings" class="ghost">Open mic settings</button>
+    </div>
+    <div class="state nodevice">
+      <h1>No microphone found</h1>
+      <p>Chrome can't see an audio input device — this isn't a permission problem.</p>
+      <p>On Windows: <b>Settings → Privacy &amp; security → Microphone</b> — turn on <b>Microphone access</b> and <b>Let desktop apps access your microphone</b> (off silently causes exactly this). Then check <b>Settings → System → Sound → Input</b> lists a device; if not, plug in a headset or webcam.</p>
+      <p>Walkthroughs record fine without a mic — the take just carries no narration.</p>
+      <button class="retry">Try again</button>
     </div>
   </div>
   <script src="micperm.js"></script>

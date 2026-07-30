@@ -15,14 +15,18 @@
         document.body.dataset.state = 'granted';
       })
       .catch(function (e) {
-        document.body.dataset.state = 'denied';
+        var name = e && e.name ? e.name : String(e);
+        // No device is a different problem than a denied one — say so.
+        document.body.dataset.state = name === 'NotFoundError' ? 'nodevice' : 'denied';
         if (err) {
-          err.textContent = (e && e.name ? e.name : String(e)) + (e && e.message ? ' — ' + e.message : '');
+          err.textContent = name + (e && e.message ? ' — ' + e.message : '');
         }
       });
   }
 
-  document.getElementById('retry').addEventListener('click', ask);
+  Array.prototype.forEach.call(document.querySelectorAll('.retry'), function (b) {
+    b.addEventListener('click', ask);
+  });
   document.getElementById('settings').addEventListener('click', function () {
     // chrome:// links can't be plain anchors, but tabs.create may open them.
     chrome.tabs.create({
