@@ -13,5 +13,5 @@ database: true      # provision Postgres + DATABASE_URL
 prisma: true        # prisma generate on build, db push predeploy
 predeploy: bunx prisma db push
 domains:
-  - inloop.dested.com
-dnsZone: dested.com
+  - handback.dev
+dnsZone: handback.dev
