@@ -16,7 +16,7 @@ cp .env.example .env         # then fill in every key from the table below
 createdb inloop
 bun run db:push              # sync prisma/schema.prisma to Postgres
 bun cli/dev-bootstrap.ts     # creates a user + org, prints an ilp_… API token
-bun run dev                  # → http://localhost:3000
+bun run dev                  # → http://localhost:3995
 ```
 
 `dev-bootstrap` is idempotent and prints a fresh token each run; the default login is `dev@inloop.local` / `inloop-dev-password`. Copy the token — it is only shown once, and everything below needs it.
@@ -29,7 +29,7 @@ Point the CLI at a folder the recorder wrote (`report.md` + one `rec-NN/` per ta
 
 ```bash
 bun cli/push.ts ./2026-07-29-1412-checkout-hangs \
-  --server http://localhost:3000 \
+  --server http://localhost:3995 \
   --token ilp_…
 ```
 
@@ -93,7 +93,7 @@ Validated by `server/env.ts` at import — all of these must be set for the serv
 | ----------------------- | ------------------------------------------------------- |
 | `DATABASE_URL`          | Postgres connection string.                             |
 | `BETTER_AUTH_SECRET`    | 32+ random chars. `openssl rand -base64 32`.            |
-| `BETTER_AUTH_URL`       | Public origin. Defaults to `http://localhost:3000`.     |
+| `BETTER_AUTH_URL`       | Public origin. Defaults to `http://localhost:3995`.     |
 | `AWS_REGION`            | Defaults to `us-west-2`.                                |
 | `S3_BUCKET`             | Bucket holding gripe payloads. Block all public access. |
 | `AWS_ACCESS_KEY_ID`     | Credential for that bucket.                             |
@@ -105,7 +105,7 @@ The CLI and MCP server read `INLOOP_SERVER` and `INLOOP_TOKEN` instead — they 
 
 | script              | what it does                                              |
 | ------------------- | --------------------------------------------------------- |
-| `bun run dev`       | dev server with HMR + SSR on :3000                        |
+| `bun run dev`       | dev server with HMR + SSR on :3995                        |
 | `bun run build`     | build client (`dist/client`) + SSR bundle (`dist/server`) |
 | `bun run start`     | production server                                         |
 | `bun run typecheck` | `tsgo --noEmit`                                           |

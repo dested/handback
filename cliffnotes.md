@@ -18,13 +18,13 @@ dark, nothing visually inherited from the Gripe extension.
 
 ## Quick Reference
 
-- **Dev:** `bun run dev` → http://localhost:3000 (needs `.env`; see Env below)
+- **Dev:** `bun run dev` → http://localhost:3995 (needs `.env`; see Env below)
 - **Type-check:** `bun run typecheck` (`tsgo --noEmit`)
 - **DB:** local Postgres 18 service; `bun run db:push` after schema edits (+`db:generate`)
 - **E2E:** `E2E_DATABASE_URL=postgres://postgres:<pw>@localhost:5432/inloop_test bun run test:e2e`
   (isolated DB + port 3100; screenshots committed; `test:e2e:update` to re-baseline)
 - **Seed a dev login:** `bun cli/dev-bootstrap.ts [email] [password] [org]` → prints an `ilp_` token
-- **Push a gripe:** `bun cli/push.ts <gripe-folder> --server http://localhost:3000 --token ilp_…`
+- **Push a gripe:** `bun cli/push.ts <gripe-folder> --server http://localhost:3995 --token ilp_…`
 - **Extension:** `bun run build:extension` (root) or `cd extension && npm run build` →
   load-unpacked `extension/dist`;
   `npm run preview` → http://localhost:8777/gallery.html (layout harness, no Chrome needed)
@@ -129,7 +129,7 @@ ApiToken (sha256 hash only; `ilp_` prefix; lastUsedAt stamped on ingest auth).
 ## Storage (S3)
 
 Bucket **inloop-files**, us-west-2, AWS account 114394156384 (profile `dested`), public access
-blocked, CORS allows localhost:3000/3210 + inloop.dested.com. IAM user `inloop-app` scoped to this
+blocked, CORS allows localhost:3995/3210 + inloop.dested.com. IAM user `inloop-app` scoped to this
 bucket; its keys live in `.env` only. Everything moves via presigned URLs (PUT 1h, GET 1h) —
 `gripes.get` presigns every file in one call so the viewer never round-trips per frame.
 
@@ -141,7 +141,7 @@ bucket; its keys live in `.env` only. Everything moves via presigned URLs (PUT 1
 - **tRPC returns must be JSON-safe** — Dates → ISO strings at the procedure, `bytes` BigInt →
   Number, or SSR/hydration markup diverges.
 - **better-auth origin check**: sign-in fails with "Invalid origin" unless `BETTER_AUTH_URL`
-  matches the URL you're browsing on. Dev on a non-3000 port needs
+  matches the URL you're browsing on. Dev on a non-3995 port needs
   `PORT=X BETTER_AUTH_URL=http://localhost:X bun server.ts`.
 - **Ingest paths are validated** (`isSafePath`) — never widen it casually; those strings become S3
   keys.

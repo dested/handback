@@ -43,7 +43,7 @@ export async function render(req: express.Request): Promise<{
   const trpcClient = createTRPCClient<typeof appRouter>({
     links: [
       httpBatchLink({
-        url: `http://localhost:${process.env.PORT ?? 3000}/api/trpc`,
+        url: `http://localhost:${process.env.PORT ?? 3995}/api/trpc`,
         headers: () => (cookieHeader ? { cookie: cookieHeader } : {}),
       }),
     ],

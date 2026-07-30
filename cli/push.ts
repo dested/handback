@@ -1,6 +1,6 @@
 // inloop push — upload a recorded gripe folder to the Inloop workspace.
 //
-//   bun cli/push.ts <gripe-folder> [--server http://localhost:3000] [--token ilp_...]
+//   bun cli/push.ts <gripe-folder> [--server http://localhost:3995] [--token ilp_...]
 //
 // The folder is what the recorder wrote: report.md + MANIFEST.txt at the root,
 // one rec-NN/ per take (recording.json, transcript.txt, frames/, grids/,
@@ -56,7 +56,7 @@ const flag = (name: string) => {
 }
 
 if (!folder) fail('usage: bun cli/push.ts <gripe-folder> [--server url] [--token ilp_...]')
-const server = (flag('server') ?? process.env.INLOOP_SERVER ?? 'http://localhost:3000').replace(
+const server = (flag('server') ?? process.env.INLOOP_SERVER ?? 'http://localhost:3995').replace(
   /\/+$/,
   ''
 )

@@ -168,7 +168,7 @@
             rev: 1,
             reviewed: Boolean(reviewed),
             events: pageEvents(startedAt, events ?? []),
-            eventScope: 'http://localhost:3000',
+            eventScope: 'http://localhost:3995',
             videoFile: 'walkthrough.webm',
           },
         };
@@ -262,7 +262,7 @@
                 slug: '2026-07-29-2305-checkout-totals-are-wrong',
                 createdAt: NOW - 1800000,
                 updatedAt: NOW,
-                origin: 'http://localhost:3000',
+                origin: 'http://localhost:3995',
                 recCount: RECORDINGS.length,
               },
               {
@@ -271,7 +271,7 @@
                 slug: '2026-07-25-1102-nav-collapses-on-ipad',
                 createdAt: NOW - 86400000,
                 updatedAt: NOW - 86000000,
-                origin: 'http://localhost:3000',
+                origin: 'http://localhost:3995',
                 recCount: 1,
                 closed: true,
                 uploadedUrl: 'https://inloop.dested.com/g/nav-collapses-on-ipad',
@@ -609,8 +609,8 @@
           onRemoved: { addListener: noop },
         },
         tabs: {
-          query: async () => [{ id: 1, windowId: 1, title: 'Checkout', url: 'http://localhost:3000/checkout' }],
-          get: async () => ({ id: 1, windowId: 1, url: 'http://localhost:3000/checkout' }),
+          query: async () => [{ id: 1, windowId: 1, title: 'Checkout', url: 'http://localhost:3995/checkout' }],
+          get: async () => ({ id: 1, windowId: 1, url: 'http://localhost:3995/checkout' }),
           create: async () => ({ id: 3 }),
           update: asyncNoop,
           remove: asyncNoop,

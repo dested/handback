@@ -86,7 +86,7 @@ if (existsSync('.env')) {
     [
       `DATABASE_URL=postgres://postgres:postgres@localhost:5432/${snake}`,
       `BETTER_AUTH_SECRET=${secret}`,
-      `BETTER_AUTH_URL=http://localhost:3000`,
+      `BETTER_AUTH_URL=http://localhost:3995`,
       '',
     ].join('\n')
   )
@@ -108,5 +108,5 @@ console.log(
   `  ${c.dim('1.')} createdb ${snake}              ${c.dim('# or point .env at any Postgres')}`
 )
 console.log(`  ${c.dim('2.')} bun run db:push`)
-console.log(`  ${c.dim('3.')} bun run dev                  ${c.dim('# → http://localhost:3000')}`)
+console.log(`  ${c.dim('3.')} bun run dev                  ${c.dim('# → http://localhost:3995')}`)
 console.log()
