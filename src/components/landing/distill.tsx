@@ -52,9 +52,13 @@ export function Distill() {
             }}
           />
           <Sprockets />
-          <p className="text-muted-foreground absolute inset-0 flex items-center justify-center font-mono text-xs">
-            {GRIPE.duration} of screen capture · ~2,800 frames · almost all of them identical
-          </p>
+          {/* Boxed, so the caption reads as a label laid on the footage rather than
+              text tangled in the perforations when it wraps on a phone. */}
+          <div className="absolute inset-0 flex items-center justify-center px-4">
+            <p className="bg-card text-muted-foreground rounded-sm px-3 py-1.5 text-center font-mono text-xs leading-relaxed">
+              {GRIPE.duration} of screen capture · ~2,800 frames · almost all of them identical
+            </p>
+          </div>
         </div>
       </div>
 
