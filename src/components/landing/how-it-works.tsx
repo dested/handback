@@ -205,7 +205,7 @@ function InboxMock() {
 /** The agent side, compressed to two calls — the full version is further down the page. */
 function AgentMock() {
   return (
-    <Example caption="claude code · inloop mcp server">
+    <Example caption="claude code · handback mcp server">
       <div className="space-y-2 p-3.5 font-mono text-[0.7rem] leading-relaxed">
         <p>
           <span className="text-cobalt select-none">▸ </span>

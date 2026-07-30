@@ -6,19 +6,19 @@ export function TermsPage() {
     <LegalPage
       title="Terms of Service"
       updated="July 30, 2026"
-      summary="The agreement between you and Inloop. Short version: it's early software, you own what you record, and you are responsible for having the right to record it.">
+      summary="The agreement between you and Handback. Short version: it's early software, you own what you record, and you are responsible for having the right to record it.">
       <Section heading="1. Agreement">
         <p>
-          By creating an account, installing the Inloop Recorder, or using the Inloop API, you agree
+          By creating an account, installing the Handback Recorder, or using the Handback API, you agree
           to these terms. If you are agreeing on behalf of a company, you confirm you have the
-          authority to bind it. If you don't agree, don't use the service. Inloop is operated by Sal
+          authority to bind it. If you don't agree, don't use the service. Handback is operated by Sal
           Aiello ("we", "us").
         </p>
       </Section>
 
-      <Section heading="2. What Inloop is">
+      <Section heading="2. What Handback is">
         <p>
-          Inloop records narrated walkthroughs of software problems — screen, voice, and the page
+          Handback records narrated walkthroughs of software problems — screen, voice, and the page
           context around them — uploads them to a shared workspace, and makes them available to your
           team and to coding agents that hold your organization's API tokens.
         </p>
@@ -26,9 +26,9 @@ export function TermsPage() {
 
       <Section heading="3. This is early software">
         <Notice>
-          Inloop is in alpha. There is no uptime commitment, no support commitment, and no
+          Handback is in alpha. There is no uptime commitment, no support commitment, and no
           guarantee that data you store will survive. Features can change or disappear. Do not make
-          Inloop the only copy of anything you cannot afford to lose.
+          Handback the only copy of anything you cannot afford to lose.
         </Notice>
         <p>
           One specific gap you should know about today: there is no self-service password reset. If
@@ -48,7 +48,7 @@ export function TermsPage() {
 
       <Section heading="5. What you record — read this one">
         <Notice>
-          You are responsible for having the right to record everything you capture. Inloop records
+          You are responsible for having the right to record everything you capture. Handback records
           your screen and your microphone; it cannot tell whose data is on that screen or whose
           voice is in the room.
         </Notice>
@@ -103,14 +103,14 @@ export function TermsPage() {
 
       <Section heading="8. Our content">
         <p>
-          The Inloop name, mark, interface, and source code remain ours. Using the service doesn't
+          The Handback name, mark, interface, and source code remain ours. Using the service doesn't
           transfer any of it to you.
         </p>
       </Section>
 
       <Section heading="9. Fees">
         <p>
-          Inloop is free during alpha. The pricing shown on our site describes intended plans and is
+          Handback is free during alpha. The pricing shown on our site describes intended plans and is
           not an offer — no paid plan is live and nothing is being charged. Should that change, you
           will be told before any charge, and you can stop using the service instead.
         </p>
@@ -155,7 +155,7 @@ export function TermsPage() {
         <p>
           We may change the service or these terms. When the terms change, the date at the top of
           this page changes; material changes will be communicated directly. Continuing to use
-          Inloop after a change means you accept it.
+          Handback after a change means you accept it.
         </p>
       </Section>
 

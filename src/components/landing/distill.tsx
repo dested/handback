@@ -34,7 +34,7 @@ export function Distill() {
       <SectionLabel>The hard part</SectionLabel>
       <SectionHeading>Video is the worst thing you can hand a model.</SectionHeading>
       <p className="text-muted-foreground mt-6 max-w-2xl text-lg leading-relaxed">
-        Ninety seconds of screen capture is thousands of pictures of almost the same thing. Inloop
+        Ninety seconds of screen capture is thousands of pictures of almost the same thing. Handback
         throws away the frames that say nothing, keeps the ones that do — and it decides while
         you’re still recording.
       </p>

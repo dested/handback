@@ -7,13 +7,13 @@ import { defineConfig, devices } from '@playwright/test'
 const PORT = 3100
 const baseURL = `http://localhost:${PORT}`
 const DATABASE_URL =
-  process.env.E2E_DATABASE_URL ?? 'postgres://postgres:postgres@localhost:5432/inloop_test'
+  process.env.E2E_DATABASE_URL ?? 'postgres://postgres:postgres@localhost:5432/handback_test'
 
 // The server's env schema requires S3 credentials at boot; e2e never uploads,
 // so dummies are fine (any test that touched S3 would fail loudly instead).
 const S3_ENV = {
   AWS_REGION: process.env.AWS_REGION ?? 'us-west-2',
-  S3_BUCKET: process.env.S3_BUCKET ?? 'inloop-files',
+  S3_BUCKET: process.env.S3_BUCKET ?? 'handback-files',
   AWS_ACCESS_KEY_ID: process.env.AWS_ACCESS_KEY_ID ?? 'e2e-dummy',
   AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY ?? 'e2e-dummy',
 }

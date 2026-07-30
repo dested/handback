@@ -199,7 +199,7 @@ const tokensRouter = router({
     .input(z.object({ orgId: z.string(), name: z.string().trim().min(1).max(80) }))
     .mutation(async ({ ctx, input }) => {
       await requireMembership(ctx.session.user.id, input.orgId)
-      const raw = `ilp_${randomBytes(24).toString('base64url')}`
+      const raw = `hb_${randomBytes(24).toString('base64url')}`
       await prisma.apiToken.create({
         data: {
           orgId: input.orgId,

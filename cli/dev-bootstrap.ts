@@ -9,8 +9,8 @@ import { auth } from '../server/auth'
 import { slugify } from '../server/membership'
 import { prisma } from '../server/prisma'
 
-const email = process.argv[2] ?? 'dev@inloop.local'
-const password = process.argv[3] ?? 'inloop-dev-password'
+const email = process.argv[2] ?? 'dev@handback.local'
+const password = process.argv[3] ?? 'handback-dev-password'
 const orgName = process.argv[4] ?? 'Dev Org'
 
 let user = await prisma.user.findUnique({ where: { email } })
@@ -43,7 +43,7 @@ if (!membership) {
   console.log(`org "${membership.org.name}" already exists`)
 }
 
-const raw = `ilp_${randomBytes(24).toString('base64url')}`
+const raw = `hb_${randomBytes(24).toString('base64url')}`
 await prisma.apiToken.create({
   data: {
     orgId: membership.orgId,

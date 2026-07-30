@@ -9,7 +9,7 @@ import { Pricing } from '~/components/landing/pricing'
 // Renders straight into <main> with no container: each section is full-bleed and
 // centres its own copy. Header and footer come from app/layout.tsx.
 //
-// The order is one argument, told once: here's the loop (how) → here's the part
+// The order is one argument, told once: here's the handback (how) → here's the part
 // that makes it possible (distill) → here's what you end up with (manifest) →
 // here's what the agent reads (agent view). Every section carries the same demo
 // gripe, so a fast scroller sees one bug, not five examples.

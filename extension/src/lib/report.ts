@@ -24,7 +24,7 @@ import { dateTime, hhmm, mmss, recDirName } from './format';
  * several takes; they are laid end to end and the seams never surface in the prose. Each
  * take owns a `rec-NN/` subtree, and this file is what prefixes those paths.
  *
- * Inloop difference from the original: there is no local folder. The same paths are
+ * Handback difference from the original: there is no local folder. The same paths are
  * uploaded as the gripe's file set and handed back by the `get_gripe` MCP tool, so the
  * report opens by naming the gripe rather than a directory on somebody's disk.
  */
@@ -79,7 +79,7 @@ function preamble(hasParts: boolean): string {
 function gripeLines(url?: string): string[] {
   if (!url) return [];
   return [
-    `**This gripe:** \`${url}\` — pull the images, video, and per-take JSON with the inloop MCP tool \`get_gripe\`; every path below is one of the files it returns.`,
+    `**This gripe:** \`${url}\` — pull the images, video, and per-take JSON with the handback MCP tool \`get_gripe\`; every path below is one of the files it returns.`,
     '',
   ];
 }
@@ -539,7 +539,7 @@ function sheetsOverlap(sheets: { from: number; to: number }[]): boolean {
 /**
  * One report for the whole gripe, in axis order: every moment of the walkthrough on a
  * single clock, exactly as the human left them after editing. `url` is the gripe's
- * page in the Inloop workspace, printed when the caller knows it.
+ * page in the Handback workspace, printed when the caller knows it.
  */
 export function buildReport(session: Session, recordings: Recording[], url?: string): string {
   const spans = partSpans(recordings);
@@ -633,7 +633,7 @@ export function buildReport(session: Session, recordings: Recording[], url?: str
   out.push('---');
   out.push('');
   out.push(
-    `<sub>Recorded with the Inloop Recorder. Machine-readable copy: ${machine}. Full listing of this gripe: \`MANIFEST.txt\`.</sub>`,
+    `<sub>Recorded with the Handback Recorder. Machine-readable copy: ${machine}. Full listing of this gripe: \`MANIFEST.txt\`.</sub>`,
   );
   out.push('');
   return out.join('\n');
@@ -646,7 +646,7 @@ export function buildTranscriptTxt(rec: RecordingMeta): string {
 }
 
 /**
- * One take, machine-readable. The shape is frozen by two readers: the Inloop viewer
+ * One take, machine-readable. The shape is frozen by two readers: the Handback viewer
  * and `cli/push.ts`, which re-derives a gripe's takes from these files when somebody
  * pushes a downloaded folder back up.
  */
@@ -767,7 +767,7 @@ export function buildManifestTxt(
   }
 
   const lines = [
-    `source: inloop recorder — ${session.name}`,
+    `source: handback recorder — ${session.name}`,
     ...(url ? [`gripe: ${url}`] : []),
     `recorded: ${dateTime(session.createdAt)} | ${parts.length} part(s) | ${session.origin}`,
     'note: every path below is relative to this gripe',
@@ -810,7 +810,7 @@ export function agentPrompt(session: Session, url?: string, parts = session.recC
     ? 'The images are the evidence — read the contact sheets first, then the timeline, look at every screenshot, and where the words and the frames disagree, believe the frames.'
     : 'Look at every image, then fix what it describes.';
   if (url) {
-    return `The gripe is at ${url} — pull the full brief with the inloop MCP tool \`get_gripe\`, then fix what it describes. I recorded it against the running app: ${what}, in the order they happened. Its \`report.md\` is authored for you. ${evidence}`;
+    return `The gripe is at ${url} — pull the full brief with the handback MCP tool \`get_gripe\`, then fix what it describes. I recorded it against the running app: ${what}, in the order they happened. Its \`report.md\` is authored for you. ${evidence}`;
   }
-  return `Pull my newest gripe with the inloop MCP tools (\`list_gripes\`, then \`get_gripe\`) and fix what it describes — "${session.name}", recorded against the running app: ${what}, in the order they happened. Its \`report.md\` is authored for you. ${evidence}`;
+  return `Pull my newest gripe with the handback MCP tools (\`list_gripes\`, then \`get_gripe\`) and fix what it describes — "${session.name}", recorded against the running app: ${what}, in the order they happened. Its \`report.md\` is authored for you. ${evidence}`;
 }

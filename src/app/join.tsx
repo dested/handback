@@ -4,7 +4,7 @@
 
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Link, useNavigate, useParams, useRouteLoaderData } from 'react-router-dom'
-import { LoopMark } from '~/components/logo'
+import { ReturnMark } from '~/components/logo'
 import { Button } from '~/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '~/components/ui/card'
 import { useActiveOrg } from '~/lib/org'
@@ -54,7 +54,7 @@ export function JoinPage() {
       ) : (
         <Card>
           <CardHeader className="items-center text-center">
-            <LoopMark className="mx-auto h-6" />
+            <ReturnMark className="mx-auto h-6" />
             <CardTitle className="font-display text-2xl leading-snug font-semibold">
               You're invited to join {inviteQuery.data.orgName}
             </CardTitle>

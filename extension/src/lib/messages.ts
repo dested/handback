@@ -18,7 +18,7 @@ export type Request =
   | { type: 'session:delete'; id: string }
   // Handed off and finished: no more takes land here, and the panel goes blank
   // until the next recording opens a fresh one. `uploadedUrl` is set when the
-  // close followed a successful push to Inloop.
+  // close followed a successful push to Handback.
   | { type: 'session:close'; id: string; uploadedUrl?: string }
   | { type: 'state:get' }
   // The panel minted `id` and got the screen share; this opens the part inside

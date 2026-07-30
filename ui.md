@@ -1,13 +1,13 @@
-# Inloop — UI
+# Handback — UI
 
 > Visual-language source of truth. Follow exactly; deviations are bugs.
-> Last updated: 2026-07-29.
+> Last updated: 2026-07-30.
 
 ## The one law
 
 **Light only. No dark mode. Nothing orange.** Sal's words: "no more of this
 fucking dark mode and orange." There is no `.dark` variant, no
-`prefers-color-scheme` handling, no orange or near-orange hue anywhere. Inloop
+`prefers-color-scheme` handling, no orange or near-orange hue anywhere. Handback
 must never resemble the Gripe extension's dark/orange look.
 
 ## Concept
@@ -47,9 +47,12 @@ Loaded via Google Fonts in `index.html`. Do not add other font families.
 
 ## Motifs
 
-- **The loop mark** — `src/components/logo.tsx`: two interlocked circle
-  outlines (ink + cobalt) beside the lowercase Fraunces wordmark `inloop`.
-  Never redraw it ad hoc; import it.
+- **The return mark** — `src/components/logo.tsx` (`ReturnMark`): one
+  returning stroke — out along the top in ink, U-turn, back in cobalt with an
+  arrowhead landing left — beside the lowercase Fraunces wordmark `handback`.
+  Never redraw it ad hoc; import it. Oversized restatement for the landing
+  watermark: `landing/return-diagram.tsx`. Extension icons render the same
+  geometry (`extension/scripts/make-icons.mjs` maps the 28×20 viewBox).
 - **Hairline rules** — sections divide with 1px `--border` lines (`.rule`),
   like ledger paper. Prefer rules over boxes; prefer boxes over shadows.
 - **The stamp** (`.stamp`) — tilted, letterspaced, bordered mono label. Used

@@ -11,7 +11,7 @@ import { useCopy } from './use-copy'
 function agentBrief(gripe: Gripe): string {
   return (
     `Read the gripe "${gripe.title}" at ${window.location.origin}/gripes/${gripe.id}. ` +
-    `Pull the full brief with the inloop MCP tool get_gripe("${gripe.id}") — the report.md ` +
+    `Pull the full brief with the handback MCP tool get_gripe("${gripe.id}") — the report.md ` +
     `inside is authored for you, follow it. When your fix is up, set the gripe to in_review ` +
     `with set_gripe_status.`
   )

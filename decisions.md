@@ -1,6 +1,23 @@
-# Inloop — Decisions
+# Handback — Decisions
 
 > ADR-lite: what was decided, why, what was rejected. Append-only.
+
+## 2026-07-30 — Renamed to "Handback" at handback.dev (supersedes 2026-07-29 "Named Inloop")
+**Why:** Sal bought handback.dev and called the rename same-day. The name states the product's
+moment more precisely than the loop metaphor: the agent does the work and *hands it back* for a
+human sign-off. Everything machine-facing renamed with it while nobody has signed up and breakage
+is free: `hb_` token prefix, `HANDBACK_TOKEN`/`HANDBACK_SERVER`, IndexedDB `handback-recorder`,
+localStorage `handback.activeOrgId`, e2e DB `handback_test`, MCP name `handback`, bucket
+`handback-files` (Drydock will provision it — spec in `G:\code\drydock\plans\2026-07-30-s3-buckets.md`),
+GitHub dested/handback. New identity: **the return mark** — one stroke out in ink, back in cobalt
+with an arrowhead (Sal picked "A — the return" from four candidates); `LoopDiagram` became
+`ReturnDiagram`. Copy dropped the loop language: title "Handback — agents fix it, humans sign
+off", stamp "SIGNED OFF BY A HUMAN", footer "Every fix, handed back.", CTA "Nothing ships without
+you."
+**Rejected:** keeping `ilp_`/`INLOOP_*` for compatibility (zero users to be compatible with; a
+half-renamed codebase forever), keeping the interlocked-circles mark under the new name (it
+illustrates the old name), renaming the local folder `G:\code\inloop` (deferred by Sal),
+migrating `inloop-files` data (nothing in it worth moving).
 
 ## 2026-07-30 — Landing examples are live DOM, keyframes are SVG, one demo gripe throughout
 **Why:** Sal wanted screenshots and examples ("go hard man, examples"). There is no real gripe

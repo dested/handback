@@ -16,18 +16,18 @@ interface Stroke {
 
 declare global {
   interface Window {
-    __inloopContent?: boolean;
+    __handbackContent?: boolean;
   }
 }
 
-if (!window.__inloopContent) {
-  window.__inloopContent = true;
+if (!window.__handbackContent) {
+  window.__handbackContent = true;
   boot();
 }
 
 function boot() {
-  const PAGE_EVENT = 'inloop:page-event';
-  const PAGE_NAV = 'inloop:page-nav';
+  const PAGE_EVENT = 'handback:page-event';
+  const PAGE_NAV = 'handback:page-nav';
   const POINTER_MS = 120; // pointer reports while recording — the frame sampler runs at 500ms
 
   let overlay: Overlay | null = null;

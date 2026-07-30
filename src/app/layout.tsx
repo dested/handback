@@ -36,7 +36,7 @@ function MarketingHeader({ signedIn }: { signedIn: boolean }) {
   return (
     <header className="border-border border-b">
       <nav className="mx-auto flex max-w-6xl items-center gap-6 px-6 py-4">
-        <Link to="/" aria-label="Inloop home">
+        <Link to="/" aria-label="Handback home">
           <Wordmark />
         </Link>
         <div className="ml-auto flex items-center gap-5 text-sm">
@@ -84,7 +84,7 @@ function AppHeader({ email }: { email: string }) {
   return (
     <header className="border-border bg-card border-b">
       <nav className="mx-auto flex max-w-6xl items-center gap-4 px-6 py-3">
-        <Link to="/app" aria-label="Inloop inbox">
+        <Link to="/app" aria-label="Handback inbox">
           <Wordmark />
         </Link>
         {orgs.length > 1 && org && (
@@ -133,14 +133,14 @@ function MarketingFooter() {
     <footer className="border-border mt-24 border-t">
       <div className="text-muted-foreground mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-6 py-8 text-sm">
         <Wordmark className="text-foreground" />
-        <span>Humans in the loop.</span>
+        <span>Every fix, handed back.</span>
         <Link className="hover:text-foreground" to="/privacy">
           Privacy
         </Link>
         <Link className="hover:text-foreground" to="/terms">
           Terms
         </Link>
-        <span className="ml-auto">© 2026 Inloop</span>
+        <span className="ml-auto">© 2026 Handback</span>
       </div>
     </footer>
   )

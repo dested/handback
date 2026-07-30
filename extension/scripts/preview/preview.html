@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light" />
-    <title>Inloop — layout preview</title>
+    <title>Handback — layout preview</title>
     <script>
       /**
        * Layout harness. Two jobs, in this order, before the panel bundle is allowed
@@ -12,7 +12,7 @@
        * so it has a gripe to draw.
        *
        * The stub is a fake service worker, not a fixture: `state:get` reads the same
-       * 'inloop-recorder' database the real worker reads, and every mutation in the
+       * 'handback-recorder' database the real worker reads, and every mutation in the
        * Request union is applied to it the way src/background does. Dragging and
        * deleting therefore survive a refresh instead of snapping back, which is the
        * only way the timeline can be judged here.
@@ -29,8 +29,8 @@
       const SETTINGS = {
         drawStart: true,
         lang: '',
-        serverUrl: 'https://inloop.dested.com',
-        apiToken: 'ilp_preview_000000000000',
+        serverUrl: 'https://handback.dev',
+        apiToken: 'hb_preview_000000000000',
       };
 
       // ── synthesis ─────────────────────────────────────────────────────────
@@ -274,7 +274,7 @@
                 origin: 'http://localhost:3995',
                 recCount: 1,
                 closed: true,
-                uploadedUrl: 'https://inloop.dested.com/g/nav-collapses-on-ipad',
+                uploadedUrl: 'https://handback.dev/g/nav-collapses-on-ipad',
               },
             ];
 
@@ -338,7 +338,7 @@
       // ── IndexedDB, opened exactly like src/lib/db.ts ───────────────────────
       const open = () =>
         new Promise((resolve, reject) => {
-          const request = indexedDB.open('inloop-recorder', 1);
+          const request = indexedDB.open('handback-recorder', 1);
           request.onupgradeneeded = () => {
             const db = request.result;
             if (!db.objectStoreNames.contains('sessions')) db.createObjectStore('sessions', { keyPath: 'id' });
@@ -576,7 +576,7 @@
           id: 'preview',
           lastError: undefined,
           getURL: (path) => `/${String(path).replace(/^\//, '')}`,
-          getManifest: () => ({ version: '1.0.0', name: 'Inloop Recorder (preview)' }),
+          getManifest: () => ({ version: '1.0.0', name: 'Handback Recorder (preview)' }),
           sendMessage: async (message) => {
             const answer = await handle(message);
             // The worker broadcasts after every mutation; without it the panel keeps

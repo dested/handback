@@ -1,13 +1,13 @@
-// inloop push — upload a recorded gripe folder to the Inloop workspace.
+// handback push — upload a recorded gripe folder to the Handback workspace.
 //
-//   bun cli/push.ts <gripe-folder> [--server http://localhost:3995] [--token ilp_...]
+//   bun cli/push.ts <gripe-folder> [--server http://localhost:3995] [--token hb_...]
 //
 // The folder is what the recorder wrote: report.md + MANIFEST.txt at the root,
 // one rec-NN/ per take (recording.json, transcript.txt, frames/, grids/,
 // walkthrough.webm). Metadata comes from each rec-NN/recording.json; files
 // stream to S3 through presigned PUTs handed out by the declare call.
 //
-// Token comes from --token or the INLOOP_TOKEN env var.
+// Token comes from --token or the HANDBACK_TOKEN env var.
 
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { basename, join } from 'node:path'
@@ -27,7 +27,7 @@ const CONTENT_TYPES: Record<string, string> = {
 const UPLOAD_CONCURRENCY = 6
 
 function fail(message: string): never {
-  console.error(`inloop push: ${message}`)
+  console.error(`handback push: ${message}`)
   process.exit(1)
 }
 
@@ -55,13 +55,13 @@ const flag = (name: string) => {
   return i >= 0 ? args[i + 1] : undefined
 }
 
-if (!folder) fail('usage: bun cli/push.ts <gripe-folder> [--server url] [--token ilp_...]')
-const server = (flag('server') ?? process.env.INLOOP_SERVER ?? 'http://localhost:3995').replace(
+if (!folder) fail('usage: bun cli/push.ts <gripe-folder> [--server url] [--token hb_...]')
+const server = (flag('server') ?? process.env.HANDBACK_SERVER ?? 'http://localhost:3995').replace(
   /\/+$/,
   ''
 )
-const token = flag('token') ?? process.env.INLOOP_TOKEN
-if (!token) fail('no API token — pass --token or set INLOOP_TOKEN')
+const token = flag('token') ?? process.env.HANDBACK_TOKEN
+if (!token) fail('no API token — pass --token or set HANDBACK_TOKEN')
 
 const files = walk(folder)
 if (files.length === 0) fail(`${folder} is empty`)

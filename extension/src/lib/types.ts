@@ -4,7 +4,7 @@
  * that survived dedup, and what the page complained about while it was running.
  *
  * Semantics are ported from the original Gripe extension and must not drift —
- * the Inloop cloud viewer and report reader consume exactly these shapes.
+ * the Handback cloud viewer and report reader consume exactly these shapes.
  */
 
 export interface PageEvent {
@@ -136,7 +136,7 @@ export interface Session {
   recCount: number;
   /** Handed off and finished. A closed session never receives another part; activating it reopens it. */
   closed?: boolean;
-  /** Set once the gripe uploaded to Inloop — the cloud viewer URL. */
+  /** Set once the gripe uploaded to Handback — the cloud viewer URL. */
   uploadedUrl?: string;
 }
 
@@ -152,9 +152,9 @@ export interface Settings {
   /** Start every recording with the on-page ink active — draw first, click through on demand. */
   drawStart: boolean;
   lang: string;
-  /** The Inloop workspace this extension uploads to. */
+  /** The Handback workspace this extension uploads to. */
   serverUrl: string;
-  /** Bearer token (ilp_…) minted under Team → API tokens. Stored locally only. */
+  /** Bearer token (hb_…) minted under Team → API tokens. Stored locally only. */
   apiToken: string;
   /**
    * Transcribe in this browser instead of on the workspace. Slower by minutes
@@ -167,12 +167,12 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   drawStart: true,
   lang: '',
-  serverUrl: 'https://inloop.dested.com',
+  serverUrl: 'https://handback.dev',
   apiToken: '',
   onDeviceTranscription: false,
 };
 
-/** The reviewer's-pen cobalt — Inloop's one accent. Never orange, never dark UI. */
+/** The reviewer's-pen cobalt — Handback's one accent. Never orange, never dark UI. */
 export const COBALT = '#2f56d8';
 
 /** Contact sheet shape. The sheet builder and the report that cites the sheets must agree. */

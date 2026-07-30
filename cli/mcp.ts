@@ -1,6 +1,6 @@
-// inloop mcp — a stdio MCP server that lets a coding agent pull gripes.
+// handback mcp — a stdio MCP server that lets a coding agent pull gripes.
 //
-//   claude mcp add inloop --env INLOOP_TOKEN=ilp_... -- bun /abs/path/cli/mcp.ts
+//   claude mcp add handback --env HANDBACK_TOKEN=hb_... -- bun /abs/path/cli/mcp.ts
 //
 // Three tools over the token-authed read API in server/ingest.ts: list the
 // team's gripes, pull one gripe's full brief (report.md + presigned URLs for
@@ -13,16 +13,16 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
 
-const DEFAULT_SERVER = 'https://inloop.dested.com'
+const DEFAULT_SERVER = 'https://handback.dev'
 
 // A gripe can carry thousands of keyframes; dumping every URL would bury the
 // report. The agent gets a workable sample and the endpoint to page the rest.
 const MAX_FRAMES = 30
 
-const server = (process.env.INLOOP_SERVER ?? DEFAULT_SERVER).replace(/\/+$/, '')
-const token = process.env.INLOOP_TOKEN
+const server = (process.env.HANDBACK_SERVER ?? DEFAULT_SERVER).replace(/\/+$/, '')
+const token = process.env.HANDBACK_TOKEN
 if (!token) {
-  console.error('inloop mcp: no API token — set INLOOP_TOKEN (an ilp_... token from Settings)')
+  console.error('handback mcp: no API token — set HANDBACK_TOKEN (an hb_... token from Settings)')
   process.exit(1)
 }
 
@@ -41,7 +41,7 @@ type ToolResult = {
   isError?: boolean
 }
 
-const mcp = new McpServer({ name: 'inloop', version: '0.1.0' })
+const mcp = new McpServer({ name: 'handback', version: '0.1.0' })
 
 /**
  * Typed shim over `mcp.registerTool`. The SDK's own generics blow the
@@ -185,4 +185,4 @@ registerTool(
 )
 
 await mcp.connect(new StdioServerTransport())
-console.error(`inloop mcp: ready (${server})`)
+console.error(`handback mcp: ready (${server})`)

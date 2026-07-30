@@ -214,7 +214,7 @@ function FirstRun() {
 /** Org exists, inbox is genuinely empty: how to get a gripe in here. */
 function FirstGripeGuide() {
   // window is absent during SSR; render a placeholder host, then fill it in.
-  const [origin, setOrigin] = useState('https://your-inloop-host')
+  const [origin, setOrigin] = useState('https://your-handback-host')
   useEffect(() => setOrigin(window.location.origin), [])
 
   return (
@@ -236,7 +236,7 @@ function FirstGripeGuide() {
           <div className="min-w-0">
             <p>Push a recorded gripe folder:</p>
             <pre className="border-border bg-muted/60 mt-2 overflow-x-auto rounded-md border p-3 font-mono text-xs">
-              INLOOP_TOKEN=ilp_… bun cli/push.ts &lt;gripe-folder&gt; --server {origin}
+              HANDBACK_TOKEN=hb_… bun cli/push.ts &lt;gripe-folder&gt; --server {origin}
             </pre>
           </div>
         </li>

@@ -6,11 +6,11 @@
  * breaking the host page.
  */
 (() => {
-  if (window.__inloopTap) return;
-  window.__inloopTap = true;
+  if (window.__handbackTap) return;
+  window.__handbackTap = true;
 
-  const TAG = 'inloop:page-event';
-  const NAV_TAG = 'inloop:page-nav';
+  const TAG = 'handback:page-event';
+  const NAV_TAG = 'handback:page-nav';
   const MAX_LEN = 2000;
   const NAV_THROTTLE_MS = 500; // a router that fires three times per route change is still one navigation
 

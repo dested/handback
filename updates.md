@@ -1,6 +1,15 @@
-# Inloop — Updates
+# Handback — Updates
 
 > Terse log of every task: what was asked → what was done. Newest first.
+
+## 2026-07-30 — renamed Inloop → Handback (handback.dev)
+Asked: "change the name from inloop to handback. its handback.dev" (+ rename all identifiers, new
+bucket via Drydock, GitHub rename, redesign the logo now). Done: full sweep by 3 Opus agents +
+Fable (hb_ tokens, HANDBACK_* env, handback-recorder/handback_test/handback.activeOrgId, MCP name,
+all copy de-looped); new return mark (logo.tsx, return-diagram.tsx, regenerated icons); GitHub →
+dested/handback; dev DB reseeded; Drydock S3 spec written (drydock repo); both typechecks green.
+Per plans/2026-07-30-handback-rename.md — infra checklist pending on Sal.
+Touched: ~55 files across server/, cli/, src/, extension/, docs kit.
 
 ## 2026-07-30 — landing page rebuilt around one worked example
 Asked: "website's really cool but it needs screenshots and examples… these people are lazy and

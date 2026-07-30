@@ -1,5 +1,5 @@
 // Team surfaces for the active org: who's in it, who's been invited, and the
-// API tokens that let `bun cli/push.ts` and the inloop MCP server talk to it.
+// API tokens that let `bun cli/push.ts` and the handback MCP server talk to it.
 
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -405,7 +405,7 @@ function TokensTab({ org }: { org: OrgSummary }) {
     <div className="space-y-8">
       <p className="text-muted-foreground max-w-2xl text-sm">
         These tokens authenticate <span className="font-mono text-xs">bun cli/push.ts</span> and the
-        inloop MCP server; they are yours alone and only work against {org.name}.
+        handback MCP server; they are yours alone and only work against {org.name}.
       </p>
 
       <section className="space-y-3">

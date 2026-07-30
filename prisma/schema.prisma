@@ -206,7 +206,7 @@ model GripeFile {
   @@map("gripe_file")
 }
 
-// Bearer tokens for the CLI / extension / MCP (`ilp_...`). Only the sha256
+// Bearer tokens for the CLI / extension / MCP (`hb_...`). Only the sha256
 // hash is stored; lastFour is for display.
 model ApiToken {
   id         String    @id @default(uuid())

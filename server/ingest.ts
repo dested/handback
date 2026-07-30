@@ -7,7 +7,7 @@
 //
 // Re-declaring the same (org, slug) replaces the previous upload wholesale:
 // old rows cascade away and the old S3 prefix is deleted. Auth is a bearer
-// ApiToken (`ilp_...`); the token pins the org.
+// ApiToken (`hb_...`); the token pins the org.
 //
 // The read side is what an agent pulls through `cli/mcp.ts`:
 //
@@ -87,7 +87,7 @@ type TokenAuth = { orgId: string; userId: string; tokenId: string }
 async function authenticate(req: Request): Promise<TokenAuth | null> {
   const header = req.header('authorization') ?? ''
   const raw = header.startsWith('Bearer ') ? header.slice(7).trim() : ''
-  if (!raw.startsWith('ilp_')) return null
+  if (!raw.startsWith('hb_')) return null
   const tokenHash = createHash('sha256').update(raw).digest('hex')
   const token = await prisma.apiToken.findUnique({ where: { tokenHash } })
   if (!token || token.revokedAt) return null

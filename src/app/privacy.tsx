@@ -5,12 +5,12 @@ export function PrivacyPage() {
     <LegalPage
       title="Privacy"
       updated="July 30, 2026"
-      summary="Inloop stores recordings of your screen and your voice. This page says exactly what we keep, where it lives, who can reach it, and how to get rid of it.">
+      summary="Handback stores recordings of your screen and your voice. This page says exactly what we keep, where it lives, who can reach it, and how to get rid of it.">
       <Section heading="Who this covers">
         <p>
-          Inloop is operated by Sal Aiello. This policy covers the Inloop web app at
-          inloop.dested.com, the Inloop Recorder Chrome extension, and the command-line and MCP
-          tools that talk to the same API. Inloop is a workspace for teams: almost everything you
+          Handback is operated by Sal Aiello. This policy covers the Handback web app at
+          handback.dev, the Handback Recorder Chrome extension, and the command-line and MCP
+          tools that talk to the same API. Handback is a workspace for teams: almost everything you
           put into it is visible to the other members of your organization, by design.
         </p>
       </Section>
@@ -158,7 +158,7 @@ export function PrivacyPage() {
 
       <Section heading="Children">
         <p>
-          Inloop is a tool for software teams and is not directed at children. Do not create an
+          Handback is a tool for software teams and is not directed at children. Do not create an
           account if you are under 16.
         </p>
       </Section>

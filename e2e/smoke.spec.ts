@@ -7,7 +7,7 @@ const USER = { name: 'Ada Lovelace', email: 'ada@example.com', password: 'passwo
 test('landing page renders for a signed-out visitor', async ({ page }) => {
   await page.goto('/')
   await expect(
-    page.getByRole('heading', { name: /Your agents ship\. You stay in the loop\./ })
+    page.getByRole('heading', { name: /Your agents ship\. The last word is yours\./ })
   ).toBeVisible()
   await expect(page.getByRole('link', { name: 'Sign in', exact: true })).toBeVisible()
   // Fonts arrive from Google Fonts; give the render a beat before the pixel diff.

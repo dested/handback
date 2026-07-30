@@ -6,7 +6,7 @@ import type { Recording, Session } from './types';
  * memory. Fresh product, fresh database — no legacy migrations.
  */
 
-const DB_NAME = 'inloop-recorder';
+const DB_NAME = 'handback-recorder';
 const DB_VERSION = 1;
 
 export const STORE = {

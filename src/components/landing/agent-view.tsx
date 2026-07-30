@@ -34,7 +34,7 @@ export function AgentView() {
         {/* min-w-0: grid items default to min-content, and the <pre> below never
             wraps — without this it drags the whole page wider than the phone. */}
         <div className="min-w-0 space-y-8">
-          <Pane label="claude code" meta="inloop mcp">
+          <Pane label="claude code" meta="handback mcp">
             <div className="space-y-2.5 p-4 font-mono text-[0.72rem] leading-relaxed">
               <p>
                 <span className="text-cobalt select-none">▸ </span>
@@ -74,7 +74,7 @@ export function AgentView() {
             <pre className="bg-background mt-3 overflow-x-auto rounded-md border px-3.5 py-3 font-mono text-[0.72rem]">
               <code>
                 <span className="text-cobalt select-none">$ </span>
-                claude mcp add inloop --env INLOOP_TOKEN=ilp_… -- bun cli/mcp.ts
+                claude mcp add handback --env HANDBACK_TOKEN=hb_… -- bun cli/mcp.ts
               </code>
             </pre>
           </div>

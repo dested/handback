@@ -1,9 +1,9 @@
 {
-  "name": "inloop-extension",
+  "name": "handback-extension",
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "Inloop Recorder — narrate what's broken, sanitize the timeline, and the gripe lands in your team's inbox for an agent to fix.",
+  "description": "Handback Recorder — narrate what's broken, sanitize the timeline, and the gripe lands in your team's inbox for an agent to fix.",
   "scripts": {
     "icons": "node scripts/make-icons.mjs",
     "ort": "node scripts/copy-ort.mjs",

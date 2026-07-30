@@ -20,7 +20,7 @@ export function TakeSection({ take, urlByPath }: { take: Take; urlByPath: Map<st
   const recordingUrl = urlByPath.get(`${take.dir}/recording.json`)
 
   const recording = useQuery({
-    queryKey: ['inloop.recording', take.id],
+    queryKey: ['handback.recording', take.id],
     enabled: recordingUrl !== undefined,
     staleTime: Infinity,
     retry: 1,

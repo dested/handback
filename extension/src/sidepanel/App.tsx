@@ -37,7 +37,7 @@ import './panel.css';
  *
  * There is no folder. Where the original wrote a gripe through to disk as each take
  * finished, this builds the same file set in memory at `done` and pushes it to the
- * Inloop workspace — so nothing lands anywhere until the human says the gripe is
+ * Handback workspace — so nothing lands anywhere until the human says the gripe is
  * finished, and what lands is exactly what the timeline showed them.
  */
 
@@ -461,7 +461,7 @@ export function App() {
     }
     if (!state.settings.apiToken.trim()) {
       setShowSettings(true);
-      setUploadError('paste your Inloop API token below — that is where the gripe goes');
+      setUploadError('paste your Handback API token below — that is where the gripe goes');
       return;
     }
     await navigator.clipboard
@@ -651,7 +651,7 @@ export function App() {
     <div className="app">
       <header className="head">
         <Mark />
-        <span className="wordmark">inloop</span>
+        <span className="wordmark">handback</span>
         <span className="spacer" />
         {/* The gripe's own line below says the duration; up here it would only repeat it. */}
         <button className="icon" title="Pop the editor out along the bottom" onClick={() => void popOut()}>
@@ -819,7 +819,7 @@ function SettingsBlock({
         <input
           value={server}
           spellCheck={false}
-          placeholder="https://inloop.dested.com"
+          placeholder="https://handback.dev"
           onChange={(e) => setServer(e.target.value)}
           onBlur={() => commit({ serverUrl: server })}
           onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
@@ -831,7 +831,7 @@ function SettingsBlock({
           type="password"
           value={token}
           spellCheck={false}
-          placeholder="ilp_…"
+          placeholder="hb_…"
           onChange={(e) => setToken(e.target.value)}
           onBlur={() => commit({ apiToken: token })}
           onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}

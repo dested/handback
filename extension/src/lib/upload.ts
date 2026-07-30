@@ -129,9 +129,9 @@ export async function pushGripe(
 ): Promise<UploadResult> {
   const server = normalizeServer(target.serverUrl);
   const token = target.apiToken.trim();
-  if (!server) throw new Error('no Inloop server — set one in settings');
+  if (!server) throw new Error('no Handback server — set one in settings');
   if (!token) throw new Error('no API token — paste one in settings');
-  if (!token.startsWith('ilp_')) throw new Error('that token is not an Inloop token (ilp_…)');
+  if (!token.startsWith('hb_')) throw new Error('that token is not a Handback token (hb_…)');
   if (!recordings.length) throw new Error('nothing recorded yet');
   if (!files.some((f) => f.path === 'report.md')) throw new Error('the report is missing');
 

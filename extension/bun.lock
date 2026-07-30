@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "inloop-extension",
+      "name": "handback-extension",
       "dependencies": {
         "@huggingface/transformers": "^4.2.0",
         "react": "^19.2.0",

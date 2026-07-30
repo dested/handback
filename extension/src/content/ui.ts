@@ -211,7 +211,7 @@ const html = (markup: string): HTMLElement => {
 
 export function createOverlay(): Overlay {
   const host = document.createElement('div');
-  host.id = 'inloop-root';
+  host.id = 'handback-root';
   const shadow = host.attachShadow({ mode: 'open' });
 
   const style = document.createElement('style');

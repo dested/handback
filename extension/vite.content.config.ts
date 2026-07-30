@@ -13,7 +13,7 @@ export default defineConfig({
     cssCodeSplit: false,
     lib: {
       entry: 'src/content/index.ts',
-      name: 'InloopContent',
+      name: 'HandbackContent',
       formats: ['iife'],
       fileName: () => 'content.js',
     },

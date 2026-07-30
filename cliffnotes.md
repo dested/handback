@@ -1,4 +1,4 @@
-# Inloop — CliffNotes
+# Handback — CliffNotes
 
 > Living map of the project. Read this before any coding session.
 > Last updated: 2026-07-30. Visual language → `ui.md` · why → `decisions.md` ·
@@ -18,24 +18,28 @@ routed to projects, and pulled by coding agents. A gripe folder (report.md + MAN
 into S3 + Postgres; the web app is the review surface; an MCP server lets any Claude Code session
 pull the queue. Pitch: **see it → say it → agent fixes it → a human signs off.**
 
-Brand: **Inloop** — humans in the loop. Light-only editorial UI (`ui.md`), nothing orange, nothing
-dark, nothing visually inherited from the Gripe extension.
+Brand: **Handback** (handback.dev, renamed from Inloop 2026-07-30 — see
+`plans/2026-07-30-handback-rename.md`) — the agent hands the work back; a human signs off.
+Light-only editorial UI (`ui.md`), nothing orange, nothing dark, nothing visually inherited from
+the Gripe extension.
 
 ## Quick Reference
 
 - **Dev:** `bun run dev` → http://localhost:3995 (needs `.env`; see Env below)
 - **Type-check:** `bun run typecheck` (`tsgo --noEmit`)
 - **DB:** local Postgres 18 service; `bun run db:push` after schema edits (+`db:generate`)
-- **E2E:** `E2E_DATABASE_URL=postgres://postgres:<pw>@localhost:5432/inloop_test bun run test:e2e`
+- **E2E:** `E2E_DATABASE_URL=postgres://postgres:<pw>@localhost:5432/handback_test bun run test:e2e`
   (isolated DB + port 3100; screenshots committed; `test:e2e:update` to re-baseline)
-- **Seed a dev login:** `bun cli/dev-bootstrap.ts [email] [password] [org]` → prints an `ilp_` token
-- **Push a gripe:** `bun cli/push.ts <gripe-folder> --server http://localhost:3995 --token ilp_…`
+- **Seed a dev login:** `bun cli/dev-bootstrap.ts [email] [password] [org]` → prints an `hb_` token
+- **Push a gripe:** `bun cli/push.ts <gripe-folder> --server http://localhost:3995 --token hb_…`
 - **Extension:** `bun run build:extension` (root) or `cd extension && npm run build` →
   load-unpacked `extension/dist`;
   `npm run preview` → http://localhost:8777/gallery.html (layout harness, no Chrome needed)
-- **MCP:** `claude mcp add inloop --env INLOOP_TOKEN=ilp_… --env INLOOP_SERVER=<url> -- bun <repo>/cli/mcp.ts`
-- **GitHub:** dested/inloop (private). **Deploy: live at https://inloop.dested.com** — Drydock,
-  auto-deploys on every push to `main` (see Deploy below).
+- **MCP:** `claude mcp add handback --env HANDBACK_TOKEN=hb_… --env HANDBACK_SERVER=<url> -- bun <repo>/cli/mcp.ts`
+- **GitHub:** dested/handback (private; renamed from dested/inloop — redirect holds). **Deploy:
+  still live at https://inloop.dested.com until the portal re-wire** — Drydock, auto-deploys on
+  push to `main`; target domain **handback.dev** (checklist in
+  `plans/2026-07-30-handback-rename.md`).
 
 ## Stack
 
@@ -57,7 +61,7 @@ server/
   trpc.ts               context (session from headers) + public/protectedProcedure
   membership.ts         requireMembership(user, org, atLeast) role gate + slugify
   router.ts             THE tRPC API: orgs, invites, tokens, projects, gripes
-  ingest.ts             Token-authed REST (Bearer ilp_…): two-phase upload + agent reads
+  ingest.ts             Token-authed REST (Bearer hb_…): two-phase upload + agent reads
   storage.ts            S3: presignPut/Get, getObjectText, deletePrefix, key layout, isSafePath
   transcribe.ts         speech-to-text via Groq whisper-large-v3-turbo; segments in ms
   prisma.ts / logger.ts PrismaClient singleton · ANSI request logger
@@ -80,7 +84,7 @@ src/
     privacy.tsx         /privacy — what's collected, where it lives, subprocessors
     terms.tsx           /terms — alpha status, recording consent, Arizona law
   components/
-    logo.tsx            LoopMark + Wordmark — THE identity, never redraw
+    logo.tsx            ReturnMark + Wordmark — THE identity (the returning stroke), never redraw
     legal.tsx           LegalPage/Section/Terms/Notice — shared chrome for /privacy + /terms
     ui/                 button, card, input, label (shadcn new-york style, no asChild)
     landing/            hero, how-it-works, distill, gripe-manifest, agent-view, pricing,
@@ -101,7 +105,7 @@ drydock.yaml            DRYDOCK-OWNED — the deploy manifest (portal is source 
 extension/              Inloop Recorder — the Chrome MV3 extension (own npm workspace)
   public/manifest.json  MV3: sidePanel + activeTab/scripting/storage/tabs; hotkeys Alt+Shift+M/D
   src/lib/              Shared contracts: types, messages (worker protocol), timeline math,
-                        db (IndexedDB 'inloop-recorder'), report.md builder, upload (to /api/ingest)
+                        db (IndexedDB 'handback-recorder'), report.md builder, upload (to /api/ingest)
   src/background/       Service worker: hotkeys, dock routing, IndexedDB writes, strip docking
   src/content/          On-page dock (d/c/m/s keys), ink drawing, telemetry; injected.js relay
   src/sidepanel/        Panel app: recorder (getDisplayMedia + dedup), transcription
@@ -126,7 +130,7 @@ extension/              Inloop Recorder — the Chrome MV3 extension (own npm wo
 | `/api/auth/*` · `/api/trpc/*` | better-auth · tRPC | `server.ts` |
 | `/api/ingest/*` | Token-authed REST (below) | `server/ingest.ts` |
 
-### /api/ingest (Bearer `ilp_…` token; org comes from the token)
+### /api/ingest (Bearer `hb_…` token; org comes from the token)
 
 | Endpoint | Does |
 | --- | --- |
@@ -144,38 +148,47 @@ owner/admin/member, unique org+user) · Invite (id IS the join-link token, 7-day
 (originHints[] auto-routes uploads by recorded origin) · **Gripe** (unique org+slug; slug = the
 recorder's folder name; status open/in_review/resolved; finalizedAt gates visibility) ← Take
 (rec-NN) + GripeFile (path unique per gripe; S3 key = `orgs/<orgId>/gripes/<gripeId>/<path>`) ·
-ApiToken (sha256 hash only; `ilp_` prefix; lastUsedAt stamped on ingest auth).
+ApiToken (sha256 hash only; `hb_` prefix since the rename — old `ilp_` tokens are dead;
+lastUsedAt stamped on ingest auth).
 
 ## Storage (S3)
 
-Bucket **inloop-files**, us-west-2, AWS account 114394156384 (profile `dested`), public access
-blocked, CORS allows localhost:3995/3210 + inloop.dested.com. IAM user `inloop-app` scoped to this
-bucket; its keys live in `.env` only. Everything moves via presigned URLs (PUT 1h, GET 1h) —
-`gripes.get` presigns every file in one call so the viewer never round-trips per frame.
+Bucket **handback-files** — DOES NOT EXIST YET: Drydock will provision it (bucket + scoped IAM
+user + CORS + SSM env) per `G:\code\drydock\plans\2026-07-30-s3-buckets.md`; until then every
+upload 403s (dev `.env` already points at it). The old hand-made pair `inloop-files` +
+IAM user `inloop-app` (us-west-2, account 114394156384, profile `dested`) still exists and is
+slated for deletion. Everything moves via presigned URLs (PUT 1h, GET 1h) — `gripes.get` presigns
+every file in one call so the viewer never round-trips per frame.
 
-## Deploy (Drydock → https://inloop.dested.com)
+## Deploy (Drydock — MID-RENAME: old `inloop` project still serving)
+
+**Transition state (2026-07-30):** prod still runs as Drydock project `inloop` at
+https://inloop.dested.com; the repo now says Handback everywhere. Sal's portal checklist to move
+it to **handback.dev** (zone + delegation, project recreate, SSM env, S3 provisioning) lives in
+`plans/2026-07-30-handback-rename.md`. `Dockerfile`/`drydock.yaml`/`.github/workflows/drydock.yml`
+still carry inloop names on purpose — Drydock regenerates all three on re-wire.
 
 Deployed by **Drydock** (`G:\code\drydock`, local portal at http://localhost:4400) onto the shared
-ARM EC2 box: ECS service `drydock-inloop`, Caddy auto-TLS, shared Postgres container, Route53 A
-record → the box's EIP `52.24.94.83`. **Push to `main` = deploy** — the generated workflow builds an
-arm64 image via OIDC (no AWS keys in GitHub), runs `bunx prisma db push` as a one-off pre-deploy
-task, then rolls the service.
+ARM EC2 box: Caddy auto-TLS, shared Postgres container, Route53 A record → the box's EIP
+`52.24.94.83`. **Push to `main` = deploy** — the generated workflow builds an arm64 image via OIDC
+(no AWS keys in GitHub), runs `bunx prisma db push` as a one-off pre-deploy task, then rolls the
+service.
 
-| Setting | Value |
+| Setting | Value (target after re-wire) |
 | --- | --- |
-| project / db name | `inloop` (Postgres db + user `inloop` on the shared container) |
+| project / db name | `handback` (today still `inloop`) |
 | container port | 3995 (`PORT` is injected; `server.ts` reads it) |
 | size | `m` — 192 MiB reservation / 576 MiB hard limit |
 | build / start | `bun run build` / `bun run start` |
 | predeploy | `bunx prisma db push` (no `--accept-data-loss`, on purpose) |
-| domain / zone | `inloop.dested.com` in the shared `dested.com` zone |
+| domain / zone | `handback.dev` (own zone; today still `inloop.dested.com` in `dested.com`) |
 
 **Env lives in SSM**, not `.env`: `DATABASE_URL` + `BETTER_AUTH_SECRET` are generated by Drydock,
-`BETTER_AUTH_URL=https://inloop.dested.com`, and `AWS_REGION` / `S3_BUCKET` /
-`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` are the `inloop-app` IAM user's keys, copied up from
-the local `.env`. Change any of them in the portal (Project → Environment) and hit
-**Apply + redeploy** — CI's task-def registration copies the *previous* revision's secret list, so a
-new key never reaches the container on a plain push.
+`BETTER_AUTH_URL` must equal the serving origin (→ `https://handback.dev`), and `AWS_REGION` /
+`S3_BUCKET` / `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` come from the S3 provisioning (see
+Storage). Change any of them in the portal (Project → Environment) and hit **Apply + redeploy** —
+CI's task-def registration copies the *previous* revision's secret list, so a new key never
+reaches the container on a plain push.
 
 ## Gotchas & hard rules
 
@@ -206,7 +219,7 @@ new key never reaches the container on a plain push.
 - **Raw API tokens are shown once** — only the sha256 lands in the DB. The dev-bootstrap script
   prints a fresh one each run.
 - **Prisma 7**: no `--skip-generate` flag; `prisma.config.ts` hand-loads `.env` — keep that block.
-- **The e2e suite boots its own server** on :3100 against `inloop_test` with dummy S3 creds — any
+- **The e2e suite boots its own server** on :3100 against `handback_test` with dummy S3 creds — any
   test that actually touches S3 will fail loudly (none do today).
 - **Playwright locators**: the empty-inbox guide contains a "Team → API tokens" link; use
   `exact: true` for the nav's "Team".
@@ -214,7 +227,7 @@ new key never reaches the container on a plain push.
   vite builds (panel+worker ESM, then content IIFE with `emptyOutDir:false`). Chrome won't bind
   bare-letter commands, so the dock keys (d/c/m/s) are a window keydown listener in the content
   script; only Alt+Shift+M/D are real `commands`.
-- **Preview harness seeds real IndexedDB** ('inloop-recorder') and stubs `chrome.*` — it shares the
+- **Preview harness seeds real IndexedDB** ('handback-recorder') and stubs `chrome.*` — it shares the
   origin's DB, so a preview tab and the real panel fight if both run on the same profile. Port 8777
   (`PORT` env to move it; the old gripe repo's harness also used 8777).
 - **`Dockerfile`, `drydock.yaml` and `.github/workflows/drydock.yml` are Drydock's** — it overwrites
@@ -222,9 +235,10 @@ new key never reaches the container on a plain push.
 - **`env.ts` parses at import time**, so a missing S3/auth var is a boot crash, not a runtime error —
   and a crash-looping container burns Let's Encrypt's duplicate-cert budget. Set env in SSM *before*
   the deploy that needs it.
-- **S3 CORS is an allowlist of exact origins** (`http://localhost:3995`, `http://localhost:3210`,
-  `https://inloop.dested.com`, `chrome-extension://*`). Browser uploads from any other origin fail at
-  the presigned PUT — update the bucket CORS when a new origin appears.
+- **S3 CORS is an allowlist of exact origins** (`http://localhost:3995`, `https://handback.dev`,
+  `chrome-extension://*` once `handback-files` exists). Browser uploads from any other origin fail
+  at the presigned PUT — CORS is Drydock-regenerated from config after the S3 provisioning lands;
+  extra origins go in the project's `s3CorsOrigins`, never hand-edited on the bucket.
 - **Transcription is server-side by default** (`transcribeCloud.ts` → `/api/ingest/transcribe` →
   Groq). On-device Whisper is the fallback and the privacy escape hatch, not the normal path — see
   `plans/2026-07-30-transcription.md`. Audio leaving the machine is a **privacy-policy fact**: if
@@ -232,8 +246,8 @@ new key never reaches the container on a plain push.
 - **`GROQ_API_KEY` is optional everywhere.** Unset → the endpoint 503s → every recorder silently
   falls back to on-device. Nothing errors, it just gets slow — so "why is transcription taking
   minutes" is a missing-key question first.
-- **Extension uploads with the panel's saved `ilp_` token** (settings → serverUrl+apiToken,
-  defaults to https://inloop.dested.com) through the same two-phase `/api/ingest` flow as the CLI.
+- **Extension uploads with the panel's saved `hb_` token** (settings → serverUrl+apiToken,
+  defaults to https://handback.dev) through the same two-phase `/api/ingest` flow as the CLI.
 
 ## Status
 
@@ -260,9 +274,15 @@ new key never reaches the container on a plain push.
   against prod), a real in-Chrome record→upload run (needs a human), share links / public
   gripe URLs, email sending for invites, billing, server-side transcription, org deletion,
   pagination past 200 gripes, Chrome Web Store listing.
-- **Next** — load-unpacked QA of the extension, then **the go-live blockers in
-  `plans/2026-07-30-go-live.md`** (Chrome Web Store submission first — it's the only queue we don't
-  control), then the strategy backlog in
+- **Done (2026-07-30, night)** — **renamed Inloop → Handback (handback.dev)**: full sweep of code,
+  extension, copy (`hb_` tokens, `HANDBACK_*` env, `handback-recorder` DB, `handback_test`,
+  `handback.activeOrgId`, MCP name); new identity — the **return mark** (`ReturnMark`,
+  `return-diagram.tsx`, regenerated extension icons); GitHub repo renamed dested/handback; e2e
+  baselines re-shot. Infra handoff pending on Sal — `plans/2026-07-30-handback-rename.md`.
+- **Next** — Sal's Drydock/DNS checklist in the rename plan (zone, project, S3 via
+  `G:\code\drydock\plans\2026-07-30-s3-buckets.md`), load-unpacked QA of the extension, then **the
+  go-live blockers in `plans/2026-07-30-go-live.md`** (Chrome Web Store submission first — it's
+  the only queue we don't control), then the strategy backlog in
   `G:\code\gripe\plans\2026-07-29-enterprise-strategy.md`.
 
 ## Plans
@@ -273,3 +293,6 @@ new key never reaches the container on a plain push.
 - `plans/2026-07-30-go-live.md` — **active**. What's required before strangers can sign up:
   password reset/email, upload size caps + quotas, the untested prod S3 round trip, and a full
   Chrome Web Store submission guide (cost, review time, why `<all_urls>` is the slow part).
+  Written pre-rename — read inloop.dested.com there as handback.dev.
+- `plans/2026-07-30-handback-rename.md` — **active**. The Inloop → Handback rename: settled
+  decisions table + Sal's Drydock/DNS checklist (zone, S3, project recreate, SSM, cleanup).

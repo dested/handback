@@ -19,7 +19,7 @@ type OrgContextValue = {
 
 const OrgContext = createContext<OrgContextValue | null>(null)
 
-const STORAGE_KEY = 'inloop.activeOrgId'
+const STORAGE_KEY = 'handback.activeOrgId'
 
 export function OrgProvider({ children, enabled }: { children: ReactNode; enabled: boolean }) {
   const trpc = useTRPC()

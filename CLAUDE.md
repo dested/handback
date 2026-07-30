@@ -6,9 +6,9 @@ records settled choices; don't reverse one silently. Append to `updates.md` when
 
 ## What this is
 
-**Inloop** — the cloud workspace where recorded gripes (narrated screen walkthroughs from the
-Gripe extension) are uploaded to S3/Postgres, reviewed by humans, and pulled by coding agents over
-MCP. Built on dested/sal-starter: Bun · Express 5 + Vite SSR · React Router 7 · tRPC v11 ·
+**Handback** (handback.dev, formerly Inloop) — the cloud workspace where recorded gripes
+(narrated screen walkthroughs from the bundled recorder extension) are uploaded to S3/Postgres,
+reviewed by humans, and pulled by coding agents over MCP. Built on dested/sal-starter: Bun · Express 5 + Vite SSR · React Router 7 · tRPC v11 ·
 Prisma 7 + Postgres · better-auth · Tailwind v4.
 
 ## Non-negotiables

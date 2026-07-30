@@ -10,7 +10,7 @@ export function ReportPanel({ gripeId, url }: { gripeId: string; url: string | u
   const { copied, copy } = useCopy()
 
   const report = useQuery({
-    queryKey: ['inloop.report', gripeId],
+    queryKey: ['handback.report', gripeId],
     enabled: url !== undefined,
     staleTime: Infinity,
     retry: 1,

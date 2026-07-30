@@ -8,7 +8,7 @@ import type { TranscriptSegment } from '../lib/types';
  * The audio arrives here already decoded to the 16 kHz mono Float32Array the
  * on-device worker wanted, so both engines share one decode. We wrap it as WAV
  * (the one container every speech API accepts without a codec) and post it to
- * `/api/ingest/transcribe` with the panel's own ilp_ token. No provider key ever
+ * `/api/ingest/transcribe` with the panel's own hb_ token. No provider key ever
  * reaches the extension.
  *
  * Long takes are split here rather than server-side: 16-bit PCM runs ~1.9 MB per

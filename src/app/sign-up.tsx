@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate, useRevalidator } from 'react-router-dom'
-import { LoopMark } from '~/components/logo'
+import { ReturnMark } from '~/components/logo'
 import { authClient } from '~/lib/auth-client'
 import { Button } from '~/components/ui/button'
 import { Input } from '~/components/ui/input'
@@ -31,7 +31,7 @@ export function SignUpPage() {
 
   return (
     <div className="mx-auto w-full max-w-sm px-6 py-20 md:py-28">
-      <LoopMark className="h-6" />
+      <ReturnMark className="h-6" />
       <h1 className="font-display mt-6 text-3xl font-semibold tracking-tight">
         Create your account
       </h1>

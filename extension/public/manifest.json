@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Inloop Recorder",
+  "name": "Handback Recorder",
   "version": "1.0.0",
-  "description": "Narrate what's broken. The recording, transcript, and console errors land in your team's Inloop inbox for an agent to fix — and for you to sign off.",
+  "description": "Narrate what's broken. The recording, transcript, and console errors land in your team's Handback inbox for an agent to fix — and for you to sign off.",
   "minimum_chrome_version": "116",
   "permissions": ["activeTab", "scripting", "storage", "tabs", "sidePanel"],
   "host_permissions": ["<all_urls>"],
@@ -14,7 +14,7 @@
     "type": "module"
   },
   "action": {
-    "default_title": "Inloop — open panel",
+    "default_title": "Handback — open panel",
     "default_icon": {
       "16": "icons/16.png",
       "32": "icons/32.png",

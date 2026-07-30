@@ -1,8 +1,9 @@
 /**
- * Generates the extension icons (the Inloop mark: two interlocked loop outlines,
- * ink + cobalt) with zero dependencies — a tiny hand-rolled PNG encoder plus
- * node's zlib. Beats checking binaries into git, and the mark stays editable as
- * code. Encoder ported from the original Gripe icon script; only the art changed.
+ * Generates the extension icons (the Handback mark: one returning stroke — out
+ * in ink, back in cobalt with an arrowhead) with zero dependencies — a tiny
+ * hand-rolled PNG encoder plus node's zlib. Beats checking binaries into git,
+ * and the mark stays editable as code. Encoder ported from the original Gripe
+ * icon script; only the art changed.
  */
 import { deflateSync } from 'node:zlib';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -60,18 +61,35 @@ function encodePng(size, rgba) {
 }
 
 /**
- * The mark: two circle outlines of equal radius, centres offset horizontally,
- * left ring ink, right ring cobalt. Where they overlap, cobalt wins — the pen
- * sits on top. Returns null (transparent) or an [r,g,b] colour for a point in
- * normalised space (-1..1 both axes).
+ * The mark: one returning stroke, drawn in the web mark's 28×20 coordinate
+ * space (src/components/logo.tsx is the source of truth). Out along the top in
+ * ink, a U-turn on the right, back along the bottom in cobalt, arrowhead
+ * landing on the left. Cobalt wins overlaps — the pen sits on top. Returns
+ * null (transparent) or an [r,g,b] colour for a point in normalised space
+ * (-1..1 both axes).
  */
+function distSeg(px, py, ax, ay, bx, by) {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)));
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
+
 function sample(nx, ny) {
-  const R = 0.52; // ring radius
-  const W = 0.16; // stroke width
-  const DX = 0.34; // centre offset from the middle
-  const inRing = (cx) => Math.abs(Math.hypot(nx - cx, ny) - R) <= W / 2;
-  if (inRing(DX)) return COBALT;
-  if (inRing(-DX)) return INK;
+  // Normalised -1..1 → mark units (viewBox 0 0 28 20, centred, slight padding).
+  const mx = nx * 15.5 + 14;
+  const my = ny * 15.5 + 10;
+  const HW = 1.6; // half stroke width, thicker than the web 1.2 for icon punch
+  // U-turn arc: centre (18,10) r 3.8; right half only, split at the midline.
+  const arcDist = Math.abs(Math.hypot(mx - 18, my - 10) - 3.8);
+  const onArc = arcDist <= HW && mx >= 18;
+  const cobalt =
+    (onArc && my >= 10) ||
+    distSeg(mx, my, 8, 13.8, 18, 13.8) <= HW ||
+    distSeg(mx, my, 11.4, 9.4, 6.2, 13.8) <= HW ||
+    distSeg(mx, my, 6.2, 13.8, 11.4, 18.2) <= HW;
+  if (cobalt) return COBALT;
+  if ((onArc && my < 10) || distSeg(mx, my, 4, 6.2, 18, 6.2) <= HW) return INK;
   return null;
 }
 
