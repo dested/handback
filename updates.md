@@ -2,6 +2,19 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-07-29 — final UI revision: transcript in full, draw mode that says so, banner dead
+Asked: "i dont see that im in draw mode… its not super easy to see the transcript… i dont like
+that make sure we got it right banner. final revision update for the ui before production." Done:
+draw mode now frames the whole viewport in cobalt with a `drawing · esc to click` tag and the dock
+never fades while armed (dock also slightly larger); a full transcript list lives under the
+timeline (cobalt mono times, current line follows the playhead, click seeks, double-click edits,
+collapsed in the popped strip); the tl-nag banner and tl-ok callout are deleted — the read-back
+confirm is one small `reads right` pill in the transcript header (reviewed flag still feeds
+report.md's trust line). Verified end-to-end in a real Chromium with the extension loaded
+(record → dock → draw frame → ink → stop → take on the timeline, Whisper fetching); preview
+harness re-screenshotted; tsc + both builds clean.
+Touched: extension/src/sidepanel/{Timeline.tsx,timeline.css}, extension/src/content/{index,ui}.ts, ui.md
+
 ## 2026-07-29 — post-review fixes from the panel agent's findings
 Asked: (review pass) verify A2-panel's 4 findings; Sal asked for a testable build. Done: wired
 `Dictation` into the Recorder's ticker slot (live interim line was dead UI); ported gripe's

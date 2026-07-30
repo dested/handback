@@ -82,8 +82,16 @@ properties in `extension/src/sidepanel/styles.css` (no Tailwind there).
 - **Timeline** (`timeline.css`): white track on paper, mono ruler, cobalt mark
   carets and selection, dashed hairline take seams, thumbnail filmstrip with
   stamped `take·m:ss` labels, voice lane as ink-gray density bars.
+- **Transcript list** (`.tl-script`): the whole transcript under the timeline —
+  cobalt mono times, current line cobalt-washed with an inset bar, click seeks,
+  double-click edits in place. Collapsed by default in the popped strip. The
+  read-back confirm is one small green outline pill in its header (`reads
+  right`) — never a banner; lecturing callouts are banned.
 - **On-page dock** (`content/ui.ts`): white pill, hairline border, mono
   keycaps for its keys; ink strokes draw in cobalt. Never dark, never orange.
+- **Draw mode says so**: while ink owns the pointer the viewport wears a cobalt
+  inset frame with one top tag (`drawing · esc to click`), and the dock never
+  fades. The frame is captured in the recording on purpose.
 - Judged in the preview harness (`npm run preview` → `:8777/gallery.html`),
   acceptance seed is `mode=long` (10:18, two takes, 150 frames).
 

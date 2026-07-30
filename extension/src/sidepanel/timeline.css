@@ -193,61 +193,109 @@
   padding: 2px 6px;
 }
 
-/* The one thing an agent can't recover from: a word the transcriber got wrong.
-   Cobalt, because it is an ask, not an error. */
-.tl-nag {
-  display: flex;
-  align-items: center;
+/* ── the transcript, whole ──────────────────────────────────────────────
+   The axis shows where the words sit; this is where you read them. Reading
+   follows the playhead; a click seeks; a double-click fixes a line. The
+   confirm lives here too — one small word, not a banner. */
+.tl-script {
   flex: none;
-  flex-wrap: wrap;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-top: 1px solid var(--border);
+  background: var(--paper);
+}
+.tl-script-head {
+  display: flex;
+  align-items: baseline;
   gap: 10px;
-  padding: var(--tl-strip) var(--tl-gut);
-  background: var(--cobalt-wash);
-  border-bottom: 1px solid var(--border);
-  border-left: 2px solid var(--cobalt);
-  font-size: var(--fs-1);
-  line-height: 1.5;
-  color: var(--ink);
+  flex: none;
+  padding: 6px var(--tl-gut) 2px;
 }
-.tl-nag span {
-  flex: 1 1 24ch;
-  max-width: 70ch;
+.tl-script-toggle {
+  padding: 2px 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-0);
+  letter-spacing: 0.02em;
   color: var(--muted);
+  background: none;
+  border: 0;
+  cursor: pointer;
 }
-.tl-nag b {
+.tl-script-toggle:hover {
   color: var(--ink);
-  font-weight: 600;
 }
-.tl-nag button {
-  flex: none;
-  padding: 5px 11px;
-  font-size: var(--fs-1);
-  color: var(--approve);
-  border-color: var(--approve);
+.tl-script-toggle i {
+  font-style: normal;
+  color: var(--cobalt);
+}
+.tl-script-hint {
+  flex: 1;
+  font-size: var(--fs-0);
+  color: var(--muted);
+  opacity: 0.75;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.tl-nag button:hover {
-  background: var(--approve-wash);
-}
-
-/* Signed off. The only green in the editor, and only once. */
-.tl-ok {
-  display: flex;
-  align-items: center;
-  gap: 7px;
+.tl-script-ok {
   flex: none;
-  padding: 5px var(--tl-gut);
-  border-bottom: 1px solid var(--border);
+  padding: 3px 10px;
   font-size: var(--fs-0);
   color: var(--approve);
+  border: 1px solid var(--approve);
+  border-radius: 999px;
+  background: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tl-script-ok:hover {
   background: var(--approve-wash);
 }
-.tl-tick {
-  width: 9px;
-  height: 5px;
-  border-left: 1.5px solid var(--approve);
-  border-bottom: 1.5px solid var(--approve);
-  transform: rotate(-45deg) translateY(-1px);
+/* Signed off. The only green in the editor, and only once. */
+.tl-script-done {
+  flex: none;
+  font-size: var(--fs-0);
+  color: var(--approve);
+}
+.tl-script-list {
+  max-height: 236px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 2px calc(var(--tl-gut) - 6px) 8px;
+}
+.tl-line {
+  display: flex;
+  gap: 10px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  font-size: var(--fs-2);
+  line-height: 1.55;
+  color: var(--ink);
+  cursor: pointer;
+}
+.tl-line:hover {
+  background: var(--tl-well);
+}
+.tl-line.now {
+  background: var(--cobalt-wash);
+  box-shadow: inset 2px 0 0 var(--cobalt);
+}
+.tl-line-t {
+  flex: none;
+  min-width: 36px;
+  padding-top: 2px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-0);
+  text-align: right;
+  color: var(--cobalt);
+}
+.tl-line-x {
+  flex: 1;
+  min-width: 0;
+}
+.tl-line .tl-linein {
+  flex: 1;
 }
 
 /* Said once and quietly, in mono, because it is machine news. Violet is
@@ -581,13 +629,9 @@
   flex: 1 1 auto;
   min-width: 0;
 }
-/* Three wrapped lines with 600px of empty room beside them costs the strip half
-   its editor. Wider cap here only — still short of a full-bleed 150ch line. */
-.tl.wide .tl-nag {
-  padding-block: 6px;
-}
-.tl.wide .tl-nag span {
-  max-width: 96ch;
+/* The popped strip has no vertical room to spare — the list stays short when open. */
+.tl.wide .tl-script-list {
+  max-height: 96px;
 }
 /* Landscape has vertical room the rail never has, so the well takes it and both
    lanes grow into it — nothing is left reserved and empty. The filmstrip stops

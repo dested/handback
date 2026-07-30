@@ -120,7 +120,11 @@ export function Timeline({ session, recordings }: { session: Session; recordings
   const [drag, setDrag] = useState<Drag | null>(null);
   // Which line is open AND on which surface. The readout usually covers the same
   // line the selected block holds, and two autofocused inputs blur each other shut.
-  const [editing, setEditing] = useState<{ key: string; at: 'clip' | 'read' } | null>(null);
+  const [editing, setEditing] = useState<{ key: string; at: 'clip' | 'read' | 'script' } | null>(
+    null,
+  );
+  /** The transcript, whole. The axis shows where words sit; this is where you read them. */
+  const [script, setScript] = useState(true);
   /** A frame held in the monitor until the next click — double-click parks it there. */
   const [pinned, setPinned] = useState<string | null>(null);
   /** What someone is typing into the playhead readout, while they are typing it. */
@@ -137,6 +141,7 @@ export function Timeline({ session, recordings }: { session: Session; recordings
   /** Where a shift-click extends from. */
   const anchorKey = useRef<string | null>(null);
   const scrollTick = useRef(0);
+  const scriptRef = useRef<HTMLDivElement | null>(null);
 
   const spans = useMemo(() => partSpans(recordings), [recordings]);
   /** Takes laid end to end are the whole axis: it opens at 0 and ends when the talking does. */
@@ -671,6 +676,17 @@ export function Timeline({ session, recordings }: { session: Session; recordings
     return before ?? lines[0];
   }, [lines, playhead]);
 
+  // The popped strip has no vertical room to spare; the tall panel does.
+  useEffect(() => setScript(!wide), [wide]);
+
+  // Reading follows the playhead — the current line stays in view, never yanked.
+  useEffect(() => {
+    if (!script || !readout) return;
+    scriptRef.current
+      ?.querySelector(`[data-line="${CSS.escape(readout.key)}"]`)
+      ?.scrollIntoView({ block: 'nearest' });
+  }, [script, readout]);
+
   const ticks = useMemo(() => {
     const step = TICKS.find((s) => s * pxPerMs >= 56) ?? TICKS[TICKS.length - 1];
     const out: number[] = [];
@@ -761,32 +777,6 @@ export function Timeline({ session, recordings }: { session: Session; recordings
             <span className="tl-said tl-none">no words on this stretch</span>
           )}
         </div>
-
-        {unread.length > 0 && (
-          <div className="tl-nag">
-            <span>
-              <b>Read this back before you hand it off.</b> Speech recognition eats the words that
-              matter — one wrong noun sends the agent to the wrong file. Click any line to fix it.
-            </span>
-            {/* One button, however many takes are pending: this is one timeline,
-                and the UI has no way to say which take a second button meant. */}
-            <button
-              onClick={async () => {
-                for (const rec of unread) await send({ type: 'recording:reviewed', id: rec.id });
-                say('transcript confirmed');
-              }}
-            >
-              looks right
-            </button>
-          </div>
-        )}
-
-        {readBack && (
-          <div className="tl-ok">
-            <span className="tl-tick" aria-hidden="true" />
-            read back and confirmed
-          </div>
-        )}
 
         {(status || notice) && (
           <div className={`tl-status${notice?.tone === 'stale' ? ' stale' : ''}`}>
@@ -976,6 +966,74 @@ export function Timeline({ session, recordings }: { session: Session; recordings
             </button>
           )}
         </div>
+
+        {lines.length > 0 && (
+          <div className="tl-script">
+            <div className="tl-script-head">
+              <button className="tl-script-toggle" onClick={() => setScript((v) => !v)}>
+                <i aria-hidden="true">{script ? '▾' : '▸'}</i> transcript · {lines.length} line
+                {lines.length === 1 ? '' : 's'}
+              </button>
+              <span className="tl-script-hint">click seeks · double-click fixes a line</span>
+              {unread.length > 0 ? (
+                <button
+                  className="tl-script-ok"
+                  title="Confirm the wording is yours — the agent then treats it as exact"
+                  onClick={async () => {
+                    for (const rec of unread) {
+                      await send({ type: 'recording:reviewed', id: rec.id });
+                    }
+                    say('transcript confirmed');
+                  }}
+                >
+                  reads right
+                </button>
+              ) : (
+                readBack && <span className="tl-script-done">✓ confirmed</span>
+              )}
+            </div>
+            {script && (
+              <div className="tl-script-list" ref={scriptRef}>
+                {lines.map((item) => {
+                  const open = editing?.key === item.key && editing.at === 'script';
+                  const now = readout?.key === item.key;
+                  return (
+                    <div
+                      key={item.key}
+                      data-line={item.key}
+                      className={`tl-line${now ? ' now' : ''}`}
+                      onClick={() => {
+                        if (open) return;
+                        setPh(item.pos);
+                        setPinned(null);
+                      }}
+                      onDoubleClick={(e) => {
+                        e.preventDefault();
+                        setEditing({ key: item.key, at: 'script' });
+                      }}
+                    >
+                      <span className="tl-line-t">{mmss(item.pos)}</span>
+                      {open ? (
+                        <input
+                          className="tl-linein"
+                          autoFocus
+                          defaultValue={item.text}
+                          onClick={(e) => e.stopPropagation()}
+                          onBlur={(e) => void commitLine(item, e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') e.currentTarget.blur();
+                          }}
+                        />
+                      ) : (
+                        <span className="tl-line-x">{item.text}</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

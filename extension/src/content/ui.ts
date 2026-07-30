@@ -64,9 +64,9 @@ canvas.live.on.capture { pointer-events: auto; touch-action: none; cursor: cross
   display: flex;
   align-items: center;
   gap: 3px;
-  padding: 5px 5px 5px 12px;
+  padding: 6px 6px 6px 14px;
   border-radius: 999px;
-  font-size: 12.5px;
+  font-size: 13px;
   white-space: nowrap;
   opacity: 0;
   pointer-events: none;
@@ -100,11 +100,11 @@ canvas.live.on.capture { pointer-events: auto; touch-action: none; cursor: cross
 
 .dock button {
   font: inherit;
-  font-size: 12.5px;
+  font-size: 13px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-height: 30px;
+  min-height: 32px;
   padding: 0 10px;
   color: var(--muted);
   background: transparent;
@@ -143,6 +143,34 @@ canvas.live.on.capture { pointer-events: auto; touch-action: none; cursor: cross
 .dock button.stop { background: var(--ink); color: #fff; font-weight: 600; }
 .dock button.stop .cap { border-color: rgba(255,255,255,.28); color: rgba(255,255,255,.72); background: transparent; }
 .dock button.stop:hover { background: #14161b; color: #fff; }
+
+/* ── draw mode, unmistakably ───────────────────────────── */
+/* When the ink owns the pointer the whole viewport says so: a cobalt frame
+   around the screen and one small tag naming the way back. The frame is in the
+   recording too — which is right, because the drawing is the point. */
+.frame {
+  position: fixed;
+  inset: 0;
+  display: none;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 3px rgba(47, 86, 216, 0.55);
+}
+.layer.draw .frame { display: block; }
+.frame .tag {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--cobalt);
+}
+.frame .tag .cap { color: var(--cobalt); border-color: rgba(47,86,216,.35); background: transparent; }
 
 /* A click leaves no trace in a screen recording. This is the trace. */
 .ripple {
@@ -193,6 +221,7 @@ export function createOverlay(): Overlay {
   const layer = html(`
     <div class="layer">
       <canvas class="live"></canvas>
+      <div class="frame"><span class="tag glass">drawing <i class="cap">esc</i> to click</span></div>
       <div class="dock glass">
         <span class="dock-live"><span class="dot"></span><span class="clock">0:00</span></span>
         <span class="sep"></span>

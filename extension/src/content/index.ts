@@ -414,6 +414,8 @@ function boot() {
     if (!overlay) return;
     overlay.dock.classList.toggle('on', dockOn);
     overlay.live.classList.toggle('on', dockOn);
+    // The whole viewport says draw mode — a frame in the recording is the point.
+    overlay.layer.classList.toggle('draw', dockOn && liveOn);
     // Only the word swaps — the `d` keycap beside it is part of the button.
     overlay.dockDrawLabel.textContent = liveOn ? 'click' : 'draw';
     overlay.dockDraw.classList.toggle('arm', liveOn);
@@ -429,6 +431,11 @@ function boot() {
   /** Fade out of the way when the cursor comes near, back on hover. */
   function onDockMove(event: MouseEvent) {
     if (!overlay || !dockOn) return;
+    // While drawing, the dock is the way out — it never fades.
+    if (liveOn) {
+      overlay.dock.classList.remove('near');
+      return;
+    }
     const box = (dockBox ??= overlay.dock.getBoundingClientRect());
     const dx = Math.max(box.left - event.clientX, 0, event.clientX - box.right);
     const dy = Math.max(box.top - event.clientY, 0, event.clientY - box.bottom);
