@@ -25,7 +25,8 @@ dark, nothing visually inherited from the Gripe extension.
   (isolated DB + port 3100; screenshots committed; `test:e2e:update` to re-baseline)
 - **Seed a dev login:** `bun cli/dev-bootstrap.ts [email] [password] [org]` → prints an `ilp_` token
 - **Push a gripe:** `bun cli/push.ts <gripe-folder> --server http://localhost:3000 --token ilp_…`
-- **Extension:** `cd extension && npm run build` → load-unpacked `extension/dist`;
+- **Extension:** `bun run build:extension` (root) or `cd extension && npm run build` →
+  load-unpacked `extension/dist`;
   `npm run preview` → http://localhost:8777/gallery.html (layout harness, no Chrome needed)
 - **MCP:** `claude mcp add inloop --env INLOOP_TOKEN=ilp_… --env INLOOP_SERVER=<url> -- bun <repo>/cli/mcp.ts`
 - **GitHub:** dested/inloop (private). Deploy: intended Drydock → inloop.dested.com (not wired yet).

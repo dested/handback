@@ -2,6 +2,12 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-07-29 — root script for the extension build
+Asked: "put it in the main node script." Done: `bun run build:extension` at the repo root
+(`npm --prefix extension run build`); deliberately NOT chained into `build` — the server deploy
+and the extension are different artifacts on different lifecycles.
+Touched: package.json, cliffnotes.md
+
 ## 2026-07-29 — final UI revision: transcript in full, draw mode that says so, banner dead
 Asked: "i dont see that im in draw mode… its not super easy to see the transcript… i dont like
 that make sure we got it right banner. final revision update for the ui before production." Done:
