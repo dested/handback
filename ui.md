@@ -68,6 +68,25 @@ deletes. Page shells and nav come from `src/app/layout.tsx` — marketing chrome
 on public pages, app chrome (org switcher, Inbox/Projects/Team nav) when signed
 in.
 
+## Extension (`extension/`)
+
+The Chrome side panel and on-page surfaces obey the same law — light paper,
+cobalt, nothing orange, no dark mode — but run on **system fonts** (no Google
+Fonts inside an extension): `ui-sans-serif` body, `ui-monospace` for
+timestamps/keycaps/transcript times. Tokens are duplicated as plain CSS custom
+properties in `extension/src/sidepanel/styles.css` (no Tailwind there).
+
+- **Panel** (`panel.css`): paper ground, white cards, cobalt `record`/`done`
+  buttons, hairline rules between sections. The review callout is a
+  cobalt-wash block; "looks right" confirm is the green approve outline.
+- **Timeline** (`timeline.css`): white track on paper, mono ruler, cobalt mark
+  carets and selection, dashed hairline take seams, thumbnail filmstrip with
+  stamped `take·m:ss` labels, voice lane as ink-gray density bars.
+- **On-page dock** (`content/ui.ts`): white pill, hairline border, mono
+  keycaps for its keys; ink strokes draw in cobalt. Never dark, never orange.
+- Judged in the preview harness (`npm run preview` → `:8777/gallery.html`),
+  acceptance seed is `mode=long` (10:18, two takes, 150 frames).
+
 ## Don'ts
 
 - No dark mode, no `.dark`, no `color-scheme: dark`.

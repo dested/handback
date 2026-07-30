@@ -25,6 +25,8 @@ dark, nothing visually inherited from the Gripe extension.
   (isolated DB + port 3100; screenshots committed; `test:e2e:update` to re-baseline)
 - **Seed a dev login:** `bun cli/dev-bootstrap.ts [email] [password] [org]` → prints an `ilp_` token
 - **Push a gripe:** `bun cli/push.ts <gripe-folder> --server http://localhost:3000 --token ilp_…`
+- **Extension:** `cd extension && npm run build` → load-unpacked `extension/dist`;
+  `npm run preview` → http://localhost:8777/gallery.html (layout harness, no Chrome needed)
 - **MCP:** `claude mcp add inloop --env INLOOP_TOKEN=ilp_… --env INLOOP_SERVER=<url> -- bun <repo>/cli/mcp.ts`
 - **GitHub:** dested/inloop (private). Deploy: intended Drydock → inloop.dested.com (not wired yet).
 
@@ -78,6 +80,15 @@ src/
   styles/app.css        ALL design tokens (light only) + .rule/.stamp/.ink-underline utilities
 e2e/                    smoke.spec.ts + committed screenshots (landing, sign-up, app flow)
 index.html              SSR template; Google Fonts (Fraunces/Libre Franklin/IBM Plex Mono)
+extension/              Inloop Recorder — the Chrome MV3 extension (own npm workspace)
+  public/manifest.json  MV3: sidePanel + activeTab/scripting/storage/tabs; hotkeys Alt+Shift+M/D
+  src/lib/              Shared contracts: types, messages (worker protocol), timeline math,
+                        db (IndexedDB 'inloop-recorder'), report.md builder, upload (to /api/ingest)
+  src/background/       Service worker: hotkeys, dock routing, IndexedDB writes, strip docking
+  src/content/          On-page dock (d/c/m/s keys), ink drawing, telemetry; injected.js relay
+  src/sidepanel/        Panel app: recorder (getDisplayMedia + dedup), Whisper transcription,
+                        Timeline editor, grids contact sheets, App.tsx orchestration
+  scripts/              make-icons, copy-ort, prune-dist, preview.mjs + preview/ (layout harness)
 ```
 
 ## Routes / URLs
@@ -144,6 +155,15 @@ bucket; its keys live in `.env` only. Everything moves via presigned URLs (PUT 1
   test that actually touches S3 will fail loudly (none do today).
 - **Playwright locators**: the empty-inbox guide contains a "Team → API tokens" link; use
   `exact: true` for the nav's "Team".
+- **Extension is its own npm workspace** (`extension/`, npm not bun — vite CRX builds): two ordered
+  vite builds (panel+worker ESM, then content IIFE with `emptyOutDir:false`). Chrome won't bind
+  bare-letter commands, so the dock keys (d/c/m/s) are a window keydown listener in the content
+  script; only Alt+Shift+M/D are real `commands`.
+- **Preview harness seeds real IndexedDB** ('inloop-recorder') and stubs `chrome.*` — it shares the
+  origin's DB, so a preview tab and the real panel fight if both run on the same profile. Port 8777
+  (`PORT` env to move it; the old gripe repo's harness also used 8777).
+- **Extension uploads with the panel's saved `ilp_` token** (settings → serverUrl+apiToken,
+  defaults to https://inloop.dested.com) through the same two-phase `/api/ingest` flow as the CLI.
 
 ## Status
 
@@ -152,10 +172,15 @@ bucket; its keys live in `.env` only. Everything moves via presigned URLs (PUT 1
   auth, inbox with first-run onboarding, viewer with video/filmstrip/transcript/events/report,
   team, projects, join); token REST reads + stdio MCP (`list_gripes`/`get_gripe`/
   `set_gripe_status`); e2e smoke suite with committed baselines; README.
+- **Done (2026-07-29, evening)** — the extension, rebuilt from scratch in `extension/`: MV3
+  side-panel recorder (screen + mic, 64×64-cell dedup keyframes, Whisper transcription in a
+  worker), on-page dock + cobalt ink drawing, the one-timeline editor (drag across take seams,
+  popped strip), report.md builder, and **direct cloud upload** to `/api/ingest` (no local
+  folders, no downloads permission). Typechecked, both bundles build, layout verified against the
+  10:18/150-frame acceptance seed via the preview harness.
 - **Not built** — Drydock deploy (needs the portal; BETTER_AUTH_URL must be set for
-  inloop.dested.com), extension → direct upload (extension still writes local folders; CLI
-  bridges), share links / public gripe URLs, email sending for invites, billing, server-side
-  transcription, org deletion, pagination past 200 gripes.
-- **Next** — wire the Gripe extension to push straight to Inloop (reuse `cli/push.ts` shapes),
-  deploy via Drydock, then the strategy backlog in
+  inloop.dested.com), a real in-Chrome record→upload run (needs a human), share links / public
+  gripe URLs, email sending for invites, billing, server-side transcription, org deletion,
+  pagination past 200 gripes, Chrome Web Store listing.
+- **Next** — load-unpacked QA of the extension, deploy via Drydock, then the strategy backlog in
   `G:\code\gripe\plans\2026-07-29-enterprise-strategy.md`.

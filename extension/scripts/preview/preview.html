@@ -1,0 +1,728 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light" />
+    <title>Inloop — layout preview</title>
+    <script>
+      /**
+       * Layout harness. Two jobs, in this order, before the panel bundle is allowed
+       * to run: stub the chrome APIs the panel touches on mount, and seed IndexedDB
+       * so it has a gripe to draw.
+       *
+       * The stub is a fake service worker, not a fixture: `state:get` reads the same
+       * 'inloop-recorder' database the real worker reads, and every mutation in the
+       * Request union is applied to it the way src/background does. Dragging and
+       * deleting therefore survive a refresh instead of snapping back, which is the
+       * only way the timeline can be judged here.
+       *
+       * ?mode=rec | long | empty   ?pop=1 (the popped editor strip)
+       */
+      const Q = new URLSearchParams(location.search);
+      const MODE = ['rec', 'long', 'empty'].includes(Q.get('mode')) ? Q.get('mode') : 'rec';
+      const NOW = Date.now();
+      const SID = 'preview-session';
+
+      // Mirrors DEFAULT_SETTINGS in src/lib/types.ts, with a token present so the
+      // panel reads as connected to a workspace.
+      const SETTINGS = {
+        drawStart: true,
+        lang: '',
+        serverUrl: 'https://inloop.dested.com',
+        apiToken: 'ilp_preview_000000000000',
+      };
+
+      // ── synthesis ─────────────────────────────────────────────────────────
+      // Everything below is deterministic (one LCG per take), so a reload shows the
+      // same footage and a screenshot comparison means something.
+
+      const PHRASES = [
+        'okay so this is the checkout page and the totals row down here is wrong',
+        'watch the subtotal when I bump the quantity up by one',
+        'the tax line never moves, it just sits at the old value',
+        'right there, that number should be nine eighty and not eight forty',
+        'let me reload it and try the whole thing again from a clean cart',
+        'same thing, so it is not a caching problem on our side',
+        'the console throws on every single one of those clicks',
+        'scroll down, there are three more rows doing the same thing',
+        'this promo code field also swallows the first character you type',
+        'I am going to open the network tab so you can see the payload',
+        'the request goes out with the old quantity, look at the body',
+        'so whatever recalculates the tax runs before the state updates',
+        'that is probably the bug, it is a stale closure somewhere',
+        'let me show you what it does on a fresh session as well',
+        'clicking apply does nothing until you blur the field first',
+        'and now the total is a different wrong number, which is worse',
+        'the shipping estimate is fine, that one recalculates properly',
+        'so it is specific to whatever handles the tax breakdown',
+        'here is the same flow at the mobile width, it is worse',
+        'the row wraps and the numbers end up under the labels',
+        'you can barely read which value belongs to which line',
+        'I want the whole totals block rebuilt honestly',
+        'anyway back to the desktop layout for a second',
+        'if I remove an item entirely the total goes negative',
+        'that should never be possible, there is no clamp anywhere',
+        'the discount is being applied twice on the second render',
+        'let me mark this one because it is the clearest reproduction',
+        'and that is the state I want you to start looking at',
+        'one more thing before I stop talking about this page',
+        'the error boundary catches it but the page stays broken',
+      ];
+
+      const SELECTORS = [
+        ['button.qty-inc', 'Increase quantity'],
+        ['#promo-code', 'Promo code'],
+        ['tr.totals-row > td.tax', '$8.40'],
+        ['button[type=submit]', 'Place order'],
+        ['a.cart-link', 'Cart (3)'],
+      ];
+
+      const lcg = (seed) => {
+        let s = (seed * 2654435761) >>> 0;
+        return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
+      };
+
+      /**
+       * Exactly `count` lines spread across the take, in bursts, with optional
+       * silences you can see as holes in the voice lane. Exact counts matter: the
+       * acceptance seed promises 120 lines and has to deliver them.
+       * `gaps[].at` is in pre-gap time, so the silence lands mid-speech.
+       */
+      function talk(durMs, count, seed, gaps = []) {
+        const rnd = lcg(seed);
+        const held = gaps.reduce((n, g) => n + g.len, 0);
+        const step = Math.max(1, durMs - 3000 - held) / count;
+        const out = [];
+        for (let i = 0; i < count; i++) {
+          const text = PHRASES[(i * 7 + seed) % PHRASES.length];
+          let t = 1200 + i * step + rnd() * step * 0.45;
+          for (const g of gaps) if (t >= g.at) t += g.len;
+          const spoken = Math.min(6500, 1200 + text.split(' ').length * 240);
+          out.push({ t: Math.round(t), d: Math.round(Math.min(spoken, step * 1.8)), text });
+        }
+        return out;
+      }
+
+      /** Keyframes with the reasons the real dedup produces, plus a pointer on most. */
+      function keyframes(durMs, count, seed, marks) {
+        const rnd = lcg(seed + 977);
+        const step = durMs / count;
+        const out = [];
+        for (let i = 0; i < count; i++) {
+          const t = Math.min(durMs - 1, Math.round(i * step + rnd() * step * 0.7));
+          const r = rnd();
+          const frame = {
+            index: i + 1,
+            t,
+            file: `frames/${String(i + 1).padStart(2, '0')}-${String(Math.floor(t / 1000)).padStart(4, '0')}.jpg`,
+            reason: i === 0 ? 'start' : marks.includes(i) ? 'mark' : r < 0.62 ? 'change' : r < 0.78 ? 'click' : r < 0.88 ? 'nav' : 'beat',
+          };
+          if (frame.reason !== 'start') frame.dist = 4 + Math.round(rnd() * 80);
+          if (rnd() < 0.8) {
+            const [selector, text] = SELECTORS[i % SELECTORS.length];
+            frame.pointer = {
+              nx: Math.round(rnd() * 1000) / 1000,
+              ny: Math.round(rnd() * 1000) / 1000,
+              selector,
+              text,
+            };
+          }
+          out.push(frame);
+        }
+        return out;
+      }
+
+      const EVENTS = [
+        ['error', "TypeError: Cannot read properties of undefined (reading 'tax')", 'at recalcTotals (cart.js:412:19)'],
+        ['error', 'Uncaught (in promise) Error: totals mismatch', 'at applyPromo (checkout.js:88)'],
+        ['warn', 'React has detected a change in the order of Hooks', undefined],
+        ['network', 'POST /api/cart/quantity → 500 (142ms)', '{"quantity":2,"expected":3}'],
+        ['network', 'GET /api/tax?subtotal=980 → 200 (2.4s)', undefined],
+      ];
+
+      /** ts is absolute, like the content script reports it. */
+      const pageEvents = (startedAt, offsets) =>
+        offsets.map(([offset, which]) => {
+          const [level, message, detail] = EVENTS[which];
+          return { level, message, ...(detail ? { detail } : {}), ts: startedAt + offset };
+        });
+
+      function take({ id, index, ago, durMs, frames, lines, seed, marks, gaps, events, reviewed, interrupted }) {
+        const startedAt = NOW - ago;
+        const rec = {
+          id,
+          sessionId: SID,
+          index,
+          createdAt: startedAt,
+          state: 'done',
+          mime: 'video/webm;codecs=vp9,opus',
+          chunks: 0,
+          meta: {
+            startedAt,
+            durationMs: durMs,
+            sampled: Math.round(durMs / 500),
+            frames: keyframes(durMs, frames, seed, marks),
+            transcript: talk(durMs, lines, seed, gaps),
+            transcriber: 'whisper',
+            rev: 1,
+            reviewed: Boolean(reviewed),
+            events: pageEvents(startedAt, events ?? []),
+            eventScope: 'http://localhost:3000',
+            videoFile: 'walkthrough.webm',
+          },
+        };
+        if (interrupted) rec.interrupted = true;
+        return rec;
+      }
+
+      // ── the seeds ─────────────────────────────────────────────────────────
+
+      /** rec: one 2:19 take. The everyday case — what a single walkthrough looks like. */
+      const REC = [
+        take({
+          id: 'preview-rec-1',
+          index: 1,
+          ago: 900000,
+          durMs: 139000,
+          frames: 40,
+          lines: 25,
+          seed: 11,
+          marks: [6, 19, 31],
+          events: [[21000, 0], [64000, 3], [96000, 2]],
+        }),
+      ];
+
+      /**
+       * long: 6:40 + 3:38 = 10:18, 150 keyframes, 120 lines. THE acceptance seed.
+       * At fit zoom nothing may overlap, the voice lane has to read as structure,
+       * the seam between takes must be invisible, and scrubbing has to stay smooth.
+       */
+      const LONG = [
+        take({
+          id: 'preview-long-1',
+          index: 1,
+          ago: 1800000,
+          durMs: 400000,
+          frames: 97,
+          lines: 78,
+          seed: 23,
+          marks: [4, 22, 41, 63, 88],
+          gaps: [{ at: 180000, len: 40000 }],
+          events: [[12000, 0], [131000, 3], [212000, 2], [305000, 1], [352000, 4]],
+        }),
+        take({
+          id: 'preview-long-2',
+          index: 2,
+          ago: 600000,
+          durMs: 218000,
+          frames: 53,
+          lines: 42,
+          seed: 41,
+          marks: [7, 26, 44],
+          reviewed: true,
+          interrupted: true,
+          events: [[8000, 3], [77000, 0]],
+        }),
+      ];
+
+      /**
+       * A human dragged these. `tl` is a position on the gripe's unified axis, not
+       * within the take, so a take-2 item can be pulled back across the seam — that
+       * crossing is the case the timeline gets wrong if it does take arithmetic.
+       */
+      function moveSome(recordings) {
+        const put = (recId, kind, index, tl) => {
+          const rec = recordings.find((r) => r.id === recId);
+          if (!rec) return;
+          const item = kind === 'frame' ? rec.meta.frames.find((f) => f.index === index) : rec.meta.transcript[index];
+          if (item) item.tl = tl;
+        };
+        // Take 1: two frames shoved later, one line nudged into the silence.
+        put('preview-long-1', 'frame', 30, 251000);
+        put('preview-long-1', 'frame', 31, 253400);
+        put('preview-long-1', 'line', 12, 196000);
+        // Take 2 (its span starts at 400000) pulled back over the seam — two lines
+        // just before it, and one frame dropped into the middle of take 1.
+        put('preview-long-2', 'line', 3, 381500);
+        put('preview-long-2', 'line', 4, 386200);
+        put('preview-long-2', 'frame', 10, 121000);
+      }
+
+      const RECORDINGS = MODE === 'long' ? LONG : MODE === 'empty' ? [] : REC;
+      if (MODE === 'long') moveSome(RECORDINGS);
+
+      const SESSIONS =
+        MODE === 'empty'
+          ? []
+          : [
+              {
+                id: SID,
+                name: 'Checkout totals are wrong',
+                slug: '2026-07-29-2305-checkout-totals-are-wrong',
+                createdAt: NOW - 1800000,
+                updatedAt: NOW,
+                origin: 'http://localhost:3000',
+                recCount: RECORDINGS.length,
+              },
+              {
+                id: 'preview-closed',
+                name: 'Nav collapses on iPad',
+                slug: '2026-07-25-1102-nav-collapses-on-ipad',
+                createdAt: NOW - 86400000,
+                updatedAt: NOW - 86000000,
+                origin: 'http://localhost:3000',
+                recCount: 1,
+                closed: true,
+                uploadedUrl: 'https://inloop.dested.com/g/nav-collapses-on-ipad',
+              },
+            ];
+
+      // ── the shapes have to be right ───────────────────────────────────────
+      // A seed that drifts from src/lib/types.ts turns every judgment made here
+      // into a lie, so it fails loudly at load instead of rendering something
+      // plausible.
+      const REASONS = ['start', 'change', 'mark', 'click', 'nav', 'beat'];
+
+      function check(recordings, sessions) {
+        const bad = [];
+        const want = (ok, why) => ok || bad.push(why);
+        const ids = new Set(sessions.map((s) => s.id));
+        for (const s of sessions) {
+          want(s.id && s.name && s.slug, `session ${s.id}: id/name/slug`);
+          want(s.createdAt > 0 && s.updatedAt >= s.createdAt, `session ${s.id}: timestamps`);
+          want(typeof s.recCount === 'number', `session ${s.id}: recCount`);
+        }
+        for (const r of recordings) {
+          const m = r.meta;
+          want(ids.has(r.sessionId), `${r.id}: orphan sessionId`);
+          want(r.index >= 1 && r.state === 'done' && r.mime && r.chunks === 0, `${r.id}: record header`);
+          want(m.durationMs > 0 && m.sampled >= m.frames.length, `${r.id}: duration/sampled`);
+          want(m.videoFile && m.startedAt > 0 && m.rev >= 1, `${r.id}: meta header`);
+          m.frames.forEach((f, i) => {
+            want(f.index === i + 1, `${r.id}: frame ${i} index ${f.index}`);
+            want(REASONS.includes(f.reason), `${r.id}: frame ${f.index} reason ${f.reason}`);
+            want(f.t >= 0 && f.t < m.durationMs, `${r.id}: frame ${f.index} t ${f.t}`);
+            want(/^frames\/\d+-\d+\.jpg$/.test(f.file), `${r.id}: frame ${f.index} file ${f.file}`);
+            want(f.tl === undefined || f.tl >= 0, `${r.id}: frame ${f.index} tl`);
+          });
+          let last = -1;
+          m.transcript.forEach((seg, i) => {
+            want(seg.t > last, `${r.id}: line ${i} out of order`);
+            want(seg.t + (seg.d ?? 0) <= m.durationMs, `${r.id}: line ${i} runs past the take`);
+            want(typeof seg.text === 'string' && seg.text.length > 4, `${r.id}: line ${i} text`);
+            last = seg.t;
+          });
+          for (const e of m.events) {
+            want(['error', 'warn', 'network'].includes(e.level), `${r.id}: event level ${e.level}`);
+            want(e.ts > 1e12, `${r.id}: event ts is not absolute`);
+          }
+        }
+        if (MODE === 'long') {
+          const total = recordings.reduce((n, r) => n + r.meta.durationMs, 0);
+          const frames = recordings.reduce((n, r) => n + r.meta.frames.length, 0);
+          const lines = recordings.reduce((n, r) => n + r.meta.transcript.length, 0);
+          want(total === 618000, `long: ${total}ms, want 618000 (10:18)`);
+          want(frames === 150, `long: ${frames} frames, want 150`);
+          want(lines === 120, `long: ${lines} lines, want 120`);
+        }
+        if (bad.length) throw new Error(`preview seed is malformed:\n  ${bad.join('\n  ')}`);
+        const spent = recordings.reduce((n, r) => n + r.meta.durationMs, 0);
+        console.log(
+          `[preview] mode=${MODE} takes=${recordings.length} ${clock(spent)} ` +
+            `frames=${recordings.reduce((n, r) => n + r.meta.frames.length, 0)} ` +
+            `lines=${recordings.reduce((n, r) => n + r.meta.transcript.length, 0)}`,
+        );
+      }
+
+      // ── IndexedDB, opened exactly like src/lib/db.ts ───────────────────────
+      const open = () =>
+        new Promise((resolve, reject) => {
+          const request = indexedDB.open('inloop-recorder', 1);
+          request.onupgradeneeded = () => {
+            const db = request.result;
+            if (!db.objectStoreNames.contains('sessions')) db.createObjectStore('sessions', { keyPath: 'id' });
+            if (!db.objectStoreNames.contains('recordings')) {
+              db.createObjectStore('recordings', { keyPath: 'id' }).createIndex('bySession', 'sessionId');
+            }
+            if (!db.objectStoreNames.contains('blobs')) db.createObjectStore('blobs');
+            if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
+          };
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+
+      let dbPromise = null;
+      const db = () => (dbPromise ??= open());
+
+      const done = (request) =>
+        new Promise((resolve, reject) => {
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+
+      async function store(name, mode) {
+        return (await db()).transaction(name, mode).objectStore(name);
+      }
+      const idbGet = async (name, key) => done((await store(name, 'readonly')).get(key));
+      const idbAll = async (name) => done((await store(name, 'readonly')).getAll());
+      const idbPut = async (name, value, key) => done((await store(name, 'readwrite')).put(value, key));
+      const idbDel = async (name, key) => done((await store(name, 'readwrite')).delete(key));
+      const idbClear = async (name) => done((await store(name, 'readwrite')).clear());
+      const idbBySession = async (id) =>
+        done((await store('recordings', 'readonly')).index('bySession').getAll(id));
+      /** 150 frame blobs one transaction at a time is seconds of blank panel. */
+      async function idbPutMany(name, entries) {
+        const os = await store(name, 'readwrite');
+        for (const [key, value] of entries) os.put(value, key);
+        return new Promise((resolve, reject) => {
+          os.transaction.oncomplete = () => resolve();
+          os.transaction.onerror = () => reject(os.transaction.error);
+        });
+      }
+
+      // ── the fake worker ───────────────────────────────────────────────────
+      const settingsGet = async () => ({ ...SETTINGS, ...((await idbGet('kv', 'settings')) ?? {}) });
+
+      async function stateGet() {
+        const sessions = (await idbAll('sessions')).sort((a, b) => b.createdAt - a.createdAt);
+        const activeId = (await idbGet('kv', 'activeSessionId')) ?? null;
+        const active = sessions.find((s) => s.id === activeId) ?? null;
+        return {
+          sessions,
+          activeSessionId: active ? active.id : null,
+          // A fresh array every read: React bails out of a render when handed the
+          // same objects it already has.
+          recordings: active ? (await idbBySession(active.id)).sort((a, b) => a.index - b.index) : [],
+          settings: await settingsGet(),
+        };
+      }
+
+      /** After a delete or a close, fall back to the newest gripe still open. */
+      async function resumeOpen() {
+        const next = (await idbAll('sessions')).sort((a, b) => b.createdAt - a.createdAt).find((s) => !s.closed);
+        await idbPut('kv', next ? next.id : null, 'activeSessionId');
+      }
+
+      async function touch(rec) {
+        rec.meta.rev = (rec.meta.rev ?? 0) + 1;
+        await idbPut('recordings', rec);
+      }
+
+      /** Everything addressed at one record, so each record takes a single write. */
+      function groupByRec(items) {
+        const byRec = new Map();
+        for (const item of items) byRec.set(item.recId, [...(byRec.get(item.recId) ?? []), item]);
+        return byRec;
+      }
+
+      /** The worker skips a write whose rev is stale; so does this, out loud. */
+      function stale(rec, rev) {
+        if (rev === undefined || rev === (rec.meta.rev ?? 0)) return false;
+        console.warn(`[preview] skipped a stale write to ${rec.id} (sent rev ${rev}, have ${rec.meta.rev})`);
+        return true;
+      }
+
+      async function dropFrameBlobs(recId, indexes) {
+        for (const index of indexes) await idbDel('blobs', `${recId}:frame:${index}`);
+      }
+
+      async function handle(m) {
+        switch (m.type) {
+          case 'state:get':
+            return stateGet();
+          case 'settings:get':
+            return settingsGet();
+          case 'settings:set':
+            await idbPut('kv', { ...(await settingsGet()), ...m.patch }, 'settings');
+            return { ok: true };
+          case 'session:rename': {
+            const s = await idbGet('sessions', m.id);
+            if (s) await idbPut('sessions', { ...s, name: m.name, updatedAt: Date.now() });
+            return { ok: true };
+          }
+          case 'session:activate': {
+            const s = await idbGet('sessions', m.id);
+            // Activating a closed gripe reopens it.
+            if (s?.closed) await idbPut('sessions', { ...s, closed: false });
+            await idbPut('kv', m.id, 'activeSessionId');
+            return { ok: true };
+          }
+          case 'session:close': {
+            const s = await idbGet('sessions', m.id);
+            if (s) {
+              await idbPut('sessions', {
+                ...s,
+                closed: true,
+                updatedAt: Date.now(),
+                ...(m.uploadedUrl ? { uploadedUrl: m.uploadedUrl } : {}),
+              });
+            }
+            if ((await idbGet('kv', 'activeSessionId')) === m.id) await resumeOpen();
+            return { ok: true };
+          }
+          case 'session:delete': {
+            for (const rec of await idbBySession(m.id)) {
+              await dropFrameBlobs(rec.id, rec.meta.frames.map((f) => f.index));
+              await idbDel('blobs', `${rec.id}:video`);
+              await idbDel('recordings', rec.id);
+            }
+            await idbDel('sessions', m.id);
+            if ((await idbGet('kv', 'activeSessionId')) === m.id) await resumeOpen();
+            return { ok: true };
+          }
+          case 'timeline:move': {
+            for (const [recId, moves] of groupByRec(m.moves)) {
+              const rec = await idbGet('recordings', recId);
+              if (!rec || stale(rec, m.revs?.[recId])) continue;
+              for (const mv of moves) {
+                const item =
+                  mv.kind === 'frame'
+                    ? rec.meta.frames.find((f) => f.index === mv.index)
+                    : rec.meta.transcript[mv.index];
+                if (item) item.tl = mv.tl;
+              }
+              await touch(rec);
+            }
+            return { ok: true };
+          }
+          case 'timeline:delete': {
+            for (const [recId, items] of groupByRec(m.items)) {
+              const rec = await idbGet('recordings', recId);
+              if (!rec || stale(rec, m.revs?.[recId])) continue;
+              const frames = items.filter((i) => i.kind === 'frame').map((i) => i.index);
+              rec.meta.frames = rec.meta.frames.filter((f) => !frames.includes(f.index));
+              await dropFrameBlobs(recId, frames);
+              // Lines are array positions: splice from the back so earlier ones hold.
+              const lines = items.filter((i) => i.kind === 'line').map((i) => i.index).sort((a, b) => b - a);
+              for (const index of lines) rec.meta.transcript.splice(index, 1);
+              await touch(rec);
+            }
+            return { ok: true };
+          }
+          case 'recording:frame:delete': {
+            const rec = await idbGet('recordings', m.id);
+            if (rec) {
+              rec.meta.frames = rec.meta.frames.filter((f) => f.index !== m.index);
+              await dropFrameBlobs(m.id, [m.index]);
+              await touch(rec);
+            }
+            return { ok: true };
+          }
+          case 'recording:line:update': {
+            const rec = await idbGet('recordings', m.id);
+            if (rec && !stale(rec, m.rev) && rec.meta.transcript[m.index]) {
+              rec.meta.transcript[m.index].text = m.text;
+              await touch(rec);
+            }
+            return { ok: true };
+          }
+          case 'recording:line:delete': {
+            const rec = await idbGet('recordings', m.id);
+            if (rec && !stale(rec, m.rev)) {
+              rec.meta.transcript.splice(m.index, 1);
+              await touch(rec);
+            }
+            return { ok: true };
+          }
+          case 'recording:transcript': {
+            const rec = await idbGet('recordings', m.id);
+            if (rec) {
+              rec.meta.transcript = m.transcript;
+              rec.meta.transcriber = 'whisper';
+              // A fresh transcript is unread again, like the worker treats it.
+              rec.meta.reviewed = false;
+              await touch(rec);
+            }
+            return { ok: true };
+          }
+          case 'recording:reviewed': {
+            const rec = await idbGet('recordings', m.id);
+            if (rec) {
+              rec.meta.reviewed = true;
+              await touch(rec);
+            }
+            return { ok: true };
+          }
+          case 'recording:progress':
+          case 'recording:finish': {
+            const rec = await idbGet('recordings', m.id);
+            if (rec) {
+              rec.meta = m.meta;
+              if (m.type === 'recording:finish') rec.state = 'done';
+              else {
+                rec.mime = m.mime;
+                rec.chunks = m.chunks;
+              }
+              await idbPut('recordings', rec);
+            }
+            return { ok: true };
+          }
+          default:
+            // Everything else the panel may send here — recording:start, the pointer
+            // and telemetry relays, strip:track, the hotkeys — has nothing to do
+            // with layout. The harness never records.
+            return { ok: true };
+        }
+      }
+
+      // ── chrome ────────────────────────────────────────────────────────────
+      const listeners = new Set();
+      const noop = () => {};
+      const asyncNoop = async () => {};
+
+      window.chrome = {
+        runtime: {
+          id: 'preview',
+          lastError: undefined,
+          getURL: (path) => `/${String(path).replace(/^\//, '')}`,
+          getManifest: () => ({ version: '1.0.0', name: 'Inloop Recorder (preview)' }),
+          sendMessage: async (message) => {
+            const answer = await handle(message);
+            // The worker broadcasts after every mutation; without it the panel keeps
+            // drawing the pre-drag timeline until something else refreshes it.
+            if (message.type !== 'state:get' && message.type !== 'settings:get') {
+              setTimeout(() => {
+                for (const fn of listeners) fn({ type: 'state:changed' }, {}, noop);
+              }, 0);
+            }
+            return answer;
+          },
+          onMessage: {
+            addListener: (fn) => listeners.add(fn),
+            removeListener: (fn) => listeners.delete(fn),
+            hasListener: (fn) => listeners.has(fn),
+          },
+          onInstalled: { addListener: noop },
+          connect: () => ({ postMessage: noop, disconnect: noop, onMessage: { addListener: noop } }),
+        },
+        sidePanel: { setOptions: asyncNoop, setPanelBehavior: asyncNoop, open: asyncNoop },
+        windows: {
+          WINDOW_ID_CURRENT: -2,
+          getCurrent: async () => ({ id: 1, left: 0, top: 0, width: 1500, height: 900 }),
+          get: async () => ({ id: 1, left: 0, top: 0, width: 1500, height: 900 }),
+          getAll: async () => [],
+          create: async () => ({ id: 2 }),
+          update: asyncNoop,
+          remove: asyncNoop,
+          onBoundsChanged: { addListener: noop },
+          onRemoved: { addListener: noop },
+        },
+        tabs: {
+          query: async () => [{ id: 1, windowId: 1, title: 'Checkout', url: 'http://localhost:3000/checkout' }],
+          get: async () => ({ id: 1, windowId: 1, url: 'http://localhost:3000/checkout' }),
+          create: async () => ({ id: 3 }),
+          update: asyncNoop,
+          remove: asyncNoop,
+          sendMessage: asyncNoop,
+          onUpdated: { addListener: noop },
+          onRemoved: { addListener: noop },
+        },
+        action: { setBadgeText: asyncNoop, setBadgeBackgroundColor: asyncNoop, setTitle: asyncNoop },
+        commands: { getAll: async () => [], onCommand: { addListener: noop } },
+        downloads: { download: asyncNoop },
+        permissions: { contains: async () => true, request: async () => true },
+        storage: {
+          local: { get: async () => ({}), set: asyncNoop, remove: asyncNoop },
+          session: { get: async () => ({}), set: asyncNoop, remove: asyncNoop },
+        },
+      };
+
+      // ── seed ──────────────────────────────────────────────────────────────
+      const clock = (ms) => `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`;
+
+      /**
+       * Something screenshot-shaped, so the filmstrip isn't a wall of flat
+       * rectangles. The stamped label is what makes scrubbing legible here: if the
+       * label doesn't change as you drag, the scrub is broken.
+       */
+      function shot(seed, label) {
+        const c = document.createElement('canvas');
+        c.width = 640;
+        c.height = 400;
+        const x = c.getContext('2d');
+        x.fillStyle = '#f7f7f4';
+        x.fillRect(0, 0, 640, 400);
+        x.fillStyle = '#ffffff';
+        x.fillRect(0, 0, 640, 34);
+        x.fillRect(0, 34, 150, 366);
+        x.strokeStyle = '#e2e0da';
+        x.lineWidth = 1;
+        x.beginPath();
+        x.moveTo(0, 34.5);
+        x.lineTo(640, 34.5);
+        x.moveTo(150.5, 34);
+        x.lineTo(150.5, 400);
+        x.stroke();
+        x.fillStyle = '#2f56d8';
+        x.fillRect(14, 12, 10, 10);
+        let y = 60 + ((seed * 13) % 40);
+        for (let i = 0; i < 14; i++) {
+          x.fillStyle = i % 4 === seed % 4 ? '#c9cbd2' : '#e6e5e0';
+          x.fillRect(176, y, 120 + ((seed * 37 + i * 61) % 380), 12);
+          y += 22;
+        }
+        x.fillStyle = '#e6e5e0';
+        for (let i = 0; i < 8; i++) x.fillRect(20, 60 + i * 26, 110, 12);
+        if (label) {
+          x.fillStyle = 'rgba(20,22,30,.82)';
+          x.fillRect(176, 296, 268, 76);
+          x.fillStyle = '#ffffff';
+          x.font = '600 46px ui-monospace, monospace';
+          x.fillText(label, 192, 350);
+        }
+        return new Promise((resolve) => c.toBlob(resolve, 'image/jpeg', 0.8));
+      }
+
+      async function seed() {
+        check(RECORDINGS, SESSIONS);
+        // A stale seed from another mode would still answer state:get, so the whole
+        // database goes first.
+        for (const name of ['sessions', 'recordings', 'blobs', 'kv']) await idbClear(name);
+        await idbPut('kv', SETTINGS, 'settings');
+        await idbPut('kv', SESSIONS.length ? SID : null, 'activeSessionId');
+        for (const s of SESSIONS) await idbPut('sessions', s);
+        let written = 0;
+        for (const rec of RECORDINGS) {
+          await idbPut('recordings', rec);
+          const frames = await Promise.all(
+            rec.meta.frames.map(async (f) => [
+              `${rec.id}:frame:${f.index}`,
+              await shot(rec.index * 7 + f.index, `${rec.index}·${clock(f.t)}`),
+            ]),
+          );
+          await idbPutMany('blobs', frames);
+          written += frames.length;
+        }
+        const total = RECORDINGS.reduce((n, r) => n + r.meta.frames.length, 0);
+        if (written !== total) throw new Error(`seeded ${written} frame blobs, expected ${total}`);
+      }
+
+      seed().then(
+        () => {
+          const script = document.createElement('script');
+          script.type = 'module';
+          script.src = '/sidepanel.js?t=' + Date.now();
+          document.body.append(script);
+        },
+        (error) => {
+          document.body.textContent = String(error);
+          document.body.style.cssText = 'font:12px ui-monospace,monospace;color:#b00020;padding:16px;white-space:pre-wrap';
+          throw error;
+        },
+      );
+    </script>
+    <script>
+      // The built panel's stylesheet is linked from dist/sidepanel.html, which this
+      // page replaces — and its name never changes, so it needs the same
+      // cache-buster as the bundle.
+      const css = document.createElement('link');
+      css.rel = 'stylesheet';
+      css.href = '/assets/sidepanel.css?t=' + Date.now();
+      document.head.append(css);
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

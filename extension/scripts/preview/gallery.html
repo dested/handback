@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="color-scheme" content="light" />
+    <title>Inloop — panel widths</title>
+    <style>
+      /* Harness chrome, held to the product's law: light paper, cobalt accent. */
+      html, body { height: 100%; margin: 0; background: #f7f7f4; color: #6b6a63;
+        font: 11px ui-monospace, SFMono-Regular, monospace; }
+      .bar { display: flex; align-items: baseline; gap: 14px; padding: 10px 12px 0; }
+      .bar b { color: #16181f; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+      .bar a { color: #6b6a63; text-decoration: none; border-bottom: 1px solid transparent; padding-bottom: 1px; }
+      .bar a:hover { color: #16181f; }
+      .bar a.on { color: #2f56d8; border-color: #2f56d8; }
+      .row { display: flex; gap: 12px; align-items: flex-start; padding: 10px 12px 16px; }
+      .cell { display: flex; flex-direction: column; gap: 5px; }
+      .cell > div { display: flex; justify-content: space-between; gap: 8px; }
+      .cell em { color: #2f56d8; font-style: normal; }
+      iframe { border: 1px solid #e2e0da; background: #fff; display: block; }
+    </style>
+  </head>
+  <body>
+    <div class="bar" id="bar"><b>inloop panel</b></div>
+    <div class="row" id="row"></div>
+    <script>
+      /**
+       * One iframe per width token, so the panel's media queries see a real width.
+       * A token is `W` (shares the row height) or a SHAPE, `WxH` — the popped editor
+       * strip is a shape, not a width, so 1500x400 has to be expressible. A shape
+       * runs with ?pop=1, which is exactly the query the real popped window carries.
+       */
+      const q = new URLSearchParams(location.search);
+      const tokens = (q.get('w') || '380,560,900').split(',').filter(Boolean);
+      const mode = q.get('mode') || 'rec';
+      const height = Number(q.get('h')) || Math.max(560, window.innerHeight - 70);
+
+      for (const m of ['rec', 'long', 'empty']) {
+        const a = document.createElement('a');
+        a.textContent = m;
+        a.href = `?w=${tokens.join(',')}&mode=${m}`;
+        if (m === mode) a.className = 'on';
+        document.getElementById('bar').append(a);
+      }
+
+      for (const token of tokens) {
+        const [w, own] = String(token).split('x').map(Number);
+        const cell = document.createElement('div');
+        cell.className = 'cell';
+        const title = document.createElement('div');
+        const label = document.createElement('span');
+        label.textContent = own ? `${w}×${own}` : `${w}px`;
+        title.append(label);
+        if (own) {
+          const popped = document.createElement('em');
+          popped.textContent = 'popped';
+          title.append(popped);
+        }
+        const frame = document.createElement('iframe');
+        frame.src = `/preview.html?mode=${mode}${own ? '&pop=1' : ''}&t=${Date.now()}`;
+        frame.width = w;
+        frame.height = own || height;
+        cell.append(title, frame);
+        document.getElementById('row').append(cell);
+      }
+    </script>
+  </body>
+</html>

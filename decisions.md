@@ -45,6 +45,17 @@ router; invite id doubles as the join-link token, no email infra needed v1.
 **Rejected:** better-auth organization plugin (opaque schema + client API for something this
 small).
 
+## 2026-07-29 — Extension: port Gripe's logic verbatim, rebuild every surface; cloud-only output
+**Why:** the recorder's behavior (64×64-cell dedup thresholds, forced-keyframe rules, one-timeline
+position math, interrupted-take recovery, Whisper FIFO, dock key guards) is battle-tested — its
+look wasn't. So `extension/` ports the logic contracts (lib/timeline.ts near-verbatim) under an
+all-new light/cobalt UI, and the done-flow uploads straight to `/api/ingest` with the panel's
+saved `ilp_` token — no local folders, no File System Access, no `downloads` permission at all.
+Fresh IndexedDB (`inloop-recorder` v1), no migration from Gripe's DB.
+**Rejected:** reusing Gripe's UI (Sal: "not a single div"), keeping local-folder output alongside
+upload (two sinks, double the failure modes; the CLI covers offline pushes), migrating Gripe's
+IndexedDB (different product, zero users to migrate).
+
 ## 2026-07-29 — Agents pull over MCP against token REST, not tRPC
 **Why:** Sal chose the pull model. A stdio MCP (`cli/mcp.ts`) wraps three REST endpoints under
 /api/ingest so agent auth = the same ilp_ tokens; tRPC stays cookie-session-only for humans.
