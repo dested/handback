@@ -1,0 +1,89 @@
+/*
+ * Inloop Recorder — panel styles. LIGHT ONLY: no dark mode, nothing orange.
+ * Same language as the web app (repo ui.md): warm paper, near-black ink, one
+ * cobalt accent, hairline rules, mono for timecodes. Fonts are system-stack
+ * here — an extension panel must not fetch webfonts.
+ */
+:root {
+  /* Paper + ink */
+  --paper: #fbfaf7;
+  --card: #ffffff;
+  --ink: #23262e;
+  --muted: #6b7078;
+  --border: #e6e4dd;
+
+  /* The reviewer's pen */
+  --cobalt: #2f56d8;
+  --cobalt-wash: #eef1fc;
+
+  /* Status inks (match the web app exactly) */
+  --review: #7a3fc0;
+  --review-wash: #f3ecfb;
+  --approve: #22795a;
+  --approve-wash: #e9f5ef;
+  --danger: #c23b3b;
+
+  /* Type */
+  --font-body:
+    'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-mono: 'Cascadia Mono', 'Consolas', ui-monospace, monospace;
+
+  /* Scale — stepped up at 480/760px by the media queries below */
+  --fs-0: 11px;
+  --fs-1: 12px;
+  --fs-2: 13px;
+  --fs-3: 15px;
+  --fs-4: 18px;
+  --gap: 10px;
+  --radius: 6px;
+
+  /* Timeline */
+  --cell-w: 72px;
+}
+
+@media (min-width: 480px) {
+  :root {
+    --fs-0: 12px;
+    --fs-1: 13px;
+    --fs-2: 14px;
+    --fs-3: 16px;
+    --fs-4: 20px;
+    --gap: 12px;
+  }
+}
+
+@media (min-width: 760px) {
+  :root {
+    --fs-4: 22px;
+    --gap: 14px;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: var(--fs-2);
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+/* Hairline rule — the section divider, same motif as the web app. */
+.rule {
+  border-top: 1px solid var(--border);
+}

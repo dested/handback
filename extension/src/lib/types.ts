@@ -1,0 +1,166 @@
+/**
+ * A gripe is a narrated screen recording, taken in one or more sittings, and
+ * everything here describes one: the takes, what was said over them, the frames
+ * that survived dedup, and what the page complained about while it was running.
+ *
+ * Semantics are ported from the original Gripe extension and must not drift —
+ * the Inloop cloud viewer and report reader consume exactly these shapes.
+ */
+
+export interface PageEvent {
+  level: 'error' | 'warn' | 'network';
+  message: string;
+  detail?: string;
+  ts: number;
+}
+
+export interface TranscriptSegment {
+  /** ms from recording start — where the speaker *started* the line */
+  t: number;
+  /** Spoken length in ms when the transcriber reported one. A line covers a window, not an instant. */
+  d?: number;
+  /** Position on the gripe's unified axis, ms. Set only when a human moved it; absent = computed from t. */
+  tl?: number;
+  text: string;
+}
+
+/** Where the mouse was, sampled by the recorded tab while a walkthrough runs. All lengths are CSS px. */
+export interface PointerSample {
+  /** Absolute ms — the panel converts it to recording-relative. */
+  ts: number;
+  /** Viewport coordinates. */
+  x: number;
+  y: number;
+  /** Screen coordinates (`MouseEvent.screenX/Y`). */
+  sx: number;
+  sy: number;
+  /** Viewport size, for the tab-capture mapping. */
+  vw: number;
+  vh: number;
+  /** Screen size, for the full-screen mapping. */
+  sw: number;
+  sh: number;
+  selector?: string;
+  text?: string;
+}
+
+/** The pointer as it applies to one keyframe. */
+export interface FramePointer {
+  /** Position inside the frame, 0–1. Absent when the capture couldn't be mapped (window capture, second monitor). */
+  nx?: number;
+  ny?: number;
+  /** What the cursor was over, in the recorded tab. */
+  selector?: string;
+  text?: string;
+}
+
+export interface RecordingFrame {
+  index: number;
+  /** ms from recording start */
+  t: number;
+  /** Path relative to the gripe folder’s take dir, e.g. frames/03-0125.jpg */
+  file: string;
+  /**
+   * Why this frame exists: first frame, dedup said "new", the human hit the mark
+   * hotkey, a click just happened in the recorded tab, the page navigated (SPA
+   * route or full load), or the heartbeat fired — nothing had been kept for a
+   * while and the screen wasn't strictly identical.
+   */
+  reason: 'start' | 'change' | 'mark' | 'click' | 'nav' | 'beat';
+  /** Changed-cell count (of 64×64) vs the closest of the last kept frames (absent on the first). */
+  dist?: number;
+  /** Mouse at capture time, when the recorded tab was reporting it. */
+  pointer?: FramePointer;
+  /** Position on the gripe's unified axis, ms. Set only when a human moved it; absent = computed from t. */
+  tl?: number;
+}
+
+export interface RecordingMeta {
+  startedAt: number;
+  durationMs: number;
+  /** Candidate frames examined; frames[] is what survived dedup. */
+  sampled: number;
+  frames: RecordingFrame[];
+  transcript: TranscriptSegment[];
+  /** Set when the on-device Whisper pass replaced the live Web Speech lines; absent = Web Speech or none. */
+  transcriber?: 'whisper';
+  /** Bumped on every content mutation; a line edit against a stale rev is skipped. */
+  rev?: number;
+  /** True once a human read the transcript back and said it was right. Reset when Whisper replaces it. */
+  reviewed?: boolean;
+  /** Console/network events forwarded by content scripts while recording. ts is absolute. */
+  events: PageEvent[];
+  /** Origin the events are scoped to — the tab that was in front at Record. Absent = no scope (kept everything). */
+  eventScope?: string;
+  /** Events from other origins that were thrown away; reported rather than hidden. */
+  droppedEvents?: number;
+  videoFile: string;
+}
+
+/**
+ * One part of a gripe. Recording and re-recording appends parts to the same
+ * session, so a walkthrough is not a kind of session — it's a record inside one.
+ */
+export interface Recording {
+  id: string;
+  sessionId: string;
+  /** 1-based part number within the gripe; names the rec-NN folder. */
+  index: number;
+  createdAt: number;
+  state: 'recording' | 'done';
+  /** Set when the panel died mid-recording and the chunks were reassembled. */
+  interrupted?: boolean;
+  /** MediaRecorder mime, needed to reassemble chunks. */
+  mime: string;
+  /** Count of persisted 1s chunk blobs (`<id>:chunk:<n>`, n from 1) while state is 'recording'. */
+  chunks: number;
+  meta: RecordingMeta;
+}
+
+export interface Session {
+  id: string;
+  name: string;
+  slug: string;
+  createdAt: number;
+  updatedAt: number;
+  origin: string;
+  /** Source of the next part index. Deleting a part doesn't renumber. */
+  recCount: number;
+  /** Handed off and finished. A closed session never receives another part; activating it reopens it. */
+  closed?: boolean;
+  /** Set once the gripe uploaded to Inloop — the cloud viewer URL. */
+  uploadedUrl?: string;
+}
+
+/** One thing sitting on the gripe's timeline, addressed the way the store finds it again. */
+export type TimelineRef =
+  | { kind: 'frame'; recId: string; index: number } // RecordingFrame.index — identity, survives deletes
+  | { kind: 'line'; recId: string; index: number }; // array position in meta.transcript
+
+/** A dragged item and where it landed. */
+export type TimelineMove = TimelineRef & { tl: number };
+
+export interface Settings {
+  /** Start every recording with the on-page ink active — draw first, click through on demand. */
+  drawStart: boolean;
+  lang: string;
+  /** The Inloop workspace this extension uploads to. */
+  serverUrl: string;
+  /** Bearer token (ilp_…) minted under Team → API tokens. Stored locally only. */
+  apiToken: string;
+}
+
+export const DEFAULT_SETTINGS: Settings = {
+  drawStart: true,
+  lang: '',
+  serverUrl: 'https://inloop.dested.com',
+  apiToken: '',
+};
+
+/** The reviewer's-pen cobalt — Inloop's one accent. Never orange, never dark UI. */
+export const COBALT = '#2f56d8';
+
+/** Contact sheet shape. The sheet builder and the report that cites the sheets must agree. */
+export const GRID_COLS = 3;
+export const GRID_ROWS = 3;
+export const GRID_PER_SHEET = GRID_COLS * GRID_ROWS;
