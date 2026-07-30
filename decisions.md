@@ -61,3 +61,25 @@ IndexedDB (different product, zero users to migrate).
 /api/ingest so agent auth = the same ilp_ tokens; tRPC stays cookie-session-only for humans.
 **Rejected:** push model (cloud-dispatched agents — needs infra Sal didn't pick), MCP hitting tRPC
 with a synthetic session.
+
+## 2026-07-30 — Deployed on Drydock (own AWS box), not Render; render.yaml deleted
+**Why:** Drydock already runs the fleet on one shared ARM EC2 box (~$30/mo for everything) with
+Caddy auto-TLS, a shared Postgres container and OIDC CI — inloop costs no new infrastructure, and
+`inloop.dested.com` lives in the same Route53 zone as the rest. `drydock.yaml` is now the deploy
+manifest and the portal is its source of truth; the old `render.yaml` was consumed once as a
+detection seed and removed.
+**Rejected:** Render (a paid service per app for something the box already does), a hand-written
+Dockerfile (Drydock regenerates the managed files on every re-wire and would overwrite it).
+
+## 2026-07-30 — Pre-deploy is `bunx prisma db push`, without `--accept-data-loss`
+**Why:** the pre-deploy task runs before every deploy, so the flag would let a schema edit silently
+drop a production column. Without it, a destructive change fails the deploy loudly and prod keeps
+serving the old image — the right failure. There are no `prisma/migrations` yet; push is the model.
+**Rejected:** `--accept-data-loss` (what render.yaml carried), running migrations by hand.
+
+## 2026-07-30 — The app keeps its own IAM keys in SSM rather than using the ECS task role
+**Why:** `inloop-app` is scoped to exactly the `inloop-files` bucket, and `server/env.ts` requires
+`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` as a hard zod contract that holds identically in dev and
+prod. The box's instance role is a fleet-wide credential — a much wider blast radius for presigning.
+**Rejected:** dropping the keys and letting the SDK fall back to the task role (widens what a
+compromised container can reach, and makes local dev and prod behave differently).

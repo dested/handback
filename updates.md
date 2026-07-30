@@ -2,6 +2,18 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-07-30 — shipped: inloop.dested.com, deployed by Drydock
+Asked: "can you deploy this with drydock." Done: pushed the pending 3000 → 3995 port change and
+deleted `render.yaml` (Drydock read it once as a detection seed); created the `inloop` project in
+the portal (ssr · bun · prisma · database, size `m`, port 3995, predeploy `bunx prisma db push`,
+domain inloop.dested.com in the shared dested.com zone), which wired the repo (Dockerfile,
+`.github/workflows/drydock.yml`, `drydock.yaml`) in one commit; copied the `inloop-app` S3 keys +
+AWS_REGION/S3_BUCKET into SSM and applied so the task def carried all 7 secrets before CI's deploy;
+fixed the bucket's CORS origin 3000 → 3995. CI green on the first run, schema pushed by the
+pre-deploy task, service steady on rev 3, TLS valid, `/healthz` → ok, landing SSRs.
+Touched: cli/push.ts, server.ts, server/env.ts, src/entry-server.tsx, scripts/init.ts, .env.example,
+README.md, CLAUDE.md, render.yaml (deleted), cliffnotes.md, decisions.md.
+
 ## 2026-07-29 — root script for the extension build
 Asked: "put it in the main node script." Done: `bun run build:extension` at the repo root
 (`npm --prefix extension run build`); deliberately NOT chained into `build` — the server deploy
