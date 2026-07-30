@@ -7,7 +7,6 @@
  */
 
 import { GRID_COLS as COLS, GRID_ROWS as ROWS, GRID_PER_SHEET } from '../lib/types';
-import { pad2 } from '../lib/format';
 
 const CELL_W = 480;
 const LABEL_H = 22;
@@ -16,11 +15,6 @@ const GRID_QUALITY = 0.85;
 export interface GridFrame {
   blob: Blob;
   label: string;
-}
-
-/** Where sheet `n` (1-based) lands inside a take's folder. The report cites the same path. */
-export function gridFileName(n: number): string {
-  return `grids/grid_${pad2(n)}.jpg`;
 }
 
 function toJpeg(canvas: HTMLCanvasElement): Promise<Blob> {

@@ -22,6 +22,7 @@ import {
 } from '../lib/report';
 import { contentTypeFor, pushGripe, type GripeFile, type UploadProgress } from '../lib/upload';
 import { Recorder, type RecorderUpdate } from './recorder';
+import { Dictation } from '../content/speech';
 import { makeGrids, type GridFrame } from './grids';
 import { transcribeRecording, type TranscribeProgress } from './transcribe';
 import { Timeline } from './Timeline';
@@ -113,6 +114,8 @@ export function App() {
   const whisperQueue = useRef<string[]>([]);
   const whisperRunning = useRef(false);
   const recorderRef = useRef<Recorder | null>(null);
+  /** micperm.html is opened once per panel life — a second Record records silent. */
+  const micTabOpened = useRef(false);
   const recovering = useRef<Set<string>>(new Set());
   // The Stop button, the page dock, and Chrome's own "Stop sharing" bar can all fire.
   const stopGuard = useRef(false);
@@ -252,8 +255,30 @@ export function App() {
     }
   };
 
+  /**
+   * The side panel can't render the getUserMedia prompt — it rejects without
+   * ever asking. First Record press without a granted mic opens micperm.html
+   * in a tab (prompts work there); a second press records anyway, silent.
+   */
+  const ensureMic = async (): Promise<boolean> => {
+    try {
+      const status = await navigator.permissions.query({ name: 'microphone' as PermissionName });
+      if (status.state === 'granted') return true;
+    } catch {
+      return true; // no Permissions API — let getUserMedia decide
+    }
+    if (!micTabOpened.current) {
+      micTabOpened.current = true;
+      await chrome.tabs.create({ url: chrome.runtime.getURL('micperm.html') });
+      say('grant the mic in the new tab, then hit Record');
+      return false;
+    }
+    return true;
+  };
+
   const startRecording = async () => {
     if (recorderRef.current) return;
+    if (!(await ensureMic())) return;
     setShipped(null);
     setUploadError(null);
     // The tab in front now is the app being walked through; everything else that
@@ -266,6 +291,7 @@ export function App() {
       state.settings.lang,
       scope.startsWith('http') ? scope : '',
       id,
+      Dictation,
     );
     try {
       await r.start();
@@ -637,11 +663,19 @@ export function App() {
               {stopping ? 'saving…' : 'stop'}
             </button>
           </div>
-          <div className="ticker">
-            {recUpdate.micState === 'denied'
-              ? 'the microphone is blocked — this take will have no narration'
-              : recUpdate.interim || (recUpdate.micState === 'listening' ? 'listening…' : '')}
-          </div>
+          {recUpdate.micState === 'denied' ? (
+            <button
+              className="ticker warn"
+              title="Open the permission page in a tab"
+              onClick={() => void chrome.tabs.create({ url: chrome.runtime.getURL('micperm.html') })}
+            >
+              microphone blocked — no narration this take · fix it
+            </button>
+          ) : (
+            <div className="ticker">
+              {recUpdate.interim || (recUpdate.micState === 'listening' ? 'listening…' : '')}
+            </div>
+          )}
           {pageDock && <div className="note">draw and stop from the little bar on the page</div>}
         </section>
       ) : (

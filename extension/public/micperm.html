@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="color-scheme" content="light" />
+<title>Inloop — microphone</title>
+<style>
+  /* Inloop's one law: light paper, cobalt ink, nothing orange, nothing dark. */
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #fbfaf7; color: #23262e; font: 13px/1.55 ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .card { max-width: 400px; padding: 28px 30px; border: 1px solid #e2e0da; border-radius: 6px; background: #ffffff; }
+  .mark { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+  .mark span { font-size: 10.5px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: #6b6a63; }
+  h1 { font-size: 15px; font-weight: 600; margin: 0 0 6px; }
+  p { margin: 6px 0; color: #6b6a63; }
+  b { color: #23262e; font-weight: 600; }
+  .err { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; color: #c23b3b; }
+  .ok { color: #2e7d4f; }
+  button { font: inherit; margin-top: 12px; margin-right: 7px; padding: 8px 14px; border-radius: 6px; border: 0; cursor: pointer; background: #2f56d8; color: #ffffff; font-weight: 650; font-size: 12.5px; }
+  button:hover { background: #2748b8; }
+  button.ghost { background: none; border: 1px solid #e2e0da; color: #6b6a63; }
+  button.ghost:hover { color: #23262e; border-color: #c9cbd2; background: none; }
+  .state { display: none; }
+  [data-state="asking"] .asking, [data-state="granted"] .granted, [data-state="denied"] .denied { display: block; }
+</style>
+</head>
+<body data-state="asking">
+  <div class="card">
+    <div class="mark">
+      <svg width="16" height="16" viewBox="0 0 20 16" aria-hidden="true"><circle cx="7" cy="8" r="5.6" fill="none" stroke="#23262e" stroke-width="1.8"/><circle cx="13" cy="8" r="5.6" fill="none" stroke="#2f56d8" stroke-width="1.8"/></svg>
+      <span>Inloop</span>
+    </div>
+    <div class="state asking">
+      <h1>One-time microphone permission</h1>
+      <p>Chrome can't show this prompt inside the side panel, so it happens here instead. Say yes and your walkthroughs carry the narration.</p>
+    </div>
+    <div class="state granted">
+      <h1 class="ok">Mic granted</h1>
+      <p>Close this tab and hit <b>Record</b> in the panel.</p>
+    </div>
+    <div class="state denied">
+      <h1>Microphone blocked</h1>
+      <p>Chrome said: <span class="err" id="err"></span></p>
+      <p>Allow the mic for this extension in site settings, then try again. On a Mac, also check <b>System Settings → Privacy &amp; Security → Microphone → Chrome</b> — if Chrome itself has no mic access, no site can.</p>
+      <button id="retry">Try again</button>
+      <button id="settings" class="ghost">Open mic settings</button>
+    </div>
+  </div>
+  <script src="micperm.js"></script>
+</body>
+</html>

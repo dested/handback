@@ -2,6 +2,15 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-07-29 — post-review fixes from the panel agent's findings
+Asked: (review pass) verify A2-panel's 4 findings; Sal asked for a testable build. Done: wired
+`Dictation` into the Recorder's ticker slot (live interim line was dead UI); ported gripe's
+micperm.html/js flow restyled to Inloop light (side panel can't render the getUserMedia prompt —
+first Record opens the page in a tab; blocked-mic ticker is now a clickable fix); deleted dead
+`gridFileName` (lib/report.ts `sheetFile` is the one owner). Findings 2/3 were already resolved in
+the final App.tsx. tsc clean, rebuilt, preview CLEAN. dist/ ready for load-unpacked.
+Touched: extension/src/sidepanel/{App.tsx,grids.ts,panel.css}, extension/public/micperm.{html,js}
+
 ## 2026-07-29 — the extension, rebuilt from scratch
 Asked: "REBUILD THE EXTENSION FROM SCRATCH… the timeline, the drawing, the shortcuts, the easy
 use. Make it incredible." Done: `extension/` — MV3 side-panel recorder porting Gripe's proven

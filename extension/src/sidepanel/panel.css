@@ -189,6 +189,21 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A blocked mic is the one live-state line you can click — it reads as a fix, not a label. */
+button.ticker.warn {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  font: inherit;
+  color: var(--danger);
+  cursor: pointer;
+}
+button.ticker.warn:hover {
+  text-decoration: underline;
+}
 .note {
   font-size: var(--fs-0);
   color: var(--muted);
