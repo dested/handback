@@ -6,8 +6,10 @@ import type {
   RecordingFrame,
   Session,
   Settings,
+  WorkspaceLink,
 } from '../lib/types';
-import { DEFAULT_SETTINGS } from '../lib/types';
+import { DEFAULT_SERVER, DEFAULT_SETTINGS, activeLink, linkId } from '../lib/types';
+import { fetchContext, type WorkspaceContext } from '../lib/context';
 import { send } from '../lib/messages';
 import { blobs, kv } from '../lib/db';
 import { dateTime, mmss, recDirName } from '../lib/format';
@@ -164,6 +166,10 @@ export function App() {
   /** The server's own words, folded away until someone asks for them. */
   const [showErrDetail, setShowErrDetail] = useState(false);
   const [shipped, setShipped] = useState<Shipped | null>(null);
+  /** What the active token can see — the workspace's own name and its projects. Null until fetched, or when it failed. */
+  const [ctx, setCtx] = useState<WorkspaceContext | null>(null);
+  /** The context fetch failed — the project picker hides rather than sitting dead; routing falls to origin hints. */
+  const [ctxFailed, setCtxFailed] = useState(false);
   const whisperQueue = useRef<string[]>([]);
   const whisperRunning = useRef(false);
   const recorderRef = useRef<Recorder | null>(null);
@@ -188,6 +194,19 @@ export function App() {
     () => state.sessions.find((s) => s.id === state.activeSessionId) ?? null,
     [state.sessions, state.activeSessionId],
   );
+
+  /**
+   * The workspace uploads go to. A recorder can hold keys to several; everything
+   * that used to read `settings.serverUrl` / `settings.apiToken` reads this.
+   */
+  const link = activeLink(state.settings);
+  /**
+   * A token is the whole of "linked": without one the recorder still records, it
+   * just has nowhere to hand anything to. The workspace's /recorder page is where
+   * that gets fixed in one click, so every dead end in the panel points at it.
+   */
+  const linked = Boolean(link);
+  const serverUrl = link?.serverUrl ?? DEFAULT_SERVER;
 
   const refresh = useCallback(async () => {
     const next = await send<PanelState>({ type: 'state:get' });
@@ -233,6 +252,45 @@ export function App() {
     setName(session?.name ?? '');
   }, [session?.id, session?.name]);
 
+  /**
+   * What the active token can see: the workspace's real name, and the projects a
+   * gripe may be pinned to. It also self-heals the stored link — a token pasted by
+   * hand, or migrated from 1.1.x, has no org id until the workspace says so.
+   * A failure is not an error state: without it the gripe still routes by origin.
+   */
+  useEffect(() => {
+    let live = true;
+    setCtx(null);
+    setCtxFailed(false);
+    if (!link) return;
+    const current = link;
+    void (async () => {
+      const answer = await fetchContext(current).catch(() => null);
+      if (!live) return;
+      if (!answer) {
+        setCtxFailed(true);
+        return;
+      }
+      setCtx(answer);
+      if (answer.org.id === current.orgId && answer.org.name === current.orgName) return;
+      const corrected: WorkspaceLink = {
+        ...current,
+        orgId: answer.org.id,
+        orgName: answer.org.name,
+        id: linkId(current.serverUrl, answer.org.id),
+      };
+      // The corrected id may already be taken by a link added under the real org —
+      // one slot per (server, org), so that one is absorbed.
+      const links = settingsRef.current.links
+        .filter((l) => l.id !== current.id && l.id !== corrected.id)
+        .concat(corrected);
+      await send({ type: 'settings:set', patch: { links, activeLinkId: corrected.id } });
+    })();
+    return () => {
+      live = false;
+    };
+  }, [link?.id, link?.apiToken]);
+
   // ── transcription queue ───────────────────────────────────────────────
   /**
    * Runs after the take is already saved, never before: on success it swaps in the
@@ -243,7 +301,17 @@ export function App() {
     async (id: string) => {
       const video = await blobs.get(`${id}:video`);
       if (!video) return;
-      const result = await transcribeRecording(video, settingsRef.current, setWhisper);
+      const l = activeLink(settingsRef.current);
+      const result = await transcribeRecording(
+        video,
+        {
+          serverUrl: l?.serverUrl ?? '',
+          apiToken: l?.apiToken ?? '',
+          lang: settingsRef.current.lang,
+          onDevice: settingsRef.current.onDeviceTranscription,
+        },
+        setWhisper,
+      );
       if (!result?.segments.length) return;
 
       // Then the cleanup pass, which knows what the page was called and what it
@@ -253,8 +321,8 @@ export function App() {
       const rec = stateRef.current.recordings.find((r) => r.id === id);
       const origin = stateRef.current.sessions.find((s) => s.id === rec?.sessionId)?.origin;
       const polished = await polishTranscript(result.segments, {
-        serverUrl: settingsRef.current.serverUrl,
-        apiToken: settingsRef.current.apiToken,
+        serverUrl: l?.serverUrl ?? '',
+        apiToken: l?.apiToken ?? '',
         origin,
         events: rec?.meta.events,
       }).catch(() => null);
@@ -531,11 +599,17 @@ export function App() {
       say('nothing recorded yet');
       return;
     }
-    if (!state.settings.apiToken.trim()) {
+    if (!link?.apiToken.trim()) {
       setShowSettings(true);
       say('link a workspace first');
       return;
     }
+    // A project picked under another workspace, or one this token never confirmed,
+    // would 400 the declare. Let the workspace route by origin instead.
+    const projectId =
+      target.projectId && ctx?.projects.some((p) => p.id === target.projectId)
+        ? target.projectId
+        : undefined;
     await navigator.clipboard
       .writeText(agentPrompt(target, undefined, takes.length))
       .catch(() => {});
@@ -550,11 +624,11 @@ export function App() {
         say(`${bundle.missing} keyframe${bundle.missing === 1 ? '' : 's'} had gone missing`);
       }
       const { url } = await pushGripe(
-        { serverUrl: state.settings.serverUrl, apiToken: state.settings.apiToken },
+        { serverUrl: link.serverUrl, apiToken: link.apiToken },
         target,
         bundle.takes,
         bundle.files,
-        setProgress,
+        { projectId, onProgress: setProgress },
       );
       const brief = agentPrompt(target, url, bundle.takes.length);
       const copied = await navigator.clipboard
@@ -609,16 +683,13 @@ export function App() {
   /** Other gripes than this one — the only reason the history button exists. */
   const others = state.sessions.filter((s) => s.id !== state.activeSessionId).length;
 
-  /**
-   * A token is the whole of "linked": without one the recorder still records, it
-   * just has nowhere to hand anything to. The workspace's /recorder page is where
-   * that gets fixed in one click, so every dead end in the panel points at it.
-   */
-  const linked = Boolean(state.settings.apiToken);
-  const serverUrl = state.settings.serverUrl || 'https://handback.dev';
   const serverHost = hostOf(serverUrl);
   const recorderUrl = `${serverUrl.replace(/\/+$/, '')}/recorder`;
   const openRecorderUrl = () => void chrome.tabs.create({ url: recorderUrl });
+
+  /** Where the workspace would file this gripe on its own, from the recorded origin. */
+  const autoProject = ctx?.projects.find((p) => session && p.originHints.includes(session.origin));
+  const autoLabel = `auto${autoProject ? ` → ${autoProject.name}` : ''}`;
 
   const summary = [
     // Duration, not a count — the panel presents one timeline.
@@ -774,7 +845,6 @@ export function App() {
               settings={state.settings}
               onPatch={patchSettings}
               onOpenRecorder={openRecorderUrl}
-              serverHost={serverHost}
             />
           </section>
           <div className="rule" />
@@ -905,6 +975,70 @@ export function App() {
           {statusRow}
           {linked && hasContent && (
             <>
+              {/* Where it lands, said as a sentence you can change: workspace · project.
+                  Above the button — the destination is read before the trigger is pulled. */}
+              <div className="dest">
+                <span className="dest-to">to</span>
+                <select
+                  className="dest-sel"
+                  value={link?.id ?? ''}
+                  onChange={(e) => {
+                    if (e.target.value === '__add') {
+                      openRecorderUrl();
+                      return;
+                    }
+                    void patchSettings({ activeLinkId: e.target.value });
+                  }}
+                >
+                  {state.settings.links.map((l) => (
+                    <option key={l.id} value={l.id}>
+                      {l.orgName || hostOf(l.serverUrl)}
+                    </option>
+                  ))}
+                  <option value="__add">+ link another workspace…</option>
+                </select>
+                {/* Fetch failed, or the workspace has no projects = no picker at all: a
+                    dead control promises a choice that doesn't exist right now. The
+                    workspace still routes by origin either way. */}
+                {!ctxFailed && !(ctx && ctx.projects.length === 0) && (
+                  <>
+                    <span className="dest-dot">·</span>
+                    <select
+                      className="dest-sel"
+                      value={
+                        session &&
+                        ctx &&
+                        session.projectId &&
+                        ctx.projects.some((p) => p.id === session.projectId)
+                          ? session.projectId
+                          : ''
+                      }
+                      disabled={!ctx || !session}
+                      onChange={(e) => {
+                        if (!session) return;
+                        const projectId = e.target.value;
+                        void (async () => {
+                          await send({
+                            type: 'session:project',
+                            id: session.id,
+                            projectId,
+                            projectName: ctx?.projects.find((p) => p.id === projectId)?.name ?? '',
+                          });
+                          await refresh();
+                        })();
+                      }}
+                    >
+                      {/* Loading reads as loading, not as a decision already made. */}
+                      <option value="">{ctx ? autoLabel : 'loading projects…'}</option>
+                      {(ctx?.projects ?? []).map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                  </>
+                )}
+              </div>
               <button
                 className="primary send"
                 disabled={recording || uploading}
@@ -913,7 +1047,7 @@ export function App() {
               >
                 {uploading ? 'sending…' : 'send to Handback'}
               </button>
-              <p className="send-sub">uploads to {serverHost} · copies a brief for your agent</p>
+              <p className="send-sub">copies a brief for your agent</p>
             </>
           )}
           {!linked && (
@@ -967,49 +1101,91 @@ function Mark() {
 }
 
 /**
- * Everything optional, in sentences. The server and token live in this browser's
- * IndexedDB and nowhere else — worth saying out loud next to a password field.
- * The link state leads because the fields below it are the manual way round; a
- * hand-pasted token has no workspace name to show, so pasting one clears it.
+ * Everything optional, in sentences. The workspaces lead: a recorder can hold
+ * keys to several, one of them is where the next gripe goes, and clicking a row
+ * is how that changes. The tokens live in this browser's IndexedDB and nowhere
+ * else — worth saying out loud next to a password field. The fields at the
+ * bottom are the manual way round; a hand-pasted token has no workspace name
+ * until the panel asks the server for one.
  */
 function SettingsBlock({
   settings,
   onPatch,
   onOpenRecorder,
-  serverHost,
 }: {
   settings: Settings;
   onPatch: (patch: Partial<Settings>) => Promise<void>;
   onOpenRecorder: () => void;
-  serverHost: string;
 }) {
-  const [server, setServer] = useState(settings.serverUrl);
-  const [token, setToken] = useState(settings.apiToken);
+  const [server, setServer] = useState(DEFAULT_SERVER);
+  const [token, setToken] = useState('');
   const [lang, setLang] = useState(settings.lang);
   useEffect(() => {
-    setServer(settings.serverUrl);
-    setToken(settings.apiToken);
     setLang(settings.lang);
-  }, [settings.serverUrl, settings.apiToken, settings.lang]);
+  }, [settings.lang]);
 
   const commit = (patch: Partial<Settings>) => void onPatch(patch);
 
+  const unlink = (id: string) => {
+    const links = settings.links.filter((l) => l.id !== id);
+    // Losing the active workspace falls to whatever is left, never to nothing
+    // while a link still exists.
+    const activeLinkId =
+      settings.activeLinkId === id ? (links[0]?.id ?? '') : settings.activeLinkId;
+    commit({ links, activeLinkId });
+  };
+
+  const addByHand = () => {
+    const serverUrl = server.trim().replace(/\/+$/, '');
+    const apiToken = token.trim();
+    const added: WorkspaceLink = {
+      id: linkId(serverUrl, ''),
+      serverUrl,
+      orgId: '',
+      orgName: '',
+      apiToken,
+      addedAt: Date.now(),
+    };
+    const links = settings.links.filter((l) => l.id !== added.id).concat(added);
+    commit({ links, activeLinkId: added.id });
+    setToken('');
+  };
+
   return (
     <div className="fields">
-      {settings.apiToken ? (
-        <div className="linked">
-          <span>
-            linked to <strong>{settings.orgName || serverHost}</strong>
-          </span>
-          <span className="linked-actions">
-            <button className="link" onClick={onOpenRecorder}>
-              manage
-            </button>
-            <button className="link" onClick={() => commit({ apiToken: '', orgName: '' })}>
-              unlink
-            </button>
-          </span>
-        </div>
+      {settings.links.length > 0 ? (
+        <>
+          <span className="field-head">Workspaces</span>
+          {settings.links.map((l) => {
+            const on = l.id === (activeLink(settings)?.id ?? '');
+            return (
+              <div
+                key={l.id}
+                className={`wsrow ${on ? 'on' : ''}`}
+                onClick={() => commit({ activeLinkId: l.id })}
+              >
+                <i className="wsdot" />
+                <span className="wsname">{l.orgName || hostOf(l.serverUrl)}</span>
+                <span className="wshost">
+                  {hostOf(l.serverUrl)} · …{l.apiToken.slice(-4)}
+                </span>
+                <button
+                  className="kill"
+                  title="Forget this workspace's token"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    unlink(l.id);
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            );
+          })}
+          <button className="link" onClick={onOpenRecorder}>
+            link another workspace →
+          </button>
+        </>
       ) : (
         <>
           <button className="primary linkcta" onClick={onOpenRecorder}>
@@ -1025,7 +1201,6 @@ function SettingsBlock({
           spellCheck={false}
           placeholder="https://handback.dev"
           onChange={(e) => setServer(e.target.value)}
-          onBlur={() => commit({ serverUrl: server })}
           onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
         />
       </label>
@@ -1037,15 +1212,16 @@ function SettingsBlock({
           spellCheck={false}
           placeholder="hb_…"
           onChange={(e) => setToken(e.target.value)}
-          onBlur={() =>
-            // An unchanged field must not cost the workspace name — only a new
-            // token has an unknown home.
-            commit(token === settings.apiToken ? {} : { apiToken: token, orgName: '' })
-          }
           onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
         />
-        <em>It stays in this browser on this machine — nothing else reads it.</em>
+        <em>
+          It stays in this browser on this machine — the panel checks it and fills in the workspace
+          name.
+        </em>
       </label>
+      <button className="link" disabled={!token.trim().startsWith('hb_')} onClick={addByHand}>
+        add workspace
+      </button>
       <button
         className={`toggle ${settings.drawStart ? 'on' : ''}`}
         onClick={() => commit({ drawStart: !settings.drawStart })}

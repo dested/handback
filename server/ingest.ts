@@ -81,6 +81,8 @@ const declareSchema = z.object({
   frameCount: z.number().int().min(0),
   errorCount: z.number().int().min(0).default(0),
   droppedCount: z.number().int().min(0).default(0),
+  /** Pin the gripe to this project; absent = auto-route by originHints. */
+  projectId: z.string().max(60).optional(),
   /** @deprecated Recorder ≤1.1.0 called `errorCount` this. Read when it's the only one sent. */
   eventCount: z.number().int().min(0).optional(),
   takes: z.array(takeSchema).min(1).max(200),
@@ -158,6 +160,29 @@ ingestRouter.use(async (req, res, next) => {
   next()
 })
 
+// GET /api/ingest/context — who this token speaks for. The recorder panel
+// calls it to show the workspace's real name and offer its projects as
+// upload destinations; the token already pins the org.
+ingestRouter.get('/context', readLimit, async (req, res) => {
+  const auth = getAuth(req)
+  const [org, projects] = await Promise.all([
+    prisma.org.findUnique({
+      where: { id: auth.orgId },
+      select: { id: true, name: true, slug: true },
+    }),
+    prisma.project.findMany({
+      where: { orgId: auth.orgId },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true, name: true, slug: true, originHints: true },
+    }),
+  ])
+  if (!org) {
+    fail(res, 404, 'Unknown org')
+    return
+  }
+  res.json({ org, projects })
+})
+
 ingestRouter.post('/gripes', declareLimit, async (req, res) => {
   const auth = getAuth(req)
   const parsed = declareSchema.safeParse(req.body)
@@ -177,6 +202,29 @@ ingestRouter.post('/gripes', declareLimit, async (req, res) => {
   if (gripeBytes > MAX_GRIPE_BYTES) {
     fail(res, 413, `This gripe is ${gb(gripeBytes)}; the limit is ${gb(MAX_GRIPE_BYTES)} per gripe`)
     return
+  }
+
+  // Route to a project. A project the sender named outranks the origin hint —
+  // the hint is a guess, an explicit choice isn't. Validated before the
+  // replace below: a bad projectId must reject the declare, not first destroy
+  // the gripe this slug already holds.
+  let projectId: string | null = null
+  if (body.projectId) {
+    const project = await prisma.project.findUnique({
+      where: { id: body.projectId },
+      select: { id: true, orgId: true },
+    })
+    if (!project || project.orgId !== auth.orgId) {
+      fail(res, 400, 'Unknown project')
+      return
+    }
+    projectId = project.id
+  } else if (body.origin) {
+    const projects = await prisma.project.findMany({
+      where: { orgId: auth.orgId },
+      select: { id: true, originHints: true },
+    })
+    projectId = projects.find((p) => p.originHints.includes(body.origin!))?.id ?? null
   }
 
   // Same folder pushed again → the new upload replaces the old one entirely.
@@ -210,16 +258,6 @@ ingestRouter.post('/gripes', declareLimit, async (req, res) => {
   if (existing) {
     await deletePrefix(gripePrefix(auth.orgId, existing.id))
     await prisma.gripe.delete({ where: { id: existing.id } })
-  }
-
-  // Route to a project when the recorded origin matches a hint.
-  let projectId: string | null = null
-  if (body.origin) {
-    const projects = await prisma.project.findMany({
-      where: { orgId: auth.orgId },
-      select: { id: true, originHints: true },
-    })
-    projectId = projects.find((p) => p.originHints.includes(body.origin!))?.id ?? null
   }
 
   const gripe = await prisma.gripe.create({

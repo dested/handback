@@ -81,11 +81,15 @@ properties in `extension/src/sidepanel/styles.css` (no Tailwind there).
 
 - **Panel** (`panel.css`): paper ground, white cards, hairline rules. One big
   cobalt action per state: idle = the full-width `Record a walkthrough` hero,
-  recording = full-width `stop recording`, review = `send to Handback` (46px,
-  with a mono "uploads to <host>" sub-line). "Record another take" is the cobalt
-  *outline* ghost — never louder than send. Settings live behind the header
-  gear and lead with the linked-to line; unlinked states point at `/recorder`
-  (cobalt-wash callout), they never demand a pasted token. Upload errors are a
+  recording = full-width `stop recording`, review = `send to Handback` (46px).
+  Above the send button sits the destination row — "to [workspace] · [project]",
+  two hairline selects with a drawn chevron (`appearance: none`, never Chrome's
+  stock arrow); the project select hides rather than renders dead when the list
+  can't be fetched or is empty. "Record another take" is the cobalt *outline*
+  ghost — never louder than send. Settings live behind the header gear and lead
+  with the Workspaces list (one row per linked workspace, cobalt border + filled
+  dot on the active one, whole row clickable, `×` to unlink); unlinked states
+  point at `/recorder` (cobalt-wash callout), they never demand a pasted token. Upload errors are a
   white card with a 2px danger left rule: mono `UPLOAD FAILED` head, one human
   sentence, `try again`/`details` links — never a raw server body.
 - **Timeline** (`timeline.css`): white track on paper, mono ruler, cobalt mark

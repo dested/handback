@@ -170,7 +170,8 @@ extension/              Handback Recorder — the Chrome MV3 extension (own npm 
 
 | Endpoint | Does |
 | --- | --- |
-| `POST /gripes` | Declare: metadata + file list → gripe/take/file rows + presigned PUT per file. Re-declaring an existing (org, slug) deletes the old gripe + S3 prefix first |
+| `GET /context` | Who the token speaks for: `{ org: {id,name,slug}, projects: [{id,name,slug,originHints}] }`. The recorder panel's workspace name + project picker |
+| `POST /gripes` | Declare: metadata + file list → gripe/take/file rows + presigned PUT per file. Optional `projectId` pins the project (validated against the token's org *before* the replace below; else originHints route it). Re-declaring an existing (org, slug) deletes the old gripe + S3 prefix first |
 | `POST /gripes/:id/finalize` | Marks files uploaded + sets `finalizedAt` (list only shows finalized) |
 | `GET /gripes` | List for agents (MCP `list_gripes`) |
 | `GET /gripes/:id` | Detail + `reportMd` text + presigned GET for every file (MCP `get_gripe`) |
@@ -370,8 +371,15 @@ reaches the container on a plain push.
   of lines; `t`/`d`/`tl` never cross the boundary. Any change there has to keep that true, or the
   timeline, the frames, and the report stop agreeing. The report says when a transcript was
   polished (`report.ts` → `engineName`) because a reader is deciding how far to trust the words.
-- **Extension uploads with the panel's saved `hb_` token** (settings → serverUrl+apiToken,
-  defaults to https://handback.dev) through the same two-phase `/api/ingest` flow as the CLI.
+- **The extension holds one link per workspace, not one token** (since 1.2.0):
+  `Settings.links: WorkspaceLink[]` — `{ id: \`${serverUrl}::${orgId}\`, serverUrl, orgId, orgName,
+  apiToken }` — with `activeLinkId` choosing where uploads go; the panel's destination row
+  ("to workspace · project") sits above Send. `/recorder`'s `handback:link` carries `orgId` and
+  *adds* a link (absorbing the same server's anonymous `orgId:''` slot); the 1.1.x flat
+  serverUrl/apiToken/orgName fields migrate into one link on first `getSettings()` read — don't
+  remove that fold until no 1.1.x installs remain. A hand-pasted token starts as `orgId:''` and
+  self-heals from `GET /api/ingest/context`. Uploads still run the same two-phase `/api/ingest`
+  flow as the CLI, now with the session's `projectId` when one was picked and confirmed.
 - **The extension's ID is pinned** by the `key` in `manifest.json` →
   `gmggnebbenlmpakojgocnjfcnpmifdci`, identical unpacked and (on first upload) in the Web Store.
   `/recorder` deep-links through it: page → `chrome.runtime.sendMessage(ID, handback:ping|link)`,
@@ -382,6 +390,12 @@ reaches the container on a plain push.
   installed — absence means "not installed", not "not Chrome".
 - **When the Web Store listing lands, set `STORE_URL`** in `src/app/recorder.tsx` — the zip/
   load-unpacked instructions collapse behind it automatically.
+- **A push to `main` does NOT ship the extension.** Deploy only moves the web app/server; the
+  recorder reaches users through `releases/recorder/` in the bucket. So before (or right after) any
+  push that touched `extension/`: bump the version if behavior changed, `bun run build:extension`,
+  zip `extension/dist` (shell step — see the Bun gotcha), `bun cli/publish-recorder.ts`. Skipping
+  this leaves every install nagged as outdated — or worse, a server expecting a handshake the
+  shipped recorder doesn't speak.
 - **The bucket is the release channel.** `/recorder` links `/download/recorder`, not GitHub — the
   repo is private, so its release URLs 404 for exactly the people we hand them to. The route needs
   a session and 302s to a presigned GET; the bytes never touch the container. **The newest zip

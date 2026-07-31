@@ -20,6 +20,9 @@ export type Request =
   // until the next recording opens a fresh one. `uploadedUrl` is set when the
   // close followed a successful push to Handback.
   | { type: 'session:close'; id: string; uploadedUrl?: string }
+  // Pin this gripe to one project in the active workspace. '' clears both fields
+  // and hands routing back to the workspace's origin hints.
+  | { type: 'session:project'; id: string; projectId: string; projectName: string }
   | { type: 'state:get' }
   // The panel minted `id` and got the screen share; this opens the part inside
   // the active gripe (or a fresh one) and answers with its part number.
@@ -89,7 +92,7 @@ export type Broadcast =
 /** What a Handback web page may send via chrome.runtime.sendMessage(EXTENSION_ID, …). */
 export type ExternalRequest =
   | { type: 'handback:ping' }
-  | { type: 'handback:link'; apiToken: string; orgName?: string };
+  | { type: 'handback:link'; apiToken: string; orgId?: string; orgName?: string };
 
 /** Answer to handback:ping — enough for the page to render "installed" and "linked". */
 export interface ExternalPong {
@@ -98,6 +101,8 @@ export interface ExternalPong {
   linked: boolean;
   /** The workspace this extension currently uploads to. */
   serverUrl: string;
+  /** Links held for the asking page's origin — the orgs that page already knows this recorder can reach. */
+  orgs: { id: string; name: string }[];
 }
 
 export interface ExternalLinkResult {

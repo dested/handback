@@ -5,8 +5,15 @@ import type {
   ExternalRequest,
   Request,
 } from '../lib/messages';
-import type { RecordingMeta, Session, Settings, TimelineMove, TimelineRef } from '../lib/types';
-import { COBALT, DEFAULT_SETTINGS } from '../lib/types';
+import type {
+  RecordingMeta,
+  Session,
+  Settings,
+  TimelineMove,
+  TimelineRef,
+  WorkspaceLink,
+} from '../lib/types';
+import { COBALT, DEFAULT_SERVER, DEFAULT_SETTINGS, activeLink, linkId } from '../lib/types';
 import {
   blobs,
   deleteRecording,
@@ -40,7 +47,7 @@ chrome.runtime.onInstalled.addListener((details) => {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
   // Only on a fresh install — an update or a browser restart must not steal a tab.
   if (details.reason === 'install') {
-    chrome.tabs.create({ url: `${DEFAULT_SETTINGS.serverUrl}/recorder` }).catch(() => {});
+    chrome.tabs.create({ url: `${DEFAULT_SERVER}/recorder` }).catch(() => {});
   }
 });
 
@@ -81,7 +88,34 @@ chrome.windows.onRemoved.addListener(async (windowId) => {
 });
 
 async function getSettings(): Promise<Settings> {
-  return { ...DEFAULT_SETTINGS, ...((await kv.get<Partial<Settings>>(SETTINGS)) ?? {}) };
+  const stored =
+    (await kv.get<Partial<Settings> & { serverUrl?: string; apiToken?: string; orgName?: string }>(
+      SETTINGS,
+    )) ?? {};
+  if (!Array.isArray(stored.links) && stored.apiToken) {
+    // 1.1.x stored exactly one workspace in three flat fields. Fold it into a
+    // link once and persist, so nobody's existing setup unlinks on update.
+    const serverUrl = stored.serverUrl || DEFAULT_SERVER;
+    const link: WorkspaceLink = {
+      id: linkId(serverUrl, ''),
+      serverUrl,
+      orgId: '',
+      orgName: stored.orgName ?? '',
+      apiToken: stored.apiToken,
+      addedAt: Date.now(),
+    };
+    const next: Settings = {
+      ...DEFAULT_SETTINGS,
+      drawStart: stored.drawStart ?? DEFAULT_SETTINGS.drawStart,
+      lang: stored.lang ?? '',
+      onDeviceTranscription: stored.onDeviceTranscription ?? false,
+      links: [link],
+      activeLinkId: link.id,
+    };
+    await kv.set(SETTINGS, next);
+    return next;
+  }
+  return { ...DEFAULT_SETTINGS, ...stored, links: Array.isArray(stored.links) ? stored.links : [] };
 }
 
 async function broadcast() {
@@ -278,6 +312,17 @@ chrome.runtime.onMessage.addListener((message: Request, _sender, sendResponse) =
           await kv.set(ACTIVE_SESSION, null);
         }
         await updateBadge();
+        await broadcast();
+        return { ok: true };
+      }
+      case 'session:project': {
+        const session = await getSession(message.id);
+        if (!session) return { ok: false };
+        await putSession({
+          ...session,
+          projectId: message.projectId || undefined,
+          projectName: message.projectName || undefined,
+        });
         await broadcast();
         return { ok: true };
       }
@@ -557,6 +602,7 @@ function isExternalRequest(message: unknown): message is ExternalRequest {
   if (message.type === 'handback:ping') return true;
   if (message.type !== 'handback:link') return false;
   if (!('apiToken' in message) || typeof message.apiToken !== 'string') return false;
+  if ('orgId' in message && typeof message.orgId !== 'string') return false;
   return !('orgName' in message) || typeof message.orgName === 'string';
 }
 
@@ -576,11 +622,15 @@ chrome.runtime.onMessageExternal.addListener((message: unknown, sender, sendResp
     switch (message.type) {
       case 'handback:ping': {
         const settings = await getSettings();
+        const active = activeLink(settings);
         return {
           ok: true,
           version: chrome.runtime.getManifest().version,
-          linked: Boolean(settings.apiToken),
-          serverUrl: settings.serverUrl,
+          linked: settings.links.length > 0,
+          serverUrl: active?.serverUrl ?? DEFAULT_SERVER,
+          orgs: settings.links
+            .filter((l) => l.serverUrl === origin && l.orgId)
+            .map((l) => ({ id: l.orgId, name: l.orgName })),
         };
       }
       case 'handback:link': {
@@ -588,13 +638,17 @@ chrome.runtime.onMessageExternal.addListener((message: unknown, sender, sendResp
         if (!apiToken.startsWith('hb_') || apiToken.length > 200) {
           return { ok: false, error: 'that is not a Handback token' };
         }
-        const next: Settings = {
-          ...(await getSettings()),
-          serverUrl: origin,
-          apiToken,
-          orgName: (message.orgName ?? '').slice(0, 80),
-        };
-        await kv.set(SETTINGS, next);
+        const orgId = (message.orgId ?? '').slice(0, 60);
+        const orgName = (message.orgName ?? '').slice(0, 80);
+        const settings = await getSettings();
+        const id = linkId(origin, orgId);
+        // One slot per (server, org). A link that finally learned its org id absorbs
+        // the anonymous slot the same server held before.
+        const links = settings.links.filter(
+          (l) => l.id !== id && !(orgId && l.serverUrl === origin && !l.orgId),
+        );
+        links.push({ id, serverUrl: origin, orgId, orgName, apiToken, addedAt: Date.now() });
+        await kv.set(SETTINGS, { ...settings, links, activeLinkId: id });
         await broadcast();
         return { ok: true };
       }

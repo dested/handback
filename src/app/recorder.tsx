@@ -48,7 +48,19 @@ declare global {
   }
 }
 
-type Presence = { version: string; linked: boolean; serverUrl: string }
+/**
+ * `orgs` is the set of workspaces the extension holds a key for *on this
+ * origin* — 1.2.0 keeps one link per workspace, so linking adds a destination
+ * rather than replacing one. Extensions at 1.1.x and older omit the field
+ * entirely; they get `[]` and fall back to the single-link `linked`/`serverUrl`
+ * pair below.
+ */
+type Presence = {
+  version: string
+  linked: boolean
+  serverUrl: string
+  orgs: { id: string; name: string }[]
+}
 type LinkResult = { ok: boolean; error?: string }
 
 const NO_ANSWER = 'no answer from the extension'
@@ -83,7 +95,7 @@ function pingExtension(): Promise<Presence | null> {
 }
 
 /** Hands the extension a freshly minted token. It answers, or it didn't hear us. */
-function linkExtension(apiToken: string, orgName: string): Promise<LinkResult> {
+function linkExtension(apiToken: string, org: { id: string; name: string }): Promise<LinkResult> {
   return new Promise((resolve) => {
     const runtime = window.chrome?.runtime
     if (!runtime) {
@@ -93,7 +105,7 @@ function linkExtension(apiToken: string, orgName: string): Promise<LinkResult> {
     try {
       runtime.sendMessage(
         EXTENSION_ID,
-        { type: 'handback:link', apiToken, orgName },
+        { type: 'handback:link', apiToken, orgId: org.id, orgName: org.name },
         (response) => {
           if (window.chrome?.runtime?.lastError) {
             resolve({ ok: false, error: NO_ANSWER })
@@ -114,7 +126,35 @@ function readPresence(response: unknown): Presence | null {
   if (!('version' in response) || typeof response.version !== 'string') return null
   if (!('linked' in response) || typeof response.linked !== 'boolean') return null
   if (!('serverUrl' in response) || typeof response.serverUrl !== 'string') return null
-  return { version: response.version, linked: response.linked, serverUrl: response.serverUrl }
+  return {
+    version: response.version,
+    linked: response.linked,
+    serverUrl: response.serverUrl,
+    orgs: readLinkedOrgs(response),
+  }
+}
+
+/**
+ * A missing `orgs` means an extension too old to know about multi-workspace
+ * links — not a malformed reply — so it reads as an empty list. When the field
+ * is there it has to be an array, and anything in it that isn't a plain
+ * `{ id, name }` pair is dropped rather than sinking the whole ping.
+ */
+function readLinkedOrgs(response: object): { id: string; name: string }[] {
+  if (!('orgs' in response)) return []
+  const { orgs } = response
+  if (!Array.isArray(orgs)) return []
+  // Array.isArray widens to any[]; hold it as unknown[] so each element still
+  // has to be narrowed before it is read.
+  const entries: unknown[] = orgs
+  const linked: { id: string; name: string }[] = []
+  for (const entry of entries) {
+    if (typeof entry !== 'object' || entry === null) continue
+    if (!('id' in entry) || typeof entry.id !== 'string') continue
+    if (!('name' in entry) || typeof entry.name !== 'string') continue
+    linked.push({ id: entry.id, name: entry.name })
+  }
+  return linked
 }
 
 function readLinkResult(response: unknown): LinkResult {
@@ -225,7 +265,7 @@ function Recorder({ org }: { org: OrgSummary }) {
                 <>
                   <PresenceIndicator presence={presence} checked={checked} latest={latest} />
                   <details className="group">
-                    <summary className="text-muted-foreground hover:text-foreground marker:content-[''] cursor-pointer list-none text-sm underline decoration-dotted underline-offset-4">
+                    <summary className="text-muted-foreground hover:text-foreground cursor-pointer list-none text-sm underline decoration-dotted underline-offset-4 marker:content-['']">
                       Reinstall or update it
                     </summary>
                     <div className="mt-4">
@@ -248,8 +288,8 @@ function Recorder({ org }: { org: OrgSummary }) {
             n="02"
             title="Link this workspace"
             blurb={
-              presence?.linked && presence.serverUrl === origin
-                ? `The recorder holds a key to ${org.name}. Recordings upload straight to this inbox.`
+              isLinkedTo(presence, org.id, origin)
+                ? `The recorder holds a key to ${org.name}. Pick it as the destination in the panel when you send.`
                 : `One click hands the recorder a key to ${org.name} — no tokens to copy. Recordings upload straight to this inbox.`
             }>
             <LinkStep org={org} origin={origin} presence={presence} />
@@ -295,6 +335,39 @@ function Recorder({ org }: { org: OrgSummary }) {
   )
 }
 
+/**
+ * "Does the extension already hold a key to *this* workspace?" — the answer a
+ * 1.2.0 extension gives by listing the org, and the one an older extension can
+ * only approximate: it reports a single link, so a match on this origin is the
+ * best it can say.
+ */
+function isLinkedTo(presence: Presence | null, orgId: string, origin: string): boolean {
+  if (presence === null) return false
+  if (presence.orgs.length > 0) return presence.orgs.some((o) => o.id === orgId)
+  return presence.linked && presence.serverUrl === origin
+}
+
+/** The workspace this link will point at. Hidden for anyone with a single one. */
+function WorkspacePicker() {
+  const { orgs, org, setActiveOrgId } = useActiveOrg()
+  if (orgs.length < 2 || !org) return null
+  return (
+    <label className="flex items-center gap-3 text-sm">
+      <span className="text-muted-foreground">Workspace</span>
+      <select
+        value={org.id}
+        onChange={(e) => setActiveOrgId(e.target.value)}
+        className="border-input bg-background h-9 rounded-md border px-2 text-sm">
+        {orgs.map((o) => (
+          <option key={o.id} value={o.id}>
+            {o.name}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+}
+
 function LinkStep({
   org,
   origin,
@@ -312,7 +385,7 @@ function LinkStep({
     trpc.tokens.create.mutationOptions({
       onSuccess: async (result) => {
         setMinted(result.token)
-        const outcome = await linkExtension(result.token, org.name)
+        const outcome = await linkExtension(result.token, { id: org.id, name: org.name })
         setPhase(outcome.ok ? 'linked' : 'failed')
       },
       onError: () => setPhase('idle'),
@@ -324,10 +397,20 @@ function LinkStep({
     create.mutate({ orgId: org.id, name: 'recorder — chrome' })
   }, [create, org.id])
 
-  // Linked, but at a different Handback. Violet, not amber — ui.md forbids the
-  // warm hues, and this is a "heads up", not a failure.
-  const linkedElsewhere = presence !== null && presence.linked && presence.serverUrl !== origin
-  const detectedHere = presence !== null && presence.linked && !linkedElsewhere
+  const linkedThisOrg = isLinkedTo(presence, org.id, origin)
+  // Other workspaces on this same Handback that the recorder can already reach.
+  // Linking adds to this list; it never replaces it.
+  const otherLinked = presence === null ? [] : presence.orgs.filter((o) => o.id !== org.id)
+  // Linked, but at a different Handback entirely — only an old single-link
+  // extension can say this, since a 1.2.0 one lists per-origin workspaces.
+  // Violet, not amber — ui.md forbids the warm hues, and this is a "heads up",
+  // not a failure.
+  const linkedElsewhere =
+    presence !== null &&
+    presence.linked &&
+    presence.orgs.length === 0 &&
+    presence.serverUrl !== origin
+  const detectedHere = linkedThisOrg
   // The banner distinguishes "was already linked when you arrived" from "you
   // just linked it", so it stays keyed to phase. The *button* must not: the
   // moment linking succeeds the action is done, and offering a primary
@@ -339,6 +422,8 @@ function LinkStep({
 
   return (
     <div className="space-y-4">
+      <WorkspacePicker />
+
       {linkedElsewhere && (
         <div className="border-review/40 bg-review-wash text-review rounded-md border p-4 text-sm">
           The recorder is linked to <span className="font-mono text-xs">{presence.serverUrl}</span>.
@@ -346,10 +431,18 @@ function LinkStep({
         </div>
       )}
 
+      {otherLinked.length > 0 && !linkedThisOrg && phase === 'idle' && (
+        <div className="border-review/40 bg-review-wash text-review rounded-md border p-4 text-sm">
+          The recorder is already linked to {otherLinked.map((o) => o.name).join(', ')}. Linking
+          adds {org.name} as a destination — you pick where each recording goes from the recorder
+          panel.
+        </div>
+      )}
+
       {alreadyHere && (
         <div className="border-approve/40 bg-approve-wash flex items-center gap-3 rounded-md border p-4">
           <span className="bg-approve size-2 shrink-0 rounded-full" />
-          <p className="text-approve text-sm font-medium">Already linked to this workspace.</p>
+          <p className="text-approve text-sm font-medium">Already linked to {org.name}.</p>
         </div>
       )}
 
@@ -357,8 +450,8 @@ function LinkStep({
         <div className="border-approve/40 bg-approve-wash flex items-center gap-3 rounded-md border p-4">
           <span className="bg-approve size-2 shrink-0 rounded-full" />
           <p className="text-approve text-sm font-medium">
-            Linked. The recorder now uploads to {org.name} — you can close this page and record from
-            any tab.
+            Linked. {org.name} is now a destination in the recorder — pick it in the panel when you
+            send. You can close this page.
           </p>
         </div>
       )}

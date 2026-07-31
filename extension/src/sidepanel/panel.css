@@ -448,6 +448,48 @@ button.ticker.warn:hover {
   font-size: var(--fs-0);
   font-style: normal;
 }
+.field-head {
+  color: var(--muted);
+  font-size: var(--fs-1);
+}
+/* A workspace is a row you click, not a field you edit — the whole row is the
+ * radio, and the × is the only other thing in it that does anything. */
+.wsrow {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 24px 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  margin-bottom: 6px;
+}
+.wsrow.on {
+  border-color: var(--cobalt);
+}
+.wsdot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  flex: none;
+  align-self: center;
+}
+.wsrow.on .wsdot {
+  background: var(--cobalt);
+  border-color: var(--cobalt);
+}
+.wsname {
+  font-size: var(--fs-1);
+  font-weight: 600;
+}
+.wshost {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: var(--fs-0);
+}
+
 .toggle {
   display: flex;
   align-items: center;
@@ -518,6 +560,39 @@ button.ticker.warn:hover {
   padding: 0 14px;
   font-size: var(--fs-3);
 }
+/* Where it lands, one line under the send: workspace · project, both changeable. */
+.dest {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-bottom: 6px;
+  font-size: var(--fs-1);
+}
+.dest-sel {
+  max-width: 46%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  /* The panel draws its own controls — Chrome's stock arrow would be the one
+   * native widget on the surface, so it's replaced with a muted chevron. */
+  appearance: none;
+  background: var(--paper)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath d='M1 1l3 3 3-3' fill='none' stroke='%23767676' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    no-repeat right 6px center;
+  padding: 3px 18px 3px 6px;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--fs-1);
+  text-overflow: ellipsis;
+}
+.dest-sel:disabled {
+  color: var(--muted);
+}
+.dest-to,
+.dest-dot {
+  color: var(--muted);
+}
+
 .send-sub {
   margin: 0;
   text-align: center;

@@ -1,4 +1,4 @@
-import type { Settings, TranscriberId, TranscriptSegment } from '../lib/types';
+import type { TranscriberId, TranscriptSegment } from '../lib/types';
 import { transcribeInCloud } from './transcribeCloud';
 import type { WorkerIn, WorkerOut } from './transcribeWorker';
 
@@ -34,19 +34,19 @@ export interface TranscribeResult {
 
 export async function transcribeRecording(
   video: Blob,
-  settings: Settings,
+  opts: { serverUrl: string; apiToken: string; lang: string; onDevice: boolean },
   onProgress: (p: TranscribeProgress) => void,
 ): Promise<TranscribeResult | null> {
   onProgress({ stage: 'decode', pct: -1 }); // decoding takes real time on long recordings
   const audio = await decode(video).catch(() => null);
   if (!audio) return null;
 
-  if (!settings.onDeviceTranscription) {
+  if (!opts.onDevice && opts.apiToken) {
     onProgress({ stage: 'upload', pct: 0 });
     const cloud = await transcribeInCloud(audio, {
-      serverUrl: settings.serverUrl,
-      apiToken: settings.apiToken,
-      lang: settings.lang,
+      serverUrl: opts.serverUrl,
+      apiToken: opts.apiToken,
+      lang: opts.lang,
       onProgress: (fraction) => onProgress({ stage: 'upload', pct: fraction * 100 }),
     }).catch(() => null);
     // A non-null answer is the answer, empty included: an empty transcript means

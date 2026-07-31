@@ -2,6 +2,30 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-07-31 — the recorder learns to hold more than one workspace (1.2.0)
+Asked: an invitee's walkthrough landed in *their* workspace and nothing let them re-point the
+recorder at ours, or pick a project — "make it incredible". Root causes: /recorder linked whatever
+org was active with no picker on the page, the extension stored exactly one server+token, and
+projects didn't exist in the panel at all. Built, across all three halves: **extension 1.2.0** —
+`Settings.links: WorkspaceLink[]` (id `${serverUrl}::${orgId}`, one slot per server+org, active
+link switchable; 1.1.x flat fields migrate on first read), a **destination row above Send**
+("to [workspace] · [project]" — project defaults to `auto → <hint match>`, hides when the list
+can't be fetched or is empty), Workspaces list in settings (click to activate, × to unlink,
+hand-paste adds a link whose org name self-heals), per-gripe `Session.projectId`; **server** —
+`GET /api/ingest/context` (org + projects for the token) and `projectId` on declare (validated
+against the token's org *before* the destructive slug replace — review caught that ordering,
+a bad projectId would have deleted the old gripe first); **web /recorder** — inline workspace
+picker in step 02, `handback:link` now carries orgId, banners keyed per-org ("linking adds a
+destination", never "replaces"), legacy single-link pings still read correctly. Quality gate
+traced every hop, found no contract mismatches; its one "bug" (stale LinkStep phase across org
+switches) was a false positive — `<Recorder key={org.id}>` remounts the subtree. ui.md's panel
+section rewritten to match. Both typechecks green; extension builds. **Not yet published to
+`releases/recorder/`** — build + zip + `bun cli/publish-recorder.ts` must ship with the deploy,
+or 1.1.x installs meet a server they half-understand.
+Touched: server/ingest.ts, src/app/recorder.tsx, extension/src/{lib/{types,messages,upload,
+context},background/index,sidepanel/{App,transcribe,panel.css}}, extension/{package,public/
+manifest}.json, ui.md, cliffnotes.md, updates.md.
+
 ## 2026-07-31 — the recorder ships from our own bucket, not from a private repo
 Asked: "what if we self host the release.. im not ready for it to go public yet" → picked the
 login-gated download. Context that shaped it: **you can't self-host a `.crx` anymore** — Chrome has

@@ -145,6 +145,10 @@ export interface Session {
   closed?: boolean;
   /** Set once the gripe uploaded to Handback — the cloud viewer URL. */
   uploadedUrl?: string;
+  /** The project this gripe ships to. Absent = let the workspace route it by origin. */
+  projectId?: string;
+  /** The project's name as the panel last saw it — display fallback when the list can't be fetched. */
+  projectName?: string;
 }
 
 /** One thing sitting on the gripe's timeline, addressed the way the store finds it again. */
@@ -155,32 +159,52 @@ export type TimelineRef =
 /** A dragged item and where it landed. */
 export type TimelineMove = TimelineRef & { tl: number };
 
+/** One workspace this recorder can upload to. A link is a server + org + the token that opens it. */
+export interface WorkspaceLink {
+  /** `${serverUrl}::${orgId}` — orgId may be '' until the workspace confirms who the token belongs to. */
+  id: string;
+  serverUrl: string;
+  /** '' when unknown (hand-pasted token, or migrated from the single-link days). */
+  orgId: string;
+  /** '' until known; the panel self-heals it from GET /api/ingest/context. */
+  orgName: string;
+  apiToken: string;
+  addedAt: number;
+}
+
 export interface Settings {
   /** Start every recording with the on-page ink active — draw first, click through on demand. */
   drawStart: boolean;
   lang: string;
-  /** The Handback workspace this extension uploads to. */
-  serverUrl: string;
-  /** Bearer token (hb_…) minted under Team → API tokens. Stored locally only. */
-  apiToken: string;
-  /** Workspace name the link handshake reported — display only; '' when the token was pasted by hand. */
-  orgName: string;
   /**
    * Transcribe in this browser instead of on the workspace. Slower by minutes
    * and it spins the fan, but no audio ever leaves the machine — the answer for
    * anyone who can't send a recording to a third party. Off by default.
    */
   onDeviceTranscription: boolean;
+  /** Every workspace this recorder holds a key to. */
+  links: WorkspaceLink[];
+  /** Which link uploads go to; '' = none. */
+  activeLinkId: string;
 }
+
+export const DEFAULT_SERVER = 'https://handback.dev';
 
 export const DEFAULT_SETTINGS: Settings = {
   drawStart: true,
   lang: '',
-  serverUrl: 'https://handback.dev',
-  apiToken: '',
-  orgName: '',
   onDeviceTranscription: false,
+  links: [],
+  activeLinkId: '',
 };
+
+export function linkId(serverUrl: string, orgId: string): string {
+  return `${serverUrl}::${orgId}`;
+}
+
+export function activeLink(settings: Settings): WorkspaceLink | null {
+  return settings.links.find((l) => l.id === settings.activeLinkId) ?? settings.links[0] ?? null;
+}
 
 /** The reviewer's-pen cobalt — Handback's one accent. Never orange, never dark UI. */
 export const COBALT = '#2f56d8';

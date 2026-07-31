@@ -77,7 +77,12 @@ async function explain(what: string, res: Response): Promise<Error> {
  * `rec-NN/recording.json` files, so the two clients produce identical rows —
  * `recordedAt` is the gripe's own creation time, the takes are the takes.
  */
-function declaration(session: Session, recordings: Recording[], files: GripeFile[]) {
+function declaration(
+  session: Session,
+  recordings: Recording[],
+  files: GripeFile[],
+  projectId?: string,
+) {
   const paths = new Set(files.map((f) => f.path));
   const takes = [...recordings]
     .sort((a, b) => a.index - b.index)
@@ -101,6 +106,7 @@ function declaration(session: Session, recordings: Recording[], files: GripeFile
     slug: session.slug,
     title: session.name || session.slug,
     origin: session.origin || undefined,
+    ...(projectId ? { projectId } : {}),
     recordedAt: new Date(session.createdAt).toISOString(),
     durationMs: takes.reduce((sum, t) => sum + t.durationMs, 0),
     frameCount: takes.reduce((sum, t) => sum + t.frameCount, 0),
@@ -122,14 +128,18 @@ export function totalBytes(files: GripeFile[]): number {
  * the caller keeps the gripe open and offers to try again, because a half-uploaded
  * gripe is invisible until finalize and re-declaring the same slug replaces it
  * wholesale, so a retry is always safe.
+ *
+ * An explicit `projectId` pins the gripe to that project; absent, the workspace
+ * routes it by the recorded origin.
  */
 export async function pushGripe(
   target: UploadTarget,
   session: Session,
   recordings: Recording[],
   files: GripeFile[],
-  onProgress?: (p: UploadProgress) => void,
+  opts?: { projectId?: string; onProgress?: (p: UploadProgress) => void },
 ): Promise<UploadResult> {
+  const onProgress = opts?.onProgress;
   const server = normalizeServer(target.serverUrl);
   const token = target.apiToken.trim();
   if (!server) throw new Error('no Handback server — set one in settings');
@@ -146,7 +156,7 @@ export async function pushGripe(
   const declareRes = await fetch(`${server}/api/ingest/gripes`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-    body: JSON.stringify(declaration(session, recordings, files)),
+    body: JSON.stringify(declaration(session, recordings, files, opts?.projectId)),
   });
   if (!declareRes.ok) throw await explain('declare', declareRes);
   const { gripeId, uploads } = (await declareRes.json()) as {
