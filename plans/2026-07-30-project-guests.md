@@ -32,5 +32,6 @@ someone to *one project* without showing them the whole workspace.
 
 ## Out of scope (deliberately)
 
-Editing an existing guest's project set from the members list (remove + re-invite instead),
-per-project roles, guest-visible unassigned gripes, project-scoped API tokens.
+Per-project roles, guest-visible unassigned gripes, project-scoped API tokens.
+(Editing a member's project set shipped later the same day as `orgs.setAccess` — see the
+member-access/admin entry in updates.md.)
