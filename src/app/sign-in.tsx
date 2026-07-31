@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useNavigate, useRevalidator } from 'react-router-dom'
+import { Link, useNavigate, useRevalidator, useSearchParams } from 'react-router-dom'
 import { ReturnMark } from '~/components/logo'
 import { authClient } from '~/lib/auth-client'
 import { Button } from '~/components/ui/button'
@@ -9,6 +9,9 @@ import { Label } from '~/components/ui/label'
 export function SignInPage() {
   const navigate = useNavigate()
   const revalidator = useRevalidator()
+  const [search] = useSearchParams()
+  // Carried through from /join so an invite survives the round trip.
+  const inviteId = search.get('invite') ?? ''
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -24,8 +27,8 @@ export function SignInPage() {
       setError(err.message ?? 'Sign in failed')
       return
     }
-    revalidator.revalidate()
-    navigate('/dashboard')
+    await revalidator.revalidate()
+    navigate(inviteId ? `/join/${encodeURIComponent(inviteId)}?accept=1` : '/dashboard')
   }
 
   return (
@@ -74,7 +77,9 @@ export function SignInPage() {
       </div>
       <p className="text-muted-foreground mt-6 text-sm">
         No account?{' '}
-        <Link to="/sign-up" className="text-primary underline-offset-4 hover:underline">
+        <Link
+          to={inviteId ? `/sign-up?invite=${encodeURIComponent(inviteId)}` : '/sign-up'}
+          className="text-primary underline-offset-4 hover:underline">
           Create one
         </Link>
       </p>

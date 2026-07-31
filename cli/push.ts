@@ -87,6 +87,7 @@ type RecJson = {
     video?: string
     frames: unknown[]
     events: unknown[]
+    droppedEvents?: number
   }
 }
 
@@ -111,7 +112,8 @@ const declare = {
   recordedAt: session.createdAt,
   durationMs: takes.reduce((sum, t) => sum + t.durationMs, 0),
   frameCount: takes.reduce((sum, t) => sum + t.frameCount, 0),
-  eventCount: parsed.reduce((sum, p) => sum + p.recording.events.length, 0),
+  errorCount: parsed.reduce((sum, p) => sum + p.recording.events.length, 0),
+  droppedCount: parsed.reduce((sum, p) => sum + (p.recording.droppedEvents ?? 0), 0),
   takes,
   files: files.map(({ path, size, contentType }) => ({ path, size, contentType })),
 }

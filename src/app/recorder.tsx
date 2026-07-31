@@ -209,65 +209,42 @@ function Recorder({ org }: { org: OrgSummary }) {
             n="01"
             title="Install the extension"
             blurb="Chrome only. It records the tab, your narration, and the console together, and only while you're recording.">
-            {STORE_URL ? (
-              <div>
-                <a
-                  href={STORE_URL}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="bg-primary text-primary-foreground inline-flex h-9 items-center gap-2 rounded-md px-4 text-sm font-medium hover:opacity-90">
-                  Add to Chrome
-                </a>
-                <p className="text-muted-foreground mt-3 text-sm">
-                  Chrome will ask to confirm — the recorder only runs when you hit Record.
-                </p>
-              </div>
-            ) : (
-              <div>
-                <p className="text-muted-foreground text-sm">
-                  The Web Store listing is in review, so for now it installs from a zip — three
-                  steps, no build tools:
-                </p>
-                <ol className="text-muted-foreground mt-4 space-y-2 text-sm">
-                  <li className="flex gap-3">
-                    <span className="text-cobalt font-mono text-xs leading-5">1</span>
-                    <span>
-                      Download <code className="font-mono text-xs">handback-recorder.zip</code> from
-                      the{' '}
-                      <a
-                        href={RELEASES_URL}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-primary underline underline-offset-4">
-                        latest release
-                      </a>{' '}
-                      and unzip it.
-                    </span>
-                  </li>
-                  <li className="flex gap-3">
-                    <span className="text-cobalt font-mono text-xs leading-5">2</span>
-                    <span>
-                      Open <code className="font-mono text-xs">chrome://extensions</code>{' '}
-                      (copy-paste it — Chrome won't let a page link there), and flip on{' '}
-                      <strong>Developer mode</strong>, top right.
-                    </span>
-                  </li>
-                  <li className="flex gap-3">
-                    <span className="text-cobalt font-mono text-xs leading-5">3</span>
-                    <span>
-                      Hit <strong>Load unpacked</strong> and pick the unzipped folder.
-                    </span>
-                  </li>
-                </ol>
-              </div>
-            )}
-            {inChrome !== false && <PresenceIndicator presence={presence} checked={checked} />}
+            {/* Once the extension answers a ping, the how-to-install steps have
+                served their purpose — they collapse rather than sitting under a
+                green "it's installed" banner telling you to install it. Still
+                reachable, because updating means walking them again. */}
+            <div className="space-y-4">
+              {presence ? (
+                <>
+                  <PresenceIndicator presence={presence} checked={checked} />
+                  <details className="group">
+                    <summary className="text-muted-foreground hover:text-foreground marker:content-[''] cursor-pointer list-none text-sm underline decoration-dotted underline-offset-4">
+                      Reinstall or update it
+                    </summary>
+                    <div className="mt-4">
+                      <InstallInstructions />
+                    </div>
+                  </details>
+                </>
+              ) : (
+                <>
+                  <InstallInstructions />
+                  {inChrome !== false && (
+                    <PresenceIndicator presence={presence} checked={checked} />
+                  )}
+                </>
+              )}
+            </div>
           </Step>
 
           <Step
             n="02"
             title="Link this workspace"
-            blurb={`One click hands the recorder a key to ${org.name} — no tokens to copy. Recordings upload straight to this inbox.`}>
+            blurb={
+              presence?.linked && presence.serverUrl === origin
+                ? `The recorder holds a key to ${org.name}. Recordings upload straight to this inbox.`
+                : `One click hands the recorder a key to ${org.name} — no tokens to copy. Recordings upload straight to this inbox.`
+            }>
             <LinkStep org={org} origin={origin} presence={presence} />
           </Step>
 
@@ -343,7 +320,14 @@ function LinkStep({
   // Linked, but at a different Handback. Violet, not amber — ui.md forbids the
   // warm hues, and this is a "heads up", not a failure.
   const linkedElsewhere = presence !== null && presence.linked && presence.serverUrl !== origin
-  const alreadyHere = presence !== null && presence.linked && !linkedElsewhere && phase === 'idle'
+  const detectedHere = presence !== null && presence.linked && !linkedElsewhere
+  // The banner distinguishes "was already linked when you arrived" from "you
+  // just linked it", so it stays keyed to phase. The *button* must not: the
+  // moment linking succeeds the action is done, and offering a primary
+  // "Link <org>" under a green "Linked." banner reads as a failed click.
+  // presence lags a poll tick behind, so phase carries it until it catches up.
+  const linkedHere = detectedHere || phase === 'linked'
+  const alreadyHere = detectedHere && phase === 'idle'
   const busy = phase === 'linking' || create.isPending
 
   return (
@@ -375,10 +359,10 @@ function LinkStep({
       <div className="flex flex-wrap items-center gap-3">
         <Button
           type="button"
-          variant={alreadyHere ? 'outline' : 'default'}
+          variant={linkedHere ? 'outline' : 'default'}
           disabled={presence === null || busy}
           onClick={link}>
-          {busy ? 'Linking…' : alreadyHere ? 'Re-link' : `Link ${org.name}`}
+          {busy ? 'Linking…' : linkedHere ? 'Re-link' : `Link ${org.name}`}
         </Button>
         {presence === null && (
           <span className="text-muted-foreground text-sm">
@@ -417,11 +401,71 @@ function LinkStep({
   )
 }
 
+/** How to get the extension in — the Web Store button once there is a listing,
+ *  the three-step zip walk until then. Rendered plainly before it's installed
+ *  and behind a disclosure after. */
+function InstallInstructions() {
+  if (STORE_URL) {
+    return (
+      <div>
+        <a
+          href={STORE_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="bg-primary text-primary-foreground inline-flex h-9 items-center gap-2 rounded-md px-4 text-sm font-medium hover:opacity-90">
+          Add to Chrome
+        </a>
+        <p className="text-muted-foreground mt-3 text-sm">
+          Chrome will ask to confirm — the recorder only runs when you hit Record.
+        </p>
+      </div>
+    )
+  }
+  return (
+    <div>
+      <p className="text-muted-foreground text-sm">
+        The Web Store listing is in review, so for now it installs from a zip — three steps, no
+        build tools:
+      </p>
+      <ol className="text-muted-foreground mt-4 space-y-2 text-sm">
+        <li className="flex gap-3">
+          <span className="text-cobalt font-mono text-xs leading-5">1</span>
+          <span>
+            Download <code className="font-mono text-xs">handback-recorder.zip</code> from the{' '}
+            <a
+              href={RELEASES_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="text-primary underline underline-offset-4">
+              latest release
+            </a>{' '}
+            and unzip it.
+          </span>
+        </li>
+        <li className="flex gap-3">
+          <span className="text-cobalt font-mono text-xs leading-5">2</span>
+          <span>
+            Open <code className="font-mono text-xs">chrome://extensions</code> (copy-paste it —
+            Chrome won't let a page link there), and flip on <strong>Developer mode</strong>, top
+            right.
+          </span>
+        </li>
+        <li className="flex gap-3">
+          <span className="text-cobalt font-mono text-xs leading-5">3</span>
+          <span>
+            Hit <strong>Load unpacked</strong> and pick the unzipped folder.
+          </span>
+        </li>
+      </ol>
+    </div>
+  )
+}
+
 /** The page's heartbeat: green the instant the extension answers a ping. */
 function PresenceIndicator({ presence, checked }: { presence: Presence | null; checked: boolean }) {
   if (presence) {
     return (
-      <div className="border-approve/40 bg-approve-wash mt-4 flex items-center gap-3 rounded-md border p-4">
+      <div className="border-approve/40 bg-approve-wash flex items-center gap-3 rounded-md border p-4">
         <span className="bg-approve size-2 shrink-0 rounded-full" />
         <p className="text-approve text-sm font-medium">
           Handback Recorder {presence.version} is installed.
@@ -432,7 +476,7 @@ function PresenceIndicator({ presence, checked }: { presence: Presence | null; c
   return (
     <div
       aria-busy={!checked}
-      className="border-border bg-muted/40 mt-4 flex items-center gap-3 rounded-md border p-4">
+      className="border-border bg-muted/40 flex items-center gap-3 rounded-md border p-4">
       <span className="bg-muted-foreground/40 size-2 shrink-0 animate-pulse rounded-full" />
       <p className="text-muted-foreground text-sm">
         Waiting to spot the extension… it shows up here the moment it's installed. Installed it

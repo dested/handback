@@ -104,7 +104,10 @@ function declaration(session: Session, recordings: Recording[], files: GripeFile
     recordedAt: new Date(session.createdAt).toISOString(),
     durationMs: takes.reduce((sum, t) => sum + t.durationMs, 0),
     frameCount: takes.reduce((sum, t) => sum + t.frameCount, 0),
-    eventCount: recordings.reduce((sum, r) => sum + r.meta.events.length, 0),
+    errorCount: recordings.reduce((sum, r) => sum + r.meta.events.length, 0),
+    // Errors the recorder saw on other tabs and threw away. Sent so the workspace
+    // can tell "the page never complained" from "we weren't watching that tab".
+    droppedCount: recordings.reduce((sum, r) => sum + (r.meta.droppedEvents ?? 0), 0),
     takes,
     files: files.map((f) => ({ path: f.path, size: f.blob.size, contentType: f.contentType })),
   };

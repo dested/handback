@@ -9,7 +9,10 @@ export function GripeHeader({ gripe }: { gripe: Gripe }) {
     mmss(gripe.durationMs),
     plural(gripe.takes.length, 'take'),
     plural(gripe.frameCount, 'frame'),
-    plural(gripe.eventCount, 'console event'),
+    plural(gripe.errorCount, 'console error'),
+    // Only worth saying when it happened: it's the difference between "the page
+    // was clean" and "the errors were on a tab we weren't recording".
+    gripe.droppedCount > 0 ? `${gripe.droppedCount} dropped from other tabs` : null,
     megabytes(gripe.bytes),
     gripe.uploadedByName ? `uploaded by ${gripe.uploadedByName}` : null,
   ].filter((part): part is string => part !== null)

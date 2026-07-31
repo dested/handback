@@ -300,6 +300,16 @@ const invitesRouter = router({
       if (!invite || invite.acceptedAt || invite.expiresAt < new Date()) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Invite is gone or expired' })
       }
+      // An addressed invite is bound to that address: invitation emails get
+      // forwarded, and the link alone shouldn't hand a workspace to whoever
+      // received the forward. A link with no address is still open by design —
+      // that's the "copy a link and pass it around" invite.
+      if (invite.email && invite.email.toLowerCase() !== ctx.session.user.email.toLowerCase()) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: `This invite was sent to ${invite.email}. Sign in as that address to accept it.`,
+        })
+      }
       const existing = await prisma.membership.findUnique({
         where: { orgId_userId: { orgId: invite.orgId, userId: ctx.session.user.id } },
       })
@@ -471,7 +481,8 @@ const gripeListSelect = {
   uploadedAt: true,
   durationMs: true,
   frameCount: true,
-  eventCount: true,
+  errorCount: true,
+  droppedCount: true,
   bytes: true,
   projectId: true,
   project: { select: { name: true, slug: true } },
@@ -518,7 +529,8 @@ const gripesRouter = router({
         uploadedAt: g.uploadedAt.toISOString(),
         durationMs: g.durationMs,
         frameCount: g.frameCount,
-        eventCount: g.eventCount,
+        errorCount: g.errorCount,
+        droppedCount: g.droppedCount,
         bytes: Number(g.bytes),
         takeCount: g._count.takes,
         projectId: g.projectId,
@@ -551,7 +563,8 @@ const gripesRouter = router({
       uploadedAt: g.uploadedAt.toISOString(),
       durationMs: g.durationMs,
       frameCount: g.frameCount,
-      eventCount: g.eventCount,
+      errorCount: g.errorCount,
+      droppedCount: g.droppedCount,
       bytes: Number(g.bytes),
       project: g.project,
       uploadedByName: g.uploadedBy?.name ?? null,

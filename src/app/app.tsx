@@ -139,9 +139,9 @@ function Inbox({ orgId }: { orgId: string }) {
                       {g.projectName}
                     </span>
                   )}
-                  {g.eventCount > 0 && (
+                  {g.errorCount > 0 && (
                     <span className="text-destructive border-destructive/30 rounded border px-1.5 py-0.5 font-mono text-[0.6875rem]">
-                      {g.eventCount} errors
+                      {g.errorCount} {g.errorCount === 1 ? 'error' : 'errors'}
                     </span>
                   )}
                   <span className={cn('rounded px-2 py-0.5 text-xs font-medium', meta.wash)}>

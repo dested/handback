@@ -67,7 +67,7 @@ useless to us no matter how accurate.
 | whisper.cpp on the Drydock box | segment-level | "free" | **No.** The t4g.large already runs 26 tasks; CPU inference would starve the fleet |
 
 The Deepgram edge, when we want it, is **keyterm prompting** — you pass domain vocabulary and it
-biases toward it. Inloop *knows the context of every recording*: the project name, the origin
+biases toward it. Handback *knows the context of every recording*: the project name, the origin
 hints, the page titles, the console errors captured alongside the audio. Feeding those in as
 keyterms means "tee arr pee see" comes back as `tRPC` instead of garbage. No generic transcription
 tool has that context; we do, for free, on every gripe. Groq's Whisper endpoint has no equivalent —
@@ -89,7 +89,7 @@ Now, in `extension/src/sidepanel/transcribe.ts`:
 
 1. **Decode once, as before.** Both engines want the same 16 kHz mono `Float32Array`, so the decode
    is shared and the fallback costs nothing extra.
-2. **Wrap it as WAV and POST it** to `/api/ingest/transcribe` with the panel's own `ilp_` token
+2. **Wrap it as WAV and POST it** to `/api/ingest/transcribe` with the panel's own `hb_` token
    (`transcribeCloud.ts`). 16-bit PCM runs ~1.9 MB/minute, so takes are **split into 8-minute
    chunks** and each chunk's timings are offset back onto the recording's clock — the client does
    the cutting because only it knows where it cut.
@@ -125,7 +125,7 @@ Server-side STT makes it fast. This makes it better than what anyone else ships:
 **Run a cleanup pass over the raw transcript with `claude-haiku-4-5`** ($1/$5 per MTok — a
 10-minute transcript costs a fraction of a cent), grounded in the telemetry we already captured:
 the page URLs and titles, the console errors, the project name. Not "fix the grammar" — *"this
-person was on `inloop.dested.com/gripes/:id` and the console threw `TRPCClientError`; correct the
+person was on `handback.dev/gripes/:id` and the console threw `TRPCClientError`; correct the
 technical terms in this transcript and touch nothing else."*
 
 That turns "the tee arr pee see call is throwing" into "the tRPC call is throwing" using evidence

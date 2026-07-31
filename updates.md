@@ -2,6 +2,78 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-07-31 — S3 moved to handback-files, and /recorder stops repeating itself
+Asked: pull gripe `85142440` over the hosted MCP as a real download test, then act on it.
+`get_gripe` round-tripped fine (report.md + presigned URLs for all 33 files; read the 3 contact
+sheets + the marked stills). The gripe's own content was two defects on `/recorder`, both fixed:
+step 01 rendered the three-step zip walkthrough unconditionally, so a green "Recorder 1.1.0 is
+installed" sat *under* instructions to install it — the steps now collapse behind a
+"Reinstall or update it" disclosure once a ping answers (`InstallInstructions` extracted); and the
+Link button stayed primary/"Link <Org>" directly beneath the green "Linked." banner, because
+`alreadyHere` required `phase === 'idle'` — split into `detectedHere` (banner, still phase-keyed)
+and `linkedHere` (button → outline "Re-link" the moment linking succeeds). Step 02's blurb goes
+past-tense once linked.
+Infra, by hand rather than by Drydock: created **`handback-files`** (BPA on, CORS copied forward)
++ IAM user **`handback-app`** with a bucket-scoped inline policy, new access key; verified
+PUT/LIST/presigned-GET, CORS preflight, and AccessDenied on any other bucket, then re-ran the same
+round trip through `server/storage.ts` itself (presignPut → PUT → presignGet → getObjectText →
+deletePrefix). Deleted `inloop-files` (234 objects, ~51 MB — the two test gripes, no data worth
+keeping) and IAM user `inloop-app` + its key. Updated `/drydock/inloop/{S3_BUCKET,
+AWS_ACCESS_KEY_ID,AWS_SECRET_ACCESS_KEY}` in SSM and forced a new ECS deployment; the running task
+started 56s after the SSM write, so it holds the new values. Deploy target confirmed along the
+way: the Drydock project is **still named `inloop`** (SSM `/drydock/inloop/*`, ECR `drydock/inloop`,
+service `drydock-inloop`) — the cliffnotes' open question, now closed.
+Local `.env` keys rotated too (backup at `.env.bak-preS3`).
+Touched: src/app/recorder.tsx, cliffnotes.md (Storage + Deploy)
+
+## 2026-07-31 — an invite now survives sign-up
+Asked: "invited a friend, they got the email, created an account, but it doesn't seem to have linked
+us" (had to generate a second link and click it again). `/join` sent signed-out visitors to a bare
+`/sign-up` and told them "then reopen this link" — nobody does, so the account was created and the
+invitation orphaned. The invite id now rides through auth: `/join/:id` links to
+`/sign-{up,in}?invite=<id>`, both pages return to `/join/:id?accept=1` on success (and
+`redirectIfSignedIn` bounces there too instead of `/app`), and `/join` auto-accepts once on that
+flag. Sign-up prefills the invited address and reads "Then you'll join <Org>."
+Verified in a clean browser: signed-out join → create account → landed `/app` with a `member`/`org`
+membership and `acceptedAt` stamped; signed-in `/sign-up?invite=` 302s straight into accept.
+Touched: src/app/{join,sign-up,sign-in,routes}.tsx
+
+## 2026-07-31 — eventCount → errorCount, and droppedCount reaches the agent
+Asked: "why was event count 0" → then "yes both" to the two fixes it surfaced. **The 0 was correct**:
+`PageEvent` is only `error|warn|network` (console tap in `extension/public/injected.js`), so it never
+counted clicks — those become forced keyframes (`recording:force`, `why:'click'`), which is why 26
+frames sat next to 0 events and proves the tap was alive. The name was the bug. Renamed
+`eventCount` → **`errorCount`** across schema/ingest/gripes-api/router/push CLI/extension uploader/
+inbox badge/viewer header, and added **`droppedCount`** (errors seen on a non-recorded tab, already
+counted by the recorder and printed in report.md but never reaching the brief) so an agent can tell
+"the page was clean" from "we weren't watching that tab". Ingest still honours a bare `eventCount`
+from Recorder ≤1.1.0 — verified both wire shapes declare→finalize→`list_gripes`/`get_gripe` against
+a live local server (new: 4/7, legacy `eventCount:9` → `errorCount:9`, `droppedCount:0`).
+**DB renamed by SQL, not by db push** (`ALTER TABLE "gripe" RENAME COLUMN`) — a drop-and-add would
+fail Drydock's flagless predeploy — on `handback`, `handback_test`, **and prod** (asked: "run db
+push on local and prod, its fine"). Prod has no public DB port, so it went through
+`aws ssm send-command` → `docker exec … psql -U drydock -d inloop`; both gripes survived with
+`error_count` 0. Learned on the way: the Drydock project/db is **still `inloop`**, ECS exec is off,
+the PG superuser is `drydock`. **Prod is mid-migration** — the running container is the old image
+and every gripe read errors on `gripe.event_count` until `main` deploys; `/healthz` still 200s so
+nothing will page. typecheck green both workspaces, extension rebuilt, e2e 4/4.
+Touched: prisma/schema.prisma, server/{ingest,gripes-api,router}.ts, cli/push.ts,
+extension/src/lib/upload.ts, src/app/app.tsx, src/components/viewer/gripe-header.tsx,
+cliffnotes.md, updates.md.
+
+## 2026-07-30 — inloop→handback doc sweep + first full e2e run since /connect
+Asked: "its handback.dev. update all the inloop shit. whats e2e database??" Swept the stale
+references: cliffnotes (`handback push`, "Handback Recorder", deploy table rewritten — handback.dev
+is live, project/db name flagged as portal-unconfirmed, "today still inloop" parentheticals gone)
+and the **active** transcription plan (`ilp_`→`hb_`, inloop.dested.com→handback.dev, "Inloop knows
+the context"→Handback). Deliberately left: updates/decisions (append-only history), the rename
+plan (inloop IS its subject), real AWS names `inloop-files`/`inloop-app` (still exist, slated for
+deletion), and `drydock.yaml` + `.github/workflows/drydock.yml` (Drydock-owned — the ECS/ECR names
+are a portal re-wire, not an edit). Ran `bun run test:e2e` with E2E_DATABASE_URL derived from .env
+→ **4/4 green**, including the new /connect click-through. Still open: the local folder is still
+`G:\code\inloop` (Sal deferred once; `reproject` skill renames it without losing session history).
+Touched: cliffnotes.md, plans/2026-07-30-transcription.md, updates.md.
+
 ## 2026-07-30 — shipped: commit + push (deploy) + Recorder 1.1.0 release
 Asked: "commit, push and run a build of the extension and tag a release." Done: everything pending
 committed (`67d64ae` — hosted MCP + /connect + /recorder + panel redesign) and pushed → Drydock

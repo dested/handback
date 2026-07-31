@@ -79,7 +79,10 @@ const declareSchema = z.object({
   recordedAt: z.string().datetime(),
   durationMs: z.number().int().min(0),
   frameCount: z.number().int().min(0),
-  eventCount: z.number().int().min(0).default(0),
+  errorCount: z.number().int().min(0).default(0),
+  droppedCount: z.number().int().min(0).default(0),
+  /** @deprecated Recorder ≤1.1.0 called `errorCount` this. Read when it's the only one sent. */
+  eventCount: z.number().int().min(0).optional(),
   takes: z.array(takeSchema).min(1).max(200),
   files: z
     .array(
@@ -230,7 +233,10 @@ ingestRouter.post('/gripes', declareLimit, async (req, res) => {
       uploadedById: auth.userId,
       durationMs: body.durationMs,
       frameCount: body.frameCount,
-      eventCount: body.eventCount,
+      // A recorder that predates the rename only sends `eventCount`; it meant
+      // the same thing, so honour it rather than silently storing zero.
+      errorCount: body.errorCount || (body.eventCount ?? 0),
+      droppedCount: body.droppedCount,
       bytes: BigInt(gripeBytes),
       takes: {
         create: body.takes.map((t) => ({

@@ -187,28 +187,37 @@ only granted projects and is clamped to member) ← ProjectAccess(membership+pro
 pair) · Invite (id IS the join-link token, 7-day expiry; optional **projectId** = guest invite,
 role forced to member; an org-wide invite upgrades an existing guest) · Project
 (originHints[] auto-routes uploads by recorded origin) · **Gripe** (unique org+slug; slug = the
-recorder's folder name; status open/in_review/resolved; finalizedAt gates visibility) ← Take
+recorder's folder name; status open/in_review/resolved; finalizedAt gates visibility;
+**errorCount**/**droppedCount** — see the events gotcha) ← Take
 (rec-NN) + GripeFile (path unique per gripe; S3 key = `orgs/<orgId>/gripes/<gripeId>/<path>`) ·
 ApiToken (sha256 hash only; `hb_` prefix since the rename — old `ilp_` tokens are dead;
 lastUsedAt stamped on ingest auth).
 
 ## Storage (S3)
 
-Bucket **handback-files** — DOES NOT EXIST YET: Drydock will provision it (bucket + scoped IAM
-user + CORS + SSM env) per `G:\code\drydock\plans\2026-07-30-s3-buckets.md`; until then every
-upload 403s (dev `.env` already points at it). The old hand-made pair `inloop-files` +
-IAM user `inloop-app` (us-west-2, account 114394156384, profile `dested`) still exists and is
-slated for deletion. Everything moves via presigned URLs (PUT 1h, GET 1h) — `gripes.get` presigns
-every file in one call so the viewer never round-trips per frame.
+Bucket **handback-files** — **live** (us-west-2, account 114394156384, profile `dested`), created
+by hand 2026-07-30 night, not by Drydock: public access fully blocked, CORS allowing
+handback.dev / www / `http://localhost:3995` / `http://localhost:3210` / `chrome-extension://*`.
+Its writer is IAM user **`handback-app`** with one inline policy `handback-files-rw` scoped to
+that bucket and nothing else (verified: it gets AccessDenied on any other bucket). The old pair
+`inloop-files` + `inloop-app` is **deleted** — bucket emptied (234 objects, ~51 MB, the two test
+gripes) and removed, user and access key removed. Anything that still remembers an
+`inloop-files` URL is dead; the presigned links inside an old `get_gripe` response 404.
+Everything moves via presigned URLs (PUT 1h, GET 1h) — `gripes.get` presigns every file in one
+call so the viewer never round-trips per frame.
 
 ## Deploy (Drydock — handback.dev is serving; re-wire partly done)
 
+**State (2026-07-31):** read the migration warning below before anything else — prod's DB is a
+release ahead of prod's container. Deploy target confirmed: project/db are **still named `inloop`**.
+
 **State (2026-07-30 night):** **https://handback.dev answers** — `/healthz` returns 200 — and
 `inloop.dested.com` no longer completes a TLS handshake. So the domain half of the move has
-landed. What has NOT been re-verified from this repo: which Drydock project/db name is actually
-behind it, and whether S3 provisioning happened (see Storage — if it didn't, uploads still 403).
-Check the portal before trusting either. The rest of Sal's checklist (zone + delegation, project
-recreate, SSM env, cleanup) lives in `plans/2026-07-30-handback-rename.md`.
+landed. S3 is settled too: `handback-files` + `handback-app` exist and prod points at them (see
+Storage), done by hand rather than by Drydock — so `G:\code\drydock\plans\2026-07-30-s3-buckets.md`
+no longer has anything to provision here. SSM (`/drydock/inloop/*`) carries the new bucket and
+keys, applied 2026-07-30 night. The rest of Sal's checklist (zone + delegation, project
+recreate, cleanup) lives in `plans/2026-07-30-handback-rename.md`.
 `Dockerfile`/`drydock.yaml`/`.github/workflows/drydock.yml` may still carry inloop names — Drydock
 regenerates all three on re-wire, so don't hand-fix them.
 
@@ -221,11 +230,25 @@ service.
 | Setting | Value |
 | --- | --- |
 | domain | **`handback.dev`** — live and serving |
-| project / db name | `handback` intended; the repo's Drydock-owned files still say `inloop`, so the ECS service/ECR repo are probably still `drydock-inloop`. **Check the portal** — this is the one field that hasn't been confirmed post-move. |
+| project / db name | **still `inloop`** — confirmed 2026-07-31 from AWS: ECS service `drydock-inloop` (cluster `drydock`), SSM prefix `/drydock/inloop/*`, Postgres database `inloop`. `handback` was intended but the re-wire never happened, so the name only lives in the domain. Renaming it is a portal job (and would move the SSM prefix + DB), not a repo edit. |
 | container port | 3995 (`PORT` is injected; `server.ts` reads it) |
 | size | `m` — 192 MiB reservation / 576 MiB hard limit |
 | build / start | `bun run build` / `bun run start` |
 | predeploy | `bunx prisma db push` (no `--accept-data-loss`, on purpose) |
+
+> **⚠️ PROD IS MID-MIGRATION (2026-07-31) — push `main` to finish it.** The `errorCount` rename was
+> applied straight to the prod DB (`error_count` renamed, `dropped_count` added), but the running
+> container is still the *old* image, which selects `gripe.event_count`. **Every gripe read on
+> handback.dev errors right now** ("The column `gripe.event_count` does not exist") — `/healthz`
+> still 200s, so a probe won't catch it. Deploying the current `main` fixes it; nothing else is
+> needed (predeploy `db push` finds no drift). Local `handback` + `handback_test` already renamed.
+
+**Reaching the prod DB** (there is no public port — it's `172.17.0.1:5432` on the Docker bridge):
+the EC2 box is SSM-managed, so `aws ssm send-command --instance-ids i-082378e80e708f4f2
+--document-name AWS-RunShellScript` → `docker exec ecs-drydock-system-postgres-1-postgres-…
+psql -U drydock -d inloop`. The superuser role is **`drydock`**, not `postgres`, and local socket
+auth is trust, so no password is needed (keep it that way — an SSM command's text is retained in
+the console). ECS exec is **disabled** on the service, so the container itself is not shell-able.
 
 **Env lives in SSM**, not `.env`: `DATABASE_URL` + `BETTER_AUTH_SECRET` are generated by Drydock,
 `BETTER_AUTH_URL` must equal the serving origin (→ `https://handback.dev`), and `AWS_REGION` /
@@ -248,6 +271,21 @@ reaches the container on a plain push.
   contain `<pre>` and mono lines that never wrap — a missing `min-w-0` drags the whole page
   wider than a phone (doc `scrollWidth` 510 at a 390 viewport). Re-check `scrollWidth` at 390
   after touching any landing grid.
+- **A gripe's `errorCount` is not "how much happened".** `PageEvent` is only `error | warn |
+  network` — the console/fetch tap in `extension/public/injected.js`, forwarded only while a
+  recording is live (`content/index.ts:93`), and `console.log` is never captured. Clicks and
+  navigation are NOT events: they become forced keyframes (`recording:force`), so a busy
+  walkthrough legitimately reads `errorCount: 0` with a high `frameCount` — that pairing is
+  evidence the tap worked, not that it died. `droppedCount` is errors that fired on a tab other
+  than the recorded one (`inScope()` in `recorder.ts`), which is what separates "the page was
+  clean" from "we weren't watching". The field was called `eventCount` until 2026-07-31 and read
+  as an interaction counter to every agent that saw it; **ingest still accepts a bare `eventCount`**
+  from Recorder ≤1.1.0 and stores it as `errorCount`, so don't delete that fallback until the
+  Web Store build is past 1.1.0 everywhere.
+- **Renaming a column is a SQL job, not a `db push` job.** Predeploy runs `bunx prisma db push`
+  **without** `--accept-data-loss` on purpose, so any drop stalls the deploy. Rename in place first
+  (`ALTER TABLE "gripe" RENAME COLUMN "old" TO "new"`), then push — it sees no drift. Remember
+  `handback_test` needs the same statement or the e2e suite 500s.
 - **Two MCP servers, one implementation.** `server/mcp.ts` (hosted, `/mcp`) and `cli/mcp.ts`
   (stdio) both go through `server/gripes-api.ts` + `server/mcp-format.ts`. Change what an agent
   sees in those two files, never in one server. `/api/ingest`'s read routes are thin wrappers over
@@ -261,6 +299,11 @@ reaches the container on a plain push.
   `authenticateToken` stamps on every ingest/MCP call. So "has an agent connected?" means "has a
   token ever completed a request", not "does a token exist". Guests get `canConnect: false` and
   never see it.
+- **An invite must survive the auth round trip.** `/join/:id` is the only page a signed-out stranger
+  lands on; its auth links carry `?invite=<id>`, `/sign-up` and `/sign-in` return to
+  `/join/:id?accept=1`, and `redirectIfSignedIn` (routes.tsx) honours the same param. Drop any one
+  of those and the account gets created while the invitation is orphaned — the failure is silent,
+  because sign-up itself succeeds. Accept is idempotent, so a stale `?accept=1` is harmless.
 - **`./server/*` never imports into `src/*`** except `import type` (starter rule; leaks secrets).
 - **tRPC returns must be JSON-safe** — Dates → ISO strings at the procedure, `bytes` BigInt →
   Number, or SSR/hydration markup diverges.

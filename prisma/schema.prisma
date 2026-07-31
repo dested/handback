@@ -185,7 +185,12 @@ model Gripe {
   uploadedBy   User?     @relation("uploader", fields: [uploadedById], references: [id], onDelete: SetNull)
   durationMs   Int       @default(0) @map("duration_ms")
   frameCount   Int       @default(0) @map("frame_count")
-  eventCount   Int       @default(0) @map("event_count")
+  // Console errors/warns + failed requests the page reported *while recording* —
+  // never clicks or navigation. Zero means the page never complained.
+  errorCount   Int       @default(0) @map("error_count")
+  // Errors that fired on a tab other than the recorded one, counted and thrown
+  // away. Distinguishes "nothing broke" from "we weren't looking there".
+  droppedCount Int       @default(0) @map("dropped_count")
   bytes        BigInt    @default(0)
   // Set when the uploader confirms every declared file landed in S3; the
   // gripe list only shows finalized gripes.

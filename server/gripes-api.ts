@@ -49,7 +49,8 @@ export type GripeListItem = {
   recordedAt: string
   durationMs: number
   frameCount: number
-  eventCount: number
+  errorCount: number
+  droppedCount: number
   takeCount: number
   projectName: string | null
 }
@@ -77,7 +78,8 @@ export async function listGripes(orgId: string, status?: GripeStatus): Promise<G
     recordedAt: g.recordedAt.toISOString(),
     durationMs: g.durationMs,
     frameCount: g.frameCount,
-    eventCount: g.eventCount,
+    errorCount: g.errorCount,
+    droppedCount: g.droppedCount,
     takeCount: g._count.takes,
     projectName: g.project?.name ?? null,
   }))
@@ -94,7 +96,8 @@ export type GripeDetail = {
   recordedAt: string
   durationMs: number
   frameCount: number
-  eventCount: number
+  errorCount: number
+  droppedCount: number
   takes: Array<{
     index: number
     dir: string
@@ -141,7 +144,8 @@ export async function getGripeDetail(orgId: string, gripeId: string): Promise<Gr
     recordedAt: gripe.recordedAt.toISOString(),
     durationMs: gripe.durationMs,
     frameCount: gripe.frameCount,
-    eventCount: gripe.eventCount,
+    errorCount: gripe.errorCount,
+    droppedCount: gripe.droppedCount,
     takes: gripe.takes.map((t) => ({
       index: t.index,
       dir: t.dir,

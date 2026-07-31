@@ -60,12 +60,17 @@ async function appLoader({ context }: LoaderFunctionArgs): Promise<RootLoaderDat
   return { session }
 }
 
-async function redirectIfSignedIn({ context }: LoaderFunctionArgs) {
+async function redirectIfSignedIn({ context, request }: LoaderFunctionArgs) {
   const session =
     typeof window === 'undefined'
       ? (context as SsrLoaderContext).session
       : await fetchClientSession()
-  if (session) throw redirect('/app')
+  if (session) {
+    // An already-signed-in visitor who followed an invite through /sign-up
+    // belongs back at the invite, not at their own inbox.
+    const invite = new URL(request.url).searchParams.get('invite')
+    throw redirect(invite ? `/join/${encodeURIComponent(invite)}?accept=1` : '/app')
+  }
   return null
 }
 
