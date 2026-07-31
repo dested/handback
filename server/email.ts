@@ -1,0 +1,160 @@
+// Transactional email, over Resend's REST API. No SDK: the whole surface we need
+// is one POST, and a dependency-free wrapper keeps the types ours.
+//
+// Without RESEND_API_KEY nothing is sent — the message is logged instead, so a
+// dev can click the reset link out of their terminal and the whole flow works
+// offline. That is the same degrade-don't-fail rule the transcription provider
+// follows.
+
+import { env } from './env'
+import { log } from './logger'
+
+const RESEND_URL = 'https://api.resend.com/emails'
+
+interface Message {
+  to: string
+  subject: string
+  /** Plain text is not a fallback — plenty of people read mail this way. */
+  text: string
+  html: string
+}
+
+export function emailConfigured(): boolean {
+  return Boolean(env.RESEND_API_KEY)
+}
+
+/**
+ * Never throws. A failed send must not take down the sign-up or invite that
+ * triggered it — the caller has already committed its database work, and an
+ * unsendable email is a support problem, not a 500.
+ */
+export async function sendEmail(message: Message): Promise<boolean> {
+  if (!env.RESEND_API_KEY) {
+    log.warn(`[email] RESEND_API_KEY unset — not sending "${message.subject}" to ${message.to}`)
+    log.info(`[email] would have said:\n${message.text}`)
+    return false
+  }
+  try {
+    const res = await fetch(RESEND_URL, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${env.RESEND_API_KEY}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: env.EMAIL_FROM,
+        to: [message.to],
+        subject: message.subject,
+        text: message.text,
+        html: message.html,
+      }),
+      signal: AbortSignal.timeout(15_000),
+    })
+    if (!res.ok) {
+      log.warn(`[email] Resend rejected "${message.subject}": ${res.status} ${await res.text()}`)
+      return false
+    }
+    log.info(`[email] sent "${message.subject}" to ${message.to}`)
+    return true
+  } catch (err) {
+    log.warn(`[email] send failed: ${err instanceof Error ? err.message : String(err)}`)
+    return false
+  }
+}
+
+// ── templates ────────────────────────────────────────────────────────────────
+// Light, ink-on-paper, one cobalt accent — the same rules as the app (ui.md).
+// Inline styles only: every mail client strips a stylesheet.
+
+const INK = '#25272e'
+const MUTED = '#6b6f7a'
+const COBALT = '#2f56d8'
+const PAPER = '#fbfaf7'
+
+/** Escapes text bound for an HTML template. Org names are user input. */
+function esc(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+function shell(body: string): string {
+  return `<div style="margin:0;padding:32px 16px;background:${PAPER};font-family:'Helvetica Neue',Arial,sans-serif;color:${INK}">
+  <div style="max-width:480px;margin:0 auto">
+    <div style="font-size:18px;font-weight:600;letter-spacing:-0.01em">Handback</div>
+    <div style="height:1px;background:#e6e3dc;margin:16px 0 24px"></div>
+    ${body}
+    <div style="height:1px;background:#e6e3dc;margin:28px 0 16px"></div>
+    <div style="font-size:12px;color:${MUTED};line-height:1.6">
+      Handback — agents fix it, humans sign off.<br>
+      Not expecting this? You can ignore it; nothing happens until the link is used.
+    </div>
+  </div>
+</div>`
+}
+
+function button(href: string, label: string): string {
+  return `<a href="${href}" style="display:inline-block;background:${COBALT};color:#fff;text-decoration:none;font-weight:600;font-size:14px;padding:11px 20px;border-radius:6px">${label}</a>`
+}
+
+function fallbackLine(href: string): string {
+  return `<p style="font-size:13px;color:${MUTED};line-height:1.6;margin:20px 0 0">
+      Or paste this into your browser:<br>
+      <span style="word-break:break-all;color:${COBALT}">${href}</span>
+    </p>`
+}
+
+export function resetPasswordEmail(url: string): Omit<Message, 'to'> {
+  return {
+    subject: 'Reset your Handback password',
+    text: `Someone asked to reset the password on your Handback account.\n\nSet a new one here:\n${url}\n\nThe link is good for one hour. If this wasn't you, ignore this email — your password stays as it is.`,
+    html: shell(`<p style="font-size:15px;line-height:1.6;margin:0 0 20px">
+      Someone asked to reset the password on your Handback account.
+    </p>
+    ${button(url, 'Set a new password')}
+    <p style="font-size:13px;color:${MUTED};line-height:1.6;margin:20px 0 0">
+      The link is good for one hour. If this wasn't you, ignore this email — your password stays as it is.
+    </p>
+    ${fallbackLine(url)}`),
+  }
+}
+
+export function verifyEmail(url: string): Omit<Message, 'to'> {
+  return {
+    subject: 'Confirm your email for Handback',
+    text: `Confirm this address so we can reach you about your account — password resets, invites, and nothing else.\n\n${url}`,
+    html: shell(`<p style="font-size:15px;line-height:1.6;margin:0 0 20px">
+      Confirm this address so we can reach you about your account — password resets,
+      invites, and nothing else.
+    </p>
+    ${button(url, 'Confirm my email')}
+    ${fallbackLine(url)}`),
+  }
+}
+
+export function inviteEmail(opts: {
+  org: string
+  inviter: string
+  url: string
+}): Omit<Message, 'to'> {
+  const { org, inviter, url } = opts
+  return {
+    subject: `${inviter} invited you to ${org} on Handback`,
+    text: `${inviter} invited you to join ${org} on Handback — the workspace where recorded walkthroughs of software problems get reviewed and handed to coding agents.\n\nJoin here:\n${url}\n\nThe invitation expires in seven days. Anyone with this link can join, so keep it to yourself.`,
+    html: shell(`<p style="font-size:15px;line-height:1.6;margin:0 0 8px">
+      <strong>${esc(inviter)}</strong> invited you to join <strong>${esc(org)}</strong> on Handback.
+    </p>
+    <p style="font-size:14px;color:${MUTED};line-height:1.6;margin:0 0 20px">
+      It's the workspace where recorded walkthroughs of software problems get reviewed
+      and handed to coding agents.
+    </p>
+    ${button(url, `Join ${esc(org)}`)}
+    <p style="font-size:13px;color:${MUTED};line-height:1.6;margin:20px 0 0">
+      The invitation expires in seven days. Anyone holding this link can join the
+      workspace, so keep it to yourself.
+    </p>
+    ${fallbackLine(url)}`),
+  }
+}

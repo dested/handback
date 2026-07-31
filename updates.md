@@ -2,6 +2,47 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-07-30 — the go-live batch: email, caps, limits, pricing, cleanup pass, store copy
+Asked: "let me know what i need to do next" → "do all that for me please", with Groq, Resend and
+Anthropic keys pasted in chat. Done, all six:
+**Email (Resend)** — `server/email.ts` (sender + reset/verify/invite templates, never throws; with
+no key it logs the message so a dev can click the link), better-auth `sendResetPassword` +
+`sendVerificationEmail`, `invites.create` emails the link, new `/forgot-password` +
+`/reset-password` pages. Sending domain created in Resend, DKIM/SPF written into Route53 — records
+resolve, Resend still reads `pending`, so mail doesn't land yet.
+**Upload caps** — `presignPut` signs `ContentLength` (S3 itself rejects a mismatch); 512 MB/file,
+2 GB/gripe, 20 GB + 500 gripes per org checked at declare, minus the gripe being replaced.
+**Rate limiting** — better-auth per-route rules + `server/ratelimit.ts` (per-IP ahead of auth,
+per-token per route) across `/api/ingest`; `trust proxy` set so `req.ip` is the caller, not Caddy.
+**Pricing** — paid tiers relabelled "Free in alpha"/"Coming soon", muted prices, and a line saying
+nothing is billed yet.
+**Transcript cleanup** — `server/polish.ts` (`claude-haiku-4-5`) + `POST /api/ingest/polish` +
+`extension/src/sidepanel/polish.ts`: edits keyed by line index, grounded in the recorded origin and
+the page's console errors, timings never cross the boundary, every failure keeps the raw lines.
+Verified live: "handbag"→"Handback", "cores"→"CORS", "you are ell"→"URL", "use effect"→"useEffect".
+The report names it (`engineName`), and `/privacy` now names Anthropic and Resend as processors.
+**Web Store** — `plans/2026-07-30-web-store-listing.md`: listing copy, single-purpose statement, a
+justification per permission (including the `<all_urls>` answer), the data-use disclosure table,
+reviewer notes, screenshot list. Go-live doc updated: blockers 1–2 closed, what's left is Sal's.
+Touched: server/{email,polish,ratelimit,ingest,storage,auth,env,router}.ts, server.ts,
+src/app/{forgot-password,reset-password,privacy,terms,sign-in,routes}.tsx,
+src/components/landing/pricing.tsx, extension/src/{sidepanel/{polish,transcribe,App},
+lib/{types,messages,report},background/index}.ts, plans/*, cliffnotes/decisions.
+
+## 2026-07-30 — project-scoped guest invites
+Asked: "create projects and invite people to be part of my project and they can see my project's
+stuff — is that built? if not scope and build it." Projects + org invites existed; project-scoped
+visibility didn't. Done (2 Opus agents + Fable, per plans/2026-07-30-project-guests.md):
+`Membership.scope` org|projects + `ProjectAccess` + `Invite.projectId`; `requireMembership` now
+returns `Access{role, projectIds}` and every gripe/project procedure enforces it (guests: own
+projects only, no unassigned gripes, no project create/assign, no API tokens, filtered members
+list; org-wide invite upgrades a guest); removeMember revokes the target's tokens. UI: Access
+select on the Team invite form, per-project Invite button + copy link on /projects, guest chips +
+"Only: …" on members, project name on /join, tokens tab and viewer project-assign hidden for
+guests. db push'd, typecheck green.
+Touched: prisma/schema.prisma, server/{membership,router}.ts, src/lib/org.tsx,
+src/app/{team,projects,join}.tsx, src/components/viewer/gripe-controls.tsx.
+
 ## 2026-07-30 — renamed Inloop → Handback (handback.dev)
 Asked: "change the name from inloop to handback. its handback.dev" (+ rename all identifiers, new
 bucket via Drydock, GitHub rename, redesign the logo now). Done: full sweep by 3 Opus agents +

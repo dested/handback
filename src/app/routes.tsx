@@ -10,7 +10,9 @@ import { GripePage } from './gripe'
 import { HomePage } from './home'
 import { JoinPage } from './join'
 import { Layout } from './layout'
+import { ForgotPasswordPage } from './forgot-password'
 import { PrivacyPage } from './privacy'
+import { ResetPasswordPage } from './reset-password'
 import { ProjectsPage } from './projects'
 import { SignInPage } from './sign-in'
 import { SignUpPage } from './sign-up'
@@ -76,6 +78,8 @@ export const routes: RouteObject[] = [
       { path: 'sign-in', Component: SignInPage, loader: redirectIfSignedIn },
       { path: 'sign-up', Component: SignUpPage, loader: redirectIfSignedIn },
       { path: 'join/:inviteId', Component: JoinPage },
+      { path: 'forgot-password', Component: ForgotPasswordPage },
+      { path: 'reset-password', Component: ResetPasswordPage },
       { path: 'privacy', Component: PrivacyPage },
       { path: 'terms', Component: TermsPage },
       { path: 'app', Component: InboxPage, loader: appLoader },

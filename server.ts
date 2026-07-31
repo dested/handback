@@ -27,6 +27,11 @@ async function createServer() {
   const app = express()
   app.disable('x-powered-by')
 
+  // One hop: Caddy terminates TLS and forwards. Without this `req.ip` is the
+  // proxy's address for every request, which would collapse every caller into a
+  // single rate-limit bucket.
+  app.set('trust proxy', 1)
+
   // One tidy log line per request (status + timing), asset noise filtered out.
   app.use(requestLogger(isProd))
 

@@ -44,10 +44,27 @@ export function isSafePath(path: string): boolean {
   return /^[\w][\w.\- /()]*$/.test(path)
 }
 
-export async function presignPut(key: string, contentType: string): Promise<string> {
+/**
+ * A presigned PUT for exactly one object of exactly `contentLength` bytes.
+ *
+ * Signing the length is what makes the declared size binding: it lands in
+ * SignedHeaders, so S3 itself rejects an upload whose `Content-Length` differs.
+ * Without it a caller could declare a 1 KB frame and push a 5 GB file — the
+ * quota accounting would say one thing and the bucket another.
+ */
+export async function presignPut(
+  key: string,
+  contentType: string,
+  contentLength: number
+): Promise<string> {
   return getSignedUrl(
     s3,
-    new PutObjectCommand({ Bucket: env.S3_BUCKET, Key: key, ContentType: contentType }),
+    new PutObjectCommand({
+      Bucket: env.S3_BUCKET,
+      Key: key,
+      ContentType: contentType,
+      ContentLength: contentLength,
+    }),
     { expiresIn: PUT_TTL_SECONDS }
   )
 }

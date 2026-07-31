@@ -9,9 +9,9 @@ export function PrivacyPage() {
       <Section heading="Who this covers">
         <p>
           Handback is operated by Sal Aiello. This policy covers the Handback web app at
-          handback.dev, the Handback Recorder Chrome extension, and the command-line and MCP
-          tools that talk to the same API. Handback is a workspace for teams: almost everything you
-          put into it is visible to the other members of your organization, by design.
+          handback.dev, the Handback Recorder Chrome extension, and the command-line and MCP tools
+          that talk to the same API. Handback is a workspace for teams: almost everything you put
+          into it is visible to the other members of your organization, by design.
         </p>
       </Section>
 
@@ -57,7 +57,9 @@ export function PrivacyPage() {
           There are no analytics scripts, advertising tags, or third-party trackers on this site —
           you can check the page source. We do not sell your data, we do not share it with anyone
           outside the processors named below, and{' '}
-          <strong>we do not use your recordings, transcripts, or reports to train AI models.</strong>
+          <strong>
+            we do not use your recordings, transcripts, or reports to train AI models.
+          </strong>
         </p>
       </Section>
 
@@ -88,7 +90,7 @@ export function PrivacyPage() {
         </p>
       </Section>
 
-      <Section heading="Transcription">
+      <Section heading="Transcription and cleanup">
         <p>
           Your narration is transcribed one of two ways, and you choose which in the extension's
           settings:
@@ -111,6 +113,14 @@ export function PrivacyPage() {
           Either way, the recording itself — video, keyframes, audio — is stored in our S3 bucket as
           described above.
         </p>
+        <p>
+          The transcript then goes through a cleanup pass so the words match what you actually said:
+          the text of the lines, the page's address, and the errors its console logged are sent to
+          Anthropic's Claude API, which returns the same lines with product names and technical
+          terms spelled correctly. No audio, video, or image is sent. Timestamps are never changed,
+          and the report states plainly when a transcript has been through this pass. Anthropic does
+          not train on API inputs or outputs.
+        </p>
       </Section>
 
       <Section heading="Processors">
@@ -124,6 +134,16 @@ export function PrivacyPage() {
               term: 'Groq',
               detail:
                 'Speech-to-text, only when server-side transcription is enabled. Receives the audio track; receives nothing else.',
+            },
+            {
+              term: 'Anthropic',
+              detail:
+                'Transcript cleanup. Receives the transcript text, the recorded page address, and its console errors. Never receives audio, video, or images.',
+            },
+            {
+              term: 'Resend',
+              detail:
+                'Sends our account email — verification, password resets, and invitations. Receives the recipient address and the message itself; never receives gripe content.',
             },
           ]}
         />

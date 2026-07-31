@@ -158,8 +158,63 @@ failing the request loudly (the recorder can't do anything useful with the error
 **Why:** the Chrome Web Store requires a privacy policy URL for an extension that captures screen
 and microphone, and a product that stores recordings of people's screens owes them a plain
 statement of what's kept and how to delete it. Governing law is Arizona (Sal's call), contact is
-sal@dested.com. The policy names AWS and Groq as the only processors and describes both
-transcription modes — so it stays true whichever way the toggle is set.
+sal@dested.com. The policy names every processor (AWS and Groq at first; Anthropic and Resend added
+the same day, in the release that introduced them) and describes both transcription modes — so it
+stays true whichever way the toggle is set.
 **Rejected:** a generated boilerplate policy (it would describe a product we don't have), deferring
 until the Web Store rejects us (the policy is on the critical path for submission), publishing a
 personal gmail as the contact.
+
+## 2026-07-30 — Email is Resend, and no email failure may block a person
+**Why:** the app needed account recovery before strangers could sign up, and Resend is a REST call
+with no SDK weight. `sendEmail` never throws — it returns a boolean and, with no `RESEND_API_KEY`,
+logs the whole message (reset link included) so a dev can click it out of the terminal. Sign-up
+sends a verification mail but does **not** require it (`requireEmailVerification` deliberately off):
+an undeliverable address must not be able to lock someone out of a product they just paid attention
+to. Invites are emailed best-effort and `invites.create` still returns the link, so a failed send
+degrades to copy-paste rather than a lost invitation.
+**Rejected:** SES (a second AWS surface to configure for the same job), requiring verification to
+sign in (breaks the alpha for anyone whose mail bounces), throwing on send failure (a 500 on
+sign-up because an email didn't go is the wrong trade).
+
+## 2026-07-30 — Upload size is enforced by *signing* it, not by trusting the declared bytes
+**Why:** `presignPut` now signs `ContentLength`, which puts the length into SignedHeaders, so S3
+itself rejects an upload whose `Content-Length` differs from what was declared. Checking the
+declared size server-side only proves the client was honest; signing it makes the number binding at
+the bucket. On top of that: 512 MB per file, 2 GB per gripe, and a per-org quota (20 GB, 500 gripes)
+checked at declare time, subtracting the gripe being replaced so a re-push doesn't count its
+predecessor twice.
+**Rejected:** presigned POST with `ContentLengthRange` (a second upload shape for the CLI and the
+extension to implement, for the same guarantee), verifying at finalize (the bytes are already on
+our bill by then), trusting the declared `bytes` (that was the hole).
+
+## 2026-07-30 — Rate limiting lives in memory, on purpose
+**Why:** the service runs as a single ECS task, so one process sees every request; Redis would be
+ceremony with an extra failure mode. `server/ratelimit.ts` is a fixed-window counter keyed per
+route, with a per-IP limit ahead of authentication (so a bad-token flood can't hammer the token
+lookup) and per-token limits behind it. If the service ever runs two tasks the limits become
+per-task — half as strict, still working. Swap in a shared store *then*.
+**Rejected:** Redis/Postgres-backed counters now (a dependency for a problem we don't have),
+a single global limit (a burst of agent reads would starve a legitimate upload).
+
+## 2026-07-30 — Alpha pricing may not imply a charge
+**Why:** the pricing section advertised $20 and $40 seats with a "Get started" button and no billing
+behind it. Charging copy with no charge path is the kind of thing people screenshot. The prices stay
+visible — they're the real intention and worth telling people — but in muted ink, under a "Free in
+alpha" / "Coming soon" badge, with a CTA that says "Use it free in alpha" and a line under the
+heading stating outright that nothing is billed yet and we'll ask before a card is needed.
+**Rejected:** deleting the paid tiers (they're the honest roadmap and the reason the free tier has
+a shape), wiring billing first (weeks of work in front of a link we want to send now).
+
+## 2026-07-30 — The transcript cleanup pass edits words by index, never timings
+**Why:** Groq hears audio, not software: "handbag" for Handback, "cores" for CORS, "you are ell"
+for URL. `server/polish.ts` sends the lines to `claude-haiku-4-5` with the page's own evidence — the
+recorded origin and its console errors — and asks for corrections keyed by line index. Three rules
+make it safe to run unattended: timings never cross the boundary (`t`/`d`/`tl` stay the recorder's),
+a line the model doesn't return is kept verbatim, and every failure path returns the original
+transcript. The report says when a transcript was polished, because a reader is deciding how far to
+trust the words. Haiku rather than Opus: this is spelling against a glossary the prompt already
+contains, on every take.
+**Rejected:** having the model return the whole transcript (one hallucinated timestamp corrupts the
+timeline), running it on-device (the thing we just moved off the user's machine), doing it inside
+`/transcribe` (a cleanup failure would then cost the transcript itself).

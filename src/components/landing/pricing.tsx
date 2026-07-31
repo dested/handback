@@ -12,8 +12,15 @@ type Tier = {
   to?: string
   href?: string
   featured?: boolean
+  /** Label in the corner of the card. */
+  badge?: string
+  /** Priced, but not billable yet — free during the alpha. */
+  soon?: boolean
 }
 
+// There is no billing yet, so no card here may imply a charge. The prices are
+// real intentions and stay visible; the CTA and the badge say plainly that
+// nothing is charged today.
 const tiers: Tier[] = [
   {
     name: 'Free',
@@ -25,19 +32,23 @@ const tiers: Tier[] = [
   {
     name: 'Pro',
     price: '$20',
-    unit: 'per seat / mo',
+    unit: 'per seat / mo, when billing opens',
     blurb: 'Cloud workspace, share links, MCP access',
-    cta: 'Get started',
+    cta: 'Use it free in alpha',
     to: '/sign-up',
     featured: true,
+    badge: 'Free in alpha',
+    soon: true,
   },
   {
     name: 'Business',
     price: '$40',
-    unit: 'per seat / mo',
+    unit: 'per seat / mo, when billing opens',
     blurb: 'Projects, auto-routing, team roles',
-    cta: 'Get started',
+    cta: 'Use it free in alpha',
     to: '/sign-up',
+    badge: 'Coming soon',
+    soon: true,
   },
   {
     name: 'Enterprise',
@@ -53,6 +64,10 @@ export function Pricing() {
     <Section id="pricing" className="rule py-20 md:py-28">
       <SectionLabel>Pricing</SectionLabel>
       <SectionHeading>Priced per reviewer, not per gripe.</SectionHeading>
+      <p className="text-muted-foreground mt-4 max-w-xl text-sm leading-relaxed">
+        Handback is in alpha and nothing is billed yet — every plan below runs free while we build.
+        We'll ask before a card is ever needed.
+      </p>
       <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {tiers.map((tier) => {
           const ctaClass = cn(
@@ -68,13 +83,24 @@ export function Pricing() {
               )}>
               <div className="flex items-center justify-between gap-2">
                 <h3 className="font-display text-lg font-semibold tracking-tight">{tier.name}</h3>
-                {tier.featured && (
-                  <span className="bg-cobalt-wash text-cobalt rounded-full px-2 py-0.5 font-mono text-[0.65rem] tracking-[0.1em] uppercase">
-                    Most teams
+                {tier.badge && (
+                  <span
+                    className={cn(
+                      'rounded-full px-2 py-0.5 font-mono text-[0.65rem] tracking-[0.1em] uppercase',
+                      tier.featured
+                        ? 'bg-cobalt-wash text-cobalt'
+                        : 'text-muted-foreground bg-muted'
+                    )}>
+                    {tier.badge}
                   </span>
                 )}
               </div>
-              <p className="font-display mt-5 text-3xl font-semibold tracking-tight">
+              {/* A price nobody is charged yet sits in muted ink, not full black. */}
+              <p
+                className={cn(
+                  'font-display mt-5 text-3xl font-semibold tracking-tight',
+                  tier.soon && 'text-muted-foreground'
+                )}>
                 {tier.price}
               </p>
               {/* nbsp keeps all four price blocks on one baseline */}

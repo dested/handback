@@ -24,6 +24,7 @@ import { contentTypeFor, pushGripe, type GripeFile, type UploadProgress } from '
 import { Recorder, type RecorderUpdate } from './recorder';
 import { Dictation } from '../content/speech';
 import { makeGrids, type GridFrame } from './grids';
+import { polishTranscript } from './polish';
 import { transcribeRecording, type TranscribeProgress } from './transcribe';
 import { Timeline } from './Timeline';
 import './panel.css';
@@ -126,6 +127,10 @@ export function App() {
   // A ref keeps it on the current server, token, and on-device choice.
   const settingsRef = useRef<Settings>(DEFAULT_SETTINGS);
   settingsRef.current = state.settings;
+  // Same reason, one step further along: the cleanup pass wants the take's own
+  // console errors and origin, read after the transcript comes back.
+  const stateRef = useRef<PanelState>(EMPTY);
+  stateRef.current = state;
 
   const session = useMemo(
     () => state.sessions.find((s) => s.id === state.activeSessionId) ?? null,
@@ -188,11 +193,26 @@ export function App() {
       if (!video) return;
       const result = await transcribeRecording(video, settingsRef.current, setWhisper);
       if (!result?.segments.length) return;
+
+      // Then the cleanup pass, which knows what the page was called and what it
+      // logged. It edits words, never timings, and a null answer just means the
+      // raw lines ship — see extension/src/sidepanel/polish.ts.
+      setWhisper({ stage: 'polish', pct: -1 });
+      const rec = stateRef.current.recordings.find((r) => r.id === id);
+      const origin = stateRef.current.sessions.find((s) => s.id === rec?.sessionId)?.origin;
+      const polished = await polishTranscript(result.segments, {
+        serverUrl: settingsRef.current.serverUrl,
+        apiToken: settingsRef.current.apiToken,
+        origin,
+        events: rec?.meta.events,
+      }).catch(() => null);
+
       await send({
         type: 'recording:transcript',
         id,
-        transcript: result.segments,
+        transcript: polished ?? result.segments,
         engine: result.engine,
+        polished: Boolean(polished),
       });
       await refresh();
     },
@@ -525,6 +545,7 @@ export function App() {
     if (whisper.stage === 'upload') return `transcribing the narration…${waiting}`;
     if (whisper.stage === 'transcribe') return `transcribing on this device…${waiting}`;
     if (whisper.stage === 'model') return `loading the speech model…${waiting}`;
+    if (whisper.stage === 'polish') return `cleaning up the transcript…${waiting}`;
     return `fetching the speech model — ${Math.round(whisper.pct)}%${waiting}`;
   }, [whisper, whisperIds]);
 

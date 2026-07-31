@@ -9,10 +9,10 @@ export function TermsPage() {
       summary="The agreement between you and Handback. Short version: it's early software, you own what you record, and you are responsible for having the right to record it.">
       <Section heading="1. Agreement">
         <p>
-          By creating an account, installing the Handback Recorder, or using the Handback API, you agree
-          to these terms. If you are agreeing on behalf of a company, you confirm you have the
-          authority to bind it. If you don't agree, don't use the service. Handback is operated by Sal
-          Aiello ("we", "us").
+          By creating an account, installing the Handback Recorder, or using the Handback API, you
+          agree to these terms. If you are agreeing on behalf of a company, you confirm you have the
+          authority to bind it. If you don't agree, don't use the service. Handback is operated by
+          Sal Aiello ("we", "us").
         </p>
       </Section>
 
@@ -31,9 +31,9 @@ export function TermsPage() {
           Handback the only copy of anything you cannot afford to lose.
         </Notice>
         <p>
-          One specific gap you should know about today: there is no self-service password reset. If
-          you lose your password, email <a href="mailto:sal@dested.com">sal@dested.com</a> and it
-          will be handled manually.
+          One specific gap you should know about today: deleting your account is not yet a button.
+          Email <a href="mailto:sal@dested.com">sal@dested.com</a> and it will be done by hand,
+          promptly.
         </p>
       </Section>
 
@@ -48,9 +48,9 @@ export function TermsPage() {
 
       <Section heading="5. What you record — read this one">
         <Notice>
-          You are responsible for having the right to record everything you capture. Handback records
-          your screen and your microphone; it cannot tell whose data is on that screen or whose
-          voice is in the room.
+          You are responsible for having the right to record everything you capture. Handback
+          records your screen and your microphone; it cannot tell whose data is on that screen or
+          whose voice is in the room.
         </Notice>
         <p>Before you record, make sure that:</p>
         <ul className="text-muted-foreground list-disc space-y-2 pl-5">
@@ -110,9 +110,9 @@ export function TermsPage() {
 
       <Section heading="9. Fees">
         <p>
-          Handback is free during alpha. The pricing shown on our site describes intended plans and is
-          not an offer — no paid plan is live and nothing is being charged. Should that change, you
-          will be told before any charge, and you can stop using the service instead.
+          Handback is free during alpha. The pricing shown on our site describes intended plans and
+          is not an offer — no paid plan is live and nothing is being charged. Should that change,
+          you will be told before any charge, and you can stop using the service instead.
         </p>
       </Section>
 
@@ -128,8 +128,8 @@ export function TermsPage() {
 
       <Section heading="11. No warranty">
         <p>
-          The service is provided "as is" and "as available", without warranties of any kind, express
-          or implied, including merchantability, fitness for a particular purpose, and
+          The service is provided "as is" and "as available", without warranties of any kind,
+          express or implied, including merchantability, fitness for a particular purpose, and
           non-infringement. We don't warrant that it will be uninterrupted, secure, or error-free,
           or that transcripts and generated reports will be accurate. Machine transcription gets
           things wrong; read before you rely on it.

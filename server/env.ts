@@ -12,6 +12,13 @@ const schema = z.object({
   // recorder falls back to its on-device Whisper pass. A dev without a Groq key
   // gets the slow path, not a boot crash.
   GROQ_API_KEY: z.string().min(1).optional(),
+  // Same rule for email: unset means transactional mail is logged instead of
+  // sent, so a dev can click a reset link out of their terminal.
+  RESEND_API_KEY: z.string().min(1).optional(),
+  EMAIL_FROM: z.string().min(1).default('Handback <noreply@handback.dev>'),
+  // Powers the transcript cleanup pass. Unset = raw transcript, which is what
+  // shipped before the pass existed.
+  ANTHROPIC_API_KEY: z.string().min(1).optional(),
 })
 
 export const env = schema.parse(process.env)

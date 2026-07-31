@@ -92,6 +92,13 @@ export interface RecordingMeta {
   transcript: TranscriptSegment[];
   /** Set when a real transcription pass replaced the live Web Speech lines; absent = Web Speech or none. */
   transcriber?: TranscriberId;
+  /**
+   * The workspace's cleanup pass rewrote the wording — product nouns spelled
+   * right, sentences punctuated, filler dropped. Timings are the transcriber's
+   * either way. The report says so, because a reader deserves to know a model
+   * touched the words.
+   */
+  polished?: boolean;
   /** Bumped on every content mutation; a line edit against a stale rev is skipped. */
   rev?: number;
   /** True once a human read the transcript back and said it was right. Reset when Whisper replaces it. */

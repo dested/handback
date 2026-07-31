@@ -504,6 +504,7 @@ chrome.runtime.onMessage.addListener((message: Request, _sender, sendResponse) =
             ...rec.meta,
             transcript: message.transcript,
             transcriber: message.engine,
+            polished: message.polished,
             // New words nobody has read yet — an earlier confirmation doesn't carry over.
             reviewed: false,
             rev: (rec.meta.rev ?? 0) + 1,

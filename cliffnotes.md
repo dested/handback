@@ -56,14 +56,19 @@ Playwright e2e. Inherited from dested/sal-starter — its conventions (server-on
 server.ts               Express entry: /healthz, auth, ingest, tRPC, vite/SSR, 404s
 server/
   env.ts                zod env: DATABASE_URL, BETTER_AUTH_*, AWS_REGION, S3_BUCKET, AWS keys,
-                        GROQ_API_KEY (optional — unset means no server-side transcription)
-  auth.ts               better-auth instance (email+password, autoSignIn)
+                        GROQ_API_KEY / ANTHROPIC_API_KEY / RESEND_API_KEY + EMAIL_FROM (all
+                        optional — each unset one disables its feature, nothing crashes)
+  auth.ts               better-auth: email+password, autoSignIn, reset/verify email, rate limits
   trpc.ts               context (session from headers) + public/protectedProcedure
   membership.ts         requireMembership(user, org, atLeast) role gate + slugify
   router.ts             THE tRPC API: orgs, invites, tokens, projects, gripes
-  ingest.ts             Token-authed REST (Bearer hb_…): two-phase upload + agent reads
+  ingest.ts             Token-authed REST (Bearer hb_…): two-phase upload + agent reads,
+                        size caps + per-org quota, /transcribe and /polish
   storage.ts            S3: presignPut/Get, getObjectText, deletePrefix, key layout, isSafePath
   transcribe.ts         speech-to-text via Groq whisper-large-v3-turbo; segments in ms
+  polish.ts             transcript cleanup via claude-haiku-4-5 — text only, timings untouched
+  email.ts              Resend sender + reset/verify/invite templates; never throws
+  ratelimit.ts          in-memory fixed-window limiter (one ECS task, so one process sees all)
   prisma.ts / logger.ts PrismaClient singleton · ANSI request logger
 cli/
   push.ts               `inloop push` — walks a gripe folder, declare → PUT xN → finalize
@@ -81,6 +86,8 @@ src/
     projects.tsx        Projects list + create (origin hints)
     team.tsx            Members / Invites / API tokens tabs
     join.tsx            /join/:inviteId — peek + accept
+    forgot-password.tsx /forgot-password — same answer whether or not the account exists
+    reset-password.tsx  /reset-password?token=… — the link better-auth emails
     privacy.tsx         /privacy — what's collected, where it lives, subprocessors
     terms.tsx           /terms — alpha status, recording consent, Arizona law
   components/
@@ -110,7 +117,8 @@ extension/              Inloop Recorder — the Chrome MV3 extension (own npm wo
   src/content/          On-page dock (d/c/m/s keys), ink drawing, telemetry; injected.js relay
   src/sidepanel/        Panel app: recorder (getDisplayMedia + dedup), transcription
                         (transcribeCloud.ts → the workspace; transcribeWorker.ts → on-device),
-                        Timeline editor, grids contact sheets, App.tsx orchestration
+                        polish.ts (the cleanup pass, after transcription), Timeline editor,
+                        grids contact sheets, App.tsx orchestration
   scripts/              make-icons, copy-ort, prune-dist, preview.mjs + preview/ (layout harness)
 ```
 
@@ -121,6 +129,7 @@ extension/              Inloop Recorder — the Chrome MV3 extension (own npm wo
 | `/` | Landing (marketing) | `src/app/home.tsx` |
 | `/sign-in` · `/sign-up` | Auth | `src/app/sign-{in,up}.tsx` |
 | `/join/:inviteId` | Invite accept | `src/app/join.tsx` |
+| `/forgot-password` · `/reset-password` | Password recovery (better-auth emails the link) | `src/app/{forgot,reset}-password.tsx` |
 | `/privacy` · `/terms` | Legal pages (linked from the marketing footer) | `src/app/{privacy,terms}.tsx` |
 | `/app` | Inbox (gripe list, first-run org creation) | `src/app/app.tsx` |
 | `/gripes/:gripeId` | The viewer | `src/app/gripe.tsx` |
@@ -140,11 +149,19 @@ extension/              Inloop Recorder — the Chrome MV3 extension (own npm wo
 | `GET /gripes/:id` | Detail + `reportMd` text + presigned GET for every file (MCP `get_gripe`) |
 | `POST /gripes/:id/status` | open / in_review / resolved (MCP `set_gripe_status`) |
 | `POST /transcribe` | 16 kHz mono WAV body in, `{segments:[{t,d?,text}]}` out. Stateless — the recorder chunks and offsets. 503 when `GROQ_API_KEY` is unset |
+| `POST /polish` | `{lines:[{text}], context:{origin,title,errors}}` in, the same number of lines back with product nouns spelled right. Text only — no timings cross this boundary. 503 when `ANTHROPIC_API_KEY` is unset |
+
+Every route is rate-limited: one per-IP limit ahead of authentication, then a per-token limit per
+route (`server/ratelimit.ts`). Declare also enforces 512 MB/file, 2 GB/gripe, 20 GB + 500 gripes per
+org, and the presigned PUT signs `ContentLength` so S3 rejects an upload that doesn't match.
 
 ## Data model (Postgres via Prisma)
 
 better-auth's User/Session/Account/Verification, plus: **Org** ← Membership(role
-owner/admin/member, unique org+user) · Invite (id IS the join-link token, 7-day expiry) · Project
+owner/admin/member, unique org+user; **scope** org|projects — "projects" = a **guest** who sees
+only granted projects and is clamped to member) ← ProjectAccess(membership+project grant, unique
+pair) · Invite (id IS the join-link token, 7-day expiry; optional **projectId** = guest invite,
+role forced to member; an org-wide invite upgrades an existing guest) · Project
 (originHints[] auto-routes uploads by recorded origin) · **Gripe** (unique org+slug; slug = the
 recorder's folder name; status open/in_review/resolved; finalizedAt gates visibility) ← Take
 (rec-NN) + GripeFile (path unique per gripe; S3 key = `orgs/<orgId>/gripes/<gripeId>/<path>`) ·
@@ -218,6 +235,11 @@ reaches the container on a plain push.
   by design.
 - **Raw API tokens are shown once** — only the sha256 lands in the DB. The dev-bootstrap script
   prints a fresh one each run.
+- **Guest scoping is enforced in `requireMembership`** (server/membership.ts): it returns
+  `Access { role, projectIds }` (`null` = whole workspace). Any NEW tRPC procedure returning
+  org data must respect `access.projectIds` (`canSeeGripe` / `requireOrgScope`) or guests leak.
+  `hb_` tokens are org-wide, so guests can't mint them, and `orgs.removeMember` revokes the
+  target's tokens.
 - **Prisma 7**: no `--skip-generate` flag; `prisma.config.ts` hand-loads `.env` — keep that block.
 - **The e2e suite boots its own server** on :3100 against `handback_test` with dummy S3 creds — any
   test that actually touches S3 will fail loudly (none do today).
@@ -246,6 +268,14 @@ reaches the container on a plain push.
 - **`GROQ_API_KEY` is optional everywhere.** Unset → the endpoint 503s → every recorder silently
   falls back to on-device. Nothing errors, it just gets slow — so "why is transcription taking
   minutes" is a missing-key question first.
+- **Every third-party key degrades the same way.** `ANTHROPIC_API_KEY` unset → `/polish` 503s → the
+  raw transcript ships. `RESEND_API_KEY` unset → `sendEmail` logs the message (link included) and
+  returns false, so a dev can click a reset link straight out of the terminal. The pattern is
+  deliberate: **a missing key must never be able to lose someone's work or block sign-up.**
+- **The cleanup pass edits words, never timings.** `/polish` takes text and returns the same number
+  of lines; `t`/`d`/`tl` never cross the boundary. Any change there has to keep that true, or the
+  timeline, the frames, and the report stop agreeing. The report says when a transcript was
+  polished (`report.ts` → `engineName`) because a reader is deciding how far to trust the words.
 - **Extension uploads with the panel's saved `hb_` token** (settings → serverUrl+apiToken,
   defaults to https://handback.dev) through the same two-phase `/api/ingest` flow as the CLI.
 
@@ -269,16 +299,23 @@ reaches the container on a plain push.
 - **Done (2026-07-30, later)** — `/privacy` and `/terms` (real pages, Arizona law, sal@dested.com);
   **server-side transcription on Groq** replacing the on-device Whisper wait, with an on-device
   toggle kept as the privacy path (`plans/2026-07-30-transcription.md`).
-- **Not built** — a `GROQ_API_KEY` in prod SSM (without it transcription silently stays on-device),
-  a prod account/API token (no one has signed up yet, so no S3 round-trip has run
+- **Not built** — a prod account/API token (no one has signed up yet, so no S3 round-trip has run
   against prod), a real in-Chrome record→upload run (needs a human), share links / public
-  gripe URLs, email sending for invites, billing, server-side transcription, org deletion,
-  pagination past 200 gripes, Chrome Web Store listing.
+  gripe URLs, billing, org deletion, error tracking / alerting, pagination past 200 gripes,
+  the Chrome Web Store listing itself (its copy is written — see Plans).
 - **Done (2026-07-30, night)** — **renamed Inloop → Handback (handback.dev)**: full sweep of code,
   extension, copy (`hb_` tokens, `HANDBACK_*` env, `handback-recorder` DB, `handback_test`,
   `handback.activeOrgId`, MCP name); new identity — the **return mark** (`ReturnMark`,
   `return-diagram.tsx`, regenerated extension icons); GitHub repo renamed dested/handback; e2e
   baselines re-shot. Infra handoff pending on Sal — `plans/2026-07-30-handback-rename.md`.
+- **Done (2026-07-30, night, after the rename)** — the go-live batch: **email on Resend**
+  (`server/email.ts` + reset/verify/invite flows, `/forgot-password`, `/reset-password`),
+  **upload size caps + per-org quota** (signed `ContentLength`, so S3 enforces it),
+  **rate limiting** (better-auth rules + `server/ratelimit.ts` over ingest), **alpha pricing copy**
+  (nothing implies a charge), and the **Haiku transcript cleanup pass** (`server/polish.ts` +
+  `extension/src/sidepanel/polish.ts` — "handbag" → "Handback", "cores" → "CORS", verified against
+  real mangled speech). Privacy page updated in the same pass: Anthropic and Resend named as
+  processors. Web Store listing copy written in full.
 - **Next** — Sal's Drydock/DNS checklist in the rename plan (zone, project, S3 via
   `G:\code\drydock\plans\2026-07-30-s3-buckets.md`), load-unpacked QA of the extension, then **the
   go-live blockers in `plans/2026-07-30-go-live.md`** (Chrome Web Store submission first — it's
@@ -288,11 +325,15 @@ reaches the container on a plain push.
 ## Plans
 
 - `plans/2026-07-30-transcription.md` — **active**. Why on-device Whisper stopped being the
-  default, what shipped on Groq, and the open follow-ups (prod key, Haiku cleanup pass, Deepgram
-  if keyterm biasing is ever needed).
-- `plans/2026-07-30-go-live.md` — **active**. What's required before strangers can sign up:
-  password reset/email, upload size caps + quotas, the untested prod S3 round trip, and a full
-  Chrome Web Store submission guide (cost, review time, why `<all_urls>` is the slow part).
-  Written pre-rename — read inloop.dested.com there as handback.dev.
+  default, what shipped on Groq, and what's left (Deepgram if keyterm biasing is ever needed). The
+  Haiku cleanup pass it proposed is built — `server/polish.ts`.
+- `plans/2026-07-30-go-live.md` — **active**. What's required before strangers can sign up. Blockers
+  1 and 2 (email, upload caps) and most should-fixes are ticked off; what's left is Sal's — Resend
+  domain verification, the Web Store submission, the prod S3 round trip, and rotating the keys that
+  were pasted in chat. Also carries the deferred `<all_urls>` → `activeTab` migration, written out
+  file by file for the day Google asks.
+- `plans/2026-07-30-web-store-listing.md` — **active**. Every field the Web Store form asks for,
+  written to paste: description, single-purpose statement, a justification per permission, the
+  data-use disclosure table, reviewer notes with test-account steps, and the screenshot shot list.
 - `plans/2026-07-30-handback-rename.md` — **active**. The Inloop → Handback rename: settled
   decisions table + Sal's Drydock/DNS checklist (zone, S3, project recreate, SSM, cleanup).

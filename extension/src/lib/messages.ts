@@ -53,6 +53,8 @@ export type Request =
       id: string;
       transcript: TranscriptSegment[];
       engine: TranscriberId;
+      /** The workspace's cleanup pass rewrote the wording (timings untouched). */
+      polished: boolean;
     }
   // The human read the transcript back and confirmed it.
   | { type: 'recording:reviewed'; id: string }

@@ -22,7 +22,7 @@ const SILENCE_FLOOR = 0.001;
 const TIMEOUT_MS = 15 * 60 * 1000;
 
 export interface TranscribeProgress {
-  stage: 'decode' | 'upload' | 'download' | 'model' | 'transcribe';
+  stage: 'decode' | 'upload' | 'download' | 'model' | 'transcribe' | 'polish';
   pct: number;
 }
 

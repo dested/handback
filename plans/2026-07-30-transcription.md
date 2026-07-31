@@ -6,8 +6,10 @@
 > **Built 2026-07-30 on Groq** (Sal's call — cheapest first, easier to swap forward to Deepgram
 > than to reverse). Shipped: `server/transcribe.ts`, `POST /api/ingest/transcribe`,
 > `extension/src/sidepanel/transcribeCloud.ts`, and the "Transcribe on this device" toggle.
-> **Still open:** the Haiku cleanup pass, keyterm biasing (Groq has no equivalent — that's the
-> reason to revisit Deepgram), and Deepgram streaming for the live line.
+> **The cleanup pass is built too** (2026-07-30, later): `server/polish.ts` → `POST
+> /api/ingest/polish` → `extension/src/sidepanel/polish.ts`.
+> **Still open:** keyterm biasing (Groq has no equivalent — that's the reason to revisit Deepgram)
+> and Deepgram streaming for the live line.
 
 ## The problem, precisely
 
@@ -146,14 +148,16 @@ see the go-live doc, which already flags the privacy policy as a blocker for oth
 - [x] Panel: WAV-encode, chunk, call it, await it, fall back to the worker on failure.
 - [x] Settings toggle: "Transcribe on this device" — off by default, the privacy escape hatch.
 - [x] Privacy policy names the subprocessor and describes both modes (`/privacy`).
-- [ ] **A `GROQ_API_KEY` in prod SSM.** Until it's set, prod answers 503 and every recorder silently
-      takes the slow path — the feature is shipped but dormant.
+- [x] **A `GROQ_API_KEY` in prod SSM** — set 2026-07-30 (task definition rev 10).
 - [ ] Verify end to end against a real recording: check the report's trust line says
       `Whisper large-v3-turbo, hosted`, and that a multi-chunk take (>8 min) has monotonic
       timestamps across the seam.
-- [ ] Haiku cleanup pass (`claude-haiku-4-5`, $1/$5 per MTok) grounded in console errors + page
-      context. Matters more on Groq than it would on Deepgram — there's no keyterm biasing to lean
-      on, so this is where technical vocabulary gets fixed.
+- [x] **Haiku cleanup pass** — built 2026-07-30. `server/polish.ts` + `POST /api/ingest/polish` +
+      `extension/src/sidepanel/polish.ts`, grounded in the recorded origin and the page's console
+      errors. Text only: the model returns edits keyed by line index, a line it doesn't return is
+      kept verbatim, and every failure leaves the original transcript standing. Verified against
+      real mangled speech — "handbag" → "Handback", "cores" → "CORS", "you are ell" → "URL",
+      "use effect" → "useEffect". The report names it, because a model touched the words.
 - [ ] *(optional)* Mic-only opus track, if the WAV upload turns out to be the slow part.
 - [ ] *(optional)* Deepgram, if keyterm biasing beats the cleanup pass.
 - [ ] *(optional)* Streaming for a live line that's actually accurate.
