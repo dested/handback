@@ -20,7 +20,12 @@ import { useTRPC } from '~/lib/trpc'
 const EXTENSION_ID = 'gmggnebbenlmpakojgocnjfcnpmifdci'
 /** Set when the Chrome Web Store listing goes live; null renders the zip path instead. */
 const STORE_URL: string | null = null
-const RELEASES_URL = 'https://github.com/dested/handback/releases/latest'
+/**
+ * Served by this app, not by GitHub: the repo is private, so its release links
+ * 404 for exactly the people we hand them to. Signed-in only, and it redirects
+ * to a short-lived presigned URL — see `GET /download/recorder`.
+ */
+const DOWNLOAD_URL = '/download/recorder'
 
 /**
  * The only part of the `chrome` API a web page can reach: `sendMessage` to an
@@ -185,6 +190,8 @@ function Recorder({ org }: { org: OrgSummary }) {
   const trpc = useTRPC()
   const connection = useQuery(trpc.tokens.connection.queryOptions({ orgId: org.id }))
   const canConnect = connection.data?.canConnect ?? true
+  const release = useQuery(trpc.recorder.release.queryOptions())
+  const latest = release.data?.version ?? null
 
   return (
     <div className="max-w-3xl space-y-12">
@@ -216,7 +223,7 @@ function Recorder({ org }: { org: OrgSummary }) {
             <div className="space-y-4">
               {presence ? (
                 <>
-                  <PresenceIndicator presence={presence} checked={checked} />
+                  <PresenceIndicator presence={presence} checked={checked} latest={latest} />
                   <details className="group">
                     <summary className="text-muted-foreground hover:text-foreground marker:content-[''] cursor-pointer list-none text-sm underline decoration-dotted underline-offset-4">
                       Reinstall or update it
@@ -230,7 +237,7 @@ function Recorder({ org }: { org: OrgSummary }) {
                 <>
                   <InstallInstructions />
                   {inChrome !== false && (
-                    <PresenceIndicator presence={presence} checked={checked} />
+                    <PresenceIndicator presence={presence} checked={checked} latest={latest} />
                   )}
                 </>
               )}
@@ -424,20 +431,15 @@ function InstallInstructions() {
   return (
     <div>
       <p className="text-muted-foreground text-sm">
-        The Web Store listing is in review, so for now it installs from a zip — three steps, no
+        It's not on the Chrome Web Store yet, so for now it installs from a zip — three steps, no
         build tools:
       </p>
       <ol className="text-muted-foreground mt-4 space-y-2 text-sm">
         <li className="flex gap-3">
           <span className="text-cobalt font-mono text-xs leading-5">1</span>
           <span>
-            Download <code className="font-mono text-xs">handback-recorder.zip</code> from the{' '}
-            <a
-              href={RELEASES_URL}
-              target="_blank"
-              rel="noreferrer"
-              className="text-primary underline underline-offset-4">
-              latest release
+            <a href={DOWNLOAD_URL} className="text-primary underline underline-offset-4">
+              Download <code className="font-mono text-xs">handback-recorder.zip</code>
             </a>{' '}
             and unzip it.
           </span>
@@ -462,14 +464,57 @@ function InstallInstructions() {
 }
 
 /** The page's heartbeat: green the instant the extension answers a ping. */
-function PresenceIndicator({ presence, checked }: { presence: Presence | null; checked: boolean }) {
+/**
+ * Nothing installed from a zip ever updates itself — that's the one thing the
+ * Web Store would do for us. So the page does it: the extension reports its
+ * version over the ping, the server reports what it's handing out, and a stale
+ * install gets told. Both are `x.y.z` from the same manifest, so a plain
+ * numeric compare is the whole comparison.
+ */
+function isOutdated(installed: string, latest: string): boolean {
+  const a = installed.split('.').map(Number)
+  const b = latest.split('.').map(Number)
+  if ([...a, ...b].some((n) => !Number.isFinite(n))) return false
+  for (let i = 0; i < 3; i++) {
+    const diff = (b[i] ?? 0) - (a[i] ?? 0)
+    if (diff !== 0) return diff > 0
+  }
+  return false
+}
+
+function PresenceIndicator({
+  presence,
+  checked,
+  latest,
+}: {
+  presence: Presence | null
+  checked: boolean
+  latest?: string | null
+}) {
   if (presence) {
+    const stale = latest ? isOutdated(presence.version, latest) : false
     return (
-      <div className="border-approve/40 bg-approve-wash flex items-center gap-3 rounded-md border p-4">
-        <span className="bg-approve size-2 shrink-0 rounded-full" />
-        <p className="text-approve text-sm font-medium">
-          Handback Recorder {presence.version} is installed.
-        </p>
+      <div className="space-y-3">
+        <div className="border-approve/40 bg-approve-wash flex items-center gap-3 rounded-md border p-4">
+          <span className="bg-approve size-2 shrink-0 rounded-full" />
+          <p className="text-approve text-sm font-medium">
+            Handback Recorder {presence.version} is installed.
+          </p>
+        </div>
+        {stale && (
+          <div className="border-review/40 bg-review-wash rounded-md border p-4 text-sm">
+            <p className="text-review font-medium">Version {latest} is available.</p>
+            <p className="text-muted-foreground mt-1">
+              A zip install doesn't update itself.{' '}
+              <a href={DOWNLOAD_URL} className="text-primary underline underline-offset-4">
+                Download {latest}
+              </a>
+              , then hit reload on the extension at{' '}
+              <code className="font-mono text-xs">chrome://extensions</code> — your workspace link
+              survives the update.
+            </p>
+          </div>
+        )}
       </div>
     )
   }

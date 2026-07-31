@@ -32,6 +32,8 @@ the Gripe extension.
   (isolated DB + port 3100; screenshots committed; `test:e2e:update` to re-baseline)
 - **Seed a dev login:** `bun cli/dev-bootstrap.ts [email] [password] [org]` → prints an `hb_` token
 - **Push a gripe:** `bun cli/push.ts <gripe-folder> --server http://localhost:3995 --token hb_…`
+- **Publish a recorder build:** build + zip `extension/dist`, then `bun cli/publish-recorder.ts`
+  → `releases/recorder/`; `/recorder` serves the newest within 60s
 - **Extension:** `bun run build:extension` (root) or `cd extension && npm run build` →
   load-unpacked `extension/dist`;
   `npm run preview` → http://localhost:8777/gallery.html (layout harness, no Chrome needed)
@@ -162,6 +164,7 @@ extension/              Handback Recorder — the Chrome MV3 extension (own npm 
 | `/api/auth/*` · `/api/trpc/*` | better-auth · tRPC | `server.ts` |
 | `/api/ingest/*` | Token-authed REST (below) | `server/ingest.ts` |
 | `/mcp` | **Hosted MCP** (POST only, `hb_` bearer). What agents connect to | `server/mcp.ts` |
+| `/download/recorder` | The extension zip — **session-gated**, 302s to a presigned S3 GET | `server.ts` |
 
 ### /api/ingest (Bearer `hb_…` token; org comes from the token)
 
@@ -379,6 +382,20 @@ reaches the container on a plain push.
   installed — absence means "not installed", not "not Chrome".
 - **When the Web Store listing lands, set `STORE_URL`** in `src/app/recorder.tsx` — the zip/
   load-unpacked instructions collapse behind it automatically.
+- **The bucket is the release channel.** `/recorder` links `/download/recorder`, not GitHub — the
+  repo is private, so its release URLs 404 for exactly the people we hand them to. The route needs
+  a session and 302s to a presigned GET; the bytes never touch the container. **The newest zip
+  under `releases/recorder/` IS the current release** (`server/releases.ts`, 60s cache) — there is
+  no version constant to bump. Publish with `bun cli/publish-recorder.ts` after building and
+  zipping `extension/dist` (the script refuses a zip that's missing, or older than the build in
+  `dist/`, or whose version disagrees with `package.json`). Off-store Chrome installs never
+  auto-update, so `/recorder` compares the version the extension reports over `handback:ping`
+  against this and nags — that comparison is the only update mechanism there is until the Web
+  Store listing exists; don't drop it when adding one.
+- **Bun hangs on a streamed S3 `Body`.** `createReadStream` into `PutObjectCommand` never resolves
+  and prints nothing — buffer the file instead (`cli/publish-recorder.ts`). Spawning
+  `Compress-Archive` from bun hangs the same way, which is why zipping is a documented shell step
+  and not part of the script.
 - **The e2e DB needs its own `db:push`.** `handback_test` is truncated, never migrated, by the
   suite — after any schema change run
   `DATABASE_URL=postgres://…/handback_test bunx prisma db push` or sign-up 500s with a

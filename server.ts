@@ -10,7 +10,9 @@ import { ingestRouter } from './server/ingest'
 import { formatError, log, requestLogger, startupBanner } from './server/logger'
 import { mcpRouter } from './server/mcp'
 import { prisma } from './server/prisma'
+import { latestRecorderRelease } from './server/releases'
 import { appRouter } from './server/router'
+import { presignGet } from './server/storage'
 import { createContext } from './server/trpc'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -54,6 +56,30 @@ async function createServer() {
   // Token-authed upload surface for the CLI / extension / MCP. Parses its own
   // JSON bodies; keep it after the auth mount, which needs the raw stream.
   app.use('/api/ingest', ingestRouter)
+
+  // The recorder's zip, for as long as there is no Web Store listing. Signed-in
+  // only: the build is not secret, but an unauthenticated URL is a public
+  // release by another name, and "not public yet" is the whole point. Sits at
+  // the root rather than under /api because it's a link a human clicks, and it
+  // must be mounted before the SSR catch-all like every other non-page route.
+  app.get('/download/recorder', async (req, res) => {
+    const headers = new Headers()
+    for (const [key, value] of Object.entries(req.headers)) {
+      if (value === undefined) continue
+      if (Array.isArray(value)) for (const v of value) headers.append(key, v)
+      else headers.set(key, value)
+    }
+    const session = await auth.api.getSession({ headers })
+    if (!session) return res.redirect(302, '/sign-in?next=/recorder')
+
+    const release = await latestRecorderRelease()
+    if (!release) return res.status(404).json({ error: 'No recorder build has been published yet' })
+
+    log.info(`[releases] ${session.user.email} downloading recorder ${release.version}`)
+    // A redirect, not a proxy: the bytes go browser↔S3 and never touch the
+    // container's memory or its 576 MiB ceiling.
+    res.redirect(302, await presignGet(release.key))
+  })
 
   // The hosted MCP server. Deliberately at the root and not under /api — this
   // URL is copy-pasted by hand into `claude mcp add`, and it has to be short

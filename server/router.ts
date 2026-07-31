@@ -6,6 +6,7 @@ import { env } from './env'
 import { isPlatformAdmin, orgHasFeature, requireAdmin, userHasFeature } from './features'
 import { canSeeGripe, requireMembership, requireOrgScope, slugify } from './membership'
 import { prisma } from './prisma'
+import { latestRecorderRelease } from './releases'
 import { deletePrefix, gripeKey, gripePrefix, isSafePath, presignGet } from './storage'
 import { protectedProcedure, publicProcedure, router } from './trpc'
 
@@ -757,8 +758,22 @@ const adminRouter = router({
     }),
 })
 
+/**
+ * What build of the recorder the site is currently handing out. `/recorder`
+ * compares it against the version the installed extension reports over the
+ * ping handshake, which is the only reason a self-hosted zip can keep anyone
+ * up to date — nothing auto-updates outside the Web Store.
+ */
+const recorderRouter = router({
+  release: protectedProcedure.query(async () => {
+    const release = await latestRecorderRelease()
+    return release ? { version: release.version, bytes: release.bytes } : null
+  }),
+})
+
 export const appRouter = router({
   me: protectedProcedure.query(({ ctx }) => ctx.session.user),
+  recorder: recorderRouter,
   orgs: orgsRouter,
   invites: invitesRouter,
   tokens: tokensRouter,

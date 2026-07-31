@@ -81,6 +81,22 @@ export async function getObjectText(key: string): Promise<string> {
   return (await res.Body?.transformToString()) ?? ''
 }
 
+/** Every object under a prefix, paged through. Keys only — never the bodies. */
+export async function listPrefix(prefix: string): Promise<Array<{ key: string; size: number }>> {
+  const out: Array<{ key: string; size: number }> = []
+  let token: string | undefined
+  do {
+    const page = await s3.send(
+      new ListObjectsV2Command({ Bucket: env.S3_BUCKET, Prefix: prefix, ContinuationToken: token })
+    )
+    for (const o of page.Contents ?? []) {
+      if (o.Key) out.push({ key: o.Key, size: Number(o.Size ?? 0) })
+    }
+    token = page.IsTruncated ? page.NextContinuationToken : undefined
+  } while (token)
+  return out
+}
+
 /** Delete everything under a prefix (re-push of a gripe, gripe deletion). */
 export async function deletePrefix(prefix: string): Promise<void> {
   let token: string | undefined

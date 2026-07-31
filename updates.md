@@ -2,6 +2,26 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-07-31 — the recorder ships from our own bucket, not from a private repo
+Asked: "what if we self host the release.. im not ready for it to go public yet" → picked the
+login-gated download. Context that shaped it: **you can't self-host a `.crx` anymore** — Chrome has
+blocked off-store installs on Windows/macOS for ~a decade, so the only real alternatives were an
+**Unlisted** Web Store listing (not searchable, still one-click + auto-update) or enterprise policy.
+Built the interim: **`GET /download/recorder`** (better-auth session or bounce to /sign-in; 302 to a
+presigned S3 GET, so bytes never cross the 576 MiB container), **`server/releases.ts`** — the newest
+zip under `releases/recorder/` *is* the release, no constant to bump, 60s cache, S3 failure degrades
+to "no build" rather than taking the page down — and **`recorder.release`** tRPC. `/recorder` now
+links the authenticated download instead of the private GitHub release (which 404s for every
+teammate) and, since nothing off-store auto-updates, **compares `handback:ping`'s reported version
+against the published one and nags** with a re-download. 1.1.1 uploaded and verified end to end:
+signed-out → /sign-in, signed-in → 200 + a valid 17-entry zip whose manifest reads 1.1.1; version
+compare unit-checked over 8 cases. Also `cli/publish-recorder.ts` (refuses a missing/stale zip or
+one whose version disagrees with package.json). Two bun traps found and written down: a **streamed
+S3 `Body` hangs forever** (buffer instead) and **spawning `Compress-Archive` from bun hangs**, so
+zipping stays a shell step. Corrected stale copy claiming the listing was "in review". e2e 4/4.
+Touched: server.ts, server/{releases,storage,router}.ts, cli/publish-recorder.ts,
+src/app/recorder.tsx, cliffnotes.md, updates.md.
+
 ## 2026-07-31 — S3 moved to handback-files, and /recorder stops repeating itself
 Asked: pull gripe `85142440` over the hosted MCP as a real download test, then act on it.
 `get_gripe` round-tripped fine (report.md + presigned URLs for all 33 files; read the 3 contact
