@@ -51,13 +51,16 @@ const GB = 1024 * 1024 * 1024
 // existed, an account created thirty seconds earlier could push objects of any
 // size, in any number — an authenticated, unmetered storage endpoint.
 //
-// The per-file and per-gripe caps are generous against real recordings (a long
-// walkthrough runs tens of megabytes) and tight against abuse. The org quota is
-// the actual backstop; raise it per customer when someone legitimately needs it.
-const MAX_FILE_BYTES = 512 * 1024 * 1024
-const MAX_GRIPE_BYTES = 2 * GB
-const ORG_QUOTA_BYTES = 20 * GB
-const ORG_MAX_GRIPES = 500
+// The per-file cap has to clear a real walkthrough's webm: a 20-minute
+// screen recording runs past 512 MB at capture bitrates, and it arrives as ONE
+// file (2026-07-31: a 20-minute session hit exactly this wall in the field).
+// 2 GB per file / 4 GB per gripe keeps hour-plus recordings shippable; the org
+// quota below is the actual backstop — raise it per customer when someone
+// legitimately needs it.
+const MAX_FILE_BYTES = 2 * GB
+const MAX_GRIPE_BYTES = 4 * GB
+export const ORG_QUOTA_BYTES = 20 * GB
+export const ORG_MAX_GRIPES = 500
 
 const gb = (bytes: number | bigint) => `${(Number(bytes) / GB).toFixed(1)} GB`
 

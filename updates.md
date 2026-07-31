@@ -2,6 +2,24 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-07-31 — the roster goes private, and everything gets a rename
+Asked: "I shouldn't be able to see other people in the team… keep it clean" + "rename walkthroughs
+and change workspace and projects and stuff" (confirmed scope: roster admin-only; rename all the
+things; full cross-workspace gripe moves). Built: **`orgs.members` now requires admin** — members
+and guests get FORBIDDEN and the Team page shows them only their own tokens (no tab strip when
+there's one tab; header reads "Your API tokens for X"); **`orgs.rename`** (inline on the Team
+header, admin+, slug stable); **`projects.update`** (name + originHints, inline editor on
+/projects, org-scope); **`gripes.rename`** (same access bar as setStatus; optimistic inline edit
+in the viewer header, invalidates get + list); **`gripes.moveToOrg`** — whole-workspace membership
+on BOTH orgs, destination quota via ingest's exported constants, slug suffixed on collision,
+S3 objects copied server-side 8-at-a-time (`storage.copyObject`, CopySource segment-encoded),
+copy → row flip (project cleared) → best-effort old-prefix delete; viewer gains a
+"Move to workspace…" select with confirm that follows the gripe by switching the active org.
+⚠ Found while verifying: **local `.env` DATABASE_URL points at the prod box** (52.24.94.83/inloop)
+— flagged to Sal, not changed; e2e skipped for exactly that reason.
+Touched: server/{router,storage,ingest}.ts, src/app/{team,projects}.tsx,
+src/components/viewer/{gripe-header,gripe-controls}.tsx, cliffnotes.md, updates.md.
+
 ## 2026-07-31 — the recorder learns to hold more than one workspace (1.2.0)
 Asked: an invitee's walkthrough landed in *their* workspace and nothing let them re-point the
 recorder at ours, or pick a project — "make it incredible". Root causes: /recorder linked whatever

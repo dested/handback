@@ -326,6 +326,16 @@ reaches the container on a plain push.
   by design.
 - **Raw API tokens are shown once** — only the sha256 lands in the DB. The dev-bootstrap script
   prints a fresh one each run.
+- **The roster is admin-only** (2026-07-31): `orgs.members` requires `admin` — members and guests
+  get FORBIDDEN, and the Team page doesn't render Members/Invites tabs for them (they see only
+  their own API tokens). Don't add a procedure that returns member names/emails without that gate;
+  the only sanctioned leak is a gripe's `uploadedByName`.
+- **`gripes.moveToOrg` is copy → flip → delete, in that order.** Both ends require whole-workspace
+  membership (a guest must never walk a project's gripe out). Objects are copied server-side
+  (`copyObject`, S3 CopyObject — bytes never cross the container), then the row flips
+  (orgId + `projectId: null` + slug suffixed if taken), then the old prefix is deleted
+  best-effort. A crash mid-copy loses nothing; after the flip, worst case is orphaned source
+  objects. Destination quota reuses ingest's exported `ORG_QUOTA_BYTES`/`ORG_MAX_GRIPES`.
 - **Guest scoping is enforced in `requireMembership`** (server/membership.ts): it returns
   `Access { role, projectIds }` (`null` = whole workspace). Any NEW tRPC procedure returning
   org data must respect `access.projectIds` (`canSeeGripe` / `requireOrgScope`) or guests leak.

@@ -5,6 +5,7 @@
 // all public access.
 
 import {
+  CopyObjectCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
   ListObjectsV2Command,
@@ -73,6 +74,21 @@ export async function presignGet(key: string): Promise<string> {
   return getSignedUrl(s3, new GetObjectCommand({ Bucket: env.S3_BUCKET, Key: key }), {
     expiresIn: GET_TTL_SECONDS,
   })
+}
+
+/**
+ * Server-side copy of one object — the move of a gripe between workspaces
+ * never pulls the bytes through the container. CopySource is a URL path, so
+ * each segment is encoded; the slashes have to survive.
+ */
+export async function copyObject(srcKey: string, dstKey: string): Promise<void> {
+  await s3.send(
+    new CopyObjectCommand({
+      Bucket: env.S3_BUCKET,
+      CopySource: `${env.S3_BUCKET}/${srcKey.split('/').map(encodeURIComponent).join('/')}`,
+      Key: dstKey,
+    })
+  )
 }
 
 /** Read a small object (recording.json, report.md) straight into a string. */

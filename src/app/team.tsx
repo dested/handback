@@ -111,14 +111,20 @@ export function TeamPage() {
 }
 
 function TeamBody({ org }: { org: OrgSummary }) {
+  // The roster and the invite list are admin surfaces — the server refuses them
+  // to everyone else, so the tabs don't exist rather than erroring on open.
   const canManage = org.role === 'owner' || org.role === 'admin'
   // Guests are scoped to a project or two; the workspace-wide surfaces aren't theirs.
   const fullAccess = org.scope === 'org'
-  const [tab, setTab] = useState<Tab>('members')
+  const [tab, setTab] = useState<Tab>(canManage ? 'members' : 'tokens')
 
   const tabs: Array<[Tab, string]> = [
-    ['members', 'Members'],
-    ...(canManage ? ([['invites', 'Invites']] as Array<[Tab, string]>) : []),
+    ...(canManage
+      ? ([
+          ['members', 'Members'],
+          ['invites', 'Invites'],
+        ] as Array<[Tab, string]>)
+      : []),
     ...(fullAccess ? ([['tokens', 'API tokens']] as Array<[Tab, string]>) : []),
   ]
 
@@ -126,29 +132,127 @@ function TeamBody({ org }: { org: OrgSummary }) {
     <div className="space-y-8">
       <header className="space-y-1">
         <h1 className="font-display text-3xl font-semibold">Team</h1>
-        <p className="text-muted-foreground text-sm">{org.name}</p>
+        {canManage ? (
+          <WorkspaceName org={org} />
+        ) : fullAccess ? (
+          <p className="text-muted-foreground text-sm">Your API tokens for {org.name}</p>
+        ) : (
+          <p className="text-muted-foreground text-sm">{org.name}</p>
+        )}
       </header>
 
-      <div className="border-border bg-card inline-flex gap-1 rounded-md border p-1">
-        {tabs.map(([value, label]) => (
-          <button
-            key={value}
-            type="button"
-            onClick={() => setTab(value)}
-            className={cn(
-              'rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
-              tab === value
-                ? 'bg-accent text-accent-foreground'
-                : 'text-muted-foreground hover:text-foreground'
-            )}>
-            {label}
-          </button>
-        ))}
-      </div>
+      {/* A guest holds a slice of the workspace, and none of this page is in it —
+          say so rather than rendering a header above nothing. */}
+      {tabs.length === 0 && (
+        <Card className="max-w-xl">
+          <CardHeader>
+            <CardTitle>You're a guest on this workspace</CardTitle>
+            <CardDescription>
+              You see the projects you've been granted —{' '}
+              <Link to="/projects" className="text-primary underline underline-offset-4">
+                they're listed here
+              </Link>
+              . Who else is in the workspace, invites, and API tokens are the owner's side of the
+              house.
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      )}
 
-      {tab === 'members' && <MembersTab org={org} />}
-      {tab === 'invites' && <InvitesTab org={org} />}
-      {tab === 'tokens' && <TokensTab org={org} />}
+      {/* A one-button tab strip is noise — with a single surface, just show it. */}
+      {tabs.length > 1 && (
+        <div className="border-border bg-card inline-flex gap-1 rounded-md border p-1">
+          {tabs.map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setTab(value)}
+              className={cn(
+                'rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+                tab === value
+                  ? 'bg-accent text-accent-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              )}>
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {tab === 'members' && canManage && <MembersTab org={org} />}
+      {tab === 'invites' && canManage && <InvitesTab org={org} />}
+      {tab === 'tokens' && fullAccess && <TokensTab org={org} />}
+    </div>
+  )
+}
+
+/** The workspace's display name, renamed in place by owners and admins. */
+function WorkspaceName({ org }: { org: OrgSummary }) {
+  const trpc = useTRPC()
+  const { refreshOrgs } = useActiveOrg()
+  const [editing, setEditing] = useState(false)
+  const [value, setValue] = useState(org.name)
+
+  const rename = useMutation(
+    trpc.orgs.rename.mutationOptions({
+      onSuccess: () => {
+        refreshOrgs()
+        setEditing(false)
+      },
+    })
+  )
+
+  const trimmed = value.trim()
+  const stale = trimmed === '' || trimmed === org.name
+
+  function save() {
+    if (stale) return
+    rename.mutate({ orgId: org.id, name: trimmed })
+  }
+
+  if (!editing) {
+    return (
+      <div className="flex items-center gap-1">
+        <p className="text-muted-foreground text-sm">{org.name}</p>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => {
+            setValue(org.name)
+            setEditing(true)
+          }}>
+          Rename
+        </Button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="max-w-md space-y-1">
+      <div className="flex items-center gap-2">
+        <Input
+          autoFocus
+          defaultValue={org.name}
+          aria-label="Workspace name"
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              save()
+            } else if (e.key === 'Escape') {
+              setEditing(false)
+            }
+          }}
+        />
+        <Button type="button" size="sm" disabled={rename.isPending || stale} onClick={save}>
+          {rename.isPending ? 'Saving…' : 'Save'}
+        </Button>
+        <Button type="button" size="sm" variant="ghost" onClick={() => setEditing(false)}>
+          Cancel
+        </Button>
+      </div>
+      {rename.isError && <ErrorLine message={rename.error.message} />}
     </div>
   )
 }
@@ -488,81 +592,81 @@ function InvitesTab({ org }: { org: OrgSummary }) {
           stay; only creating new invites is paywalled. */}
       {!org.teamEnabled && <TeamUpsell />}
       {org.teamEnabled && (
-      <Card className="max-w-xl">
-        <CardHeader>
-          <CardTitle>Invite someone</CardTitle>
-          <CardDescription>
-            Leave the email blank for a link anyone can use. Invites expire after seven days. Scope
-            an invite to one project and they'll only see that project's gripes.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form
-            className="space-y-4"
-            onSubmit={(e) => {
-              e.preventDefault()
-              const trimmed = email.trim()
-              create.mutate({
-                orgId: org.id,
-                ...(projectId ? { projectId } : { role }),
-                ...(trimmed ? { email: trimmed } : {}),
-              })
-            }}>
-            <div className="flex flex-wrap items-end gap-3">
-              <div className="min-w-48 flex-1 space-y-2">
-                <Label htmlFor="invite-email">Email (optional)</Label>
-                <Input
-                  id="invite-email"
-                  type="email"
-                  placeholder="teammate@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  autoComplete="off"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="invite-access">Access</Label>
-                <select
-                  id="invite-access"
-                  className={cn(SELECT, 'h-9')}
-                  value={projectId}
-                  onChange={(e) => setProjectId(e.target.value)}>
-                  <option value="">Entire workspace</option>
-                  {(projectsQuery.data ?? []).map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} only
-                    </option>
-                  ))}
-                </select>
-              </div>
-              {projectId === '' && (
+        <Card className="max-w-xl">
+          <CardHeader>
+            <CardTitle>Invite someone</CardTitle>
+            <CardDescription>
+              Leave the email blank for a link anyone can use. Invites expire after seven days.
+              Scope an invite to one project and they'll only see that project's gripes.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form
+              className="space-y-4"
+              onSubmit={(e) => {
+                e.preventDefault()
+                const trimmed = email.trim()
+                create.mutate({
+                  orgId: org.id,
+                  ...(projectId ? { projectId } : { role }),
+                  ...(trimmed ? { email: trimmed } : {}),
+                })
+              }}>
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="min-w-48 flex-1 space-y-2">
+                  <Label htmlFor="invite-email">Email (optional)</Label>
+                  <Input
+                    id="invite-email"
+                    type="email"
+                    placeholder="teammate@example.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    autoComplete="off"
+                  />
+                </div>
                 <div className="space-y-2">
-                  <Label htmlFor="invite-role">Role</Label>
+                  <Label htmlFor="invite-access">Access</Label>
                   <select
-                    id="invite-role"
+                    id="invite-access"
                     className={cn(SELECT, 'h-9')}
-                    value={role}
-                    onChange={(e) => setRole(e.target.value as 'admin' | 'member')}>
-                    <option value="member">member</option>
-                    <option value="admin">admin</option>
+                    value={projectId}
+                    onChange={(e) => setProjectId(e.target.value)}>
+                    <option value="">Entire workspace</option>
+                    {(projectsQuery.data ?? []).map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} only
+                      </option>
+                    ))}
                   </select>
                 </div>
-              )}
-              <Button type="submit" disabled={create.isPending}>
-                {create.isPending ? 'Creating…' : 'Create invite'}
-              </Button>
-            </div>
-            {projectsQuery.isError && <ErrorLine message={projectsQuery.error.message} />}
-            {create.isError && <ErrorLine message={create.error.message} />}
-            {createdId && (
-              <div className="space-y-2">
-                <p className="text-muted-foreground text-sm">Send them this link:</p>
-                <CopyField value={linkFor(createdId)} />
+                {projectId === '' && (
+                  <div className="space-y-2">
+                    <Label htmlFor="invite-role">Role</Label>
+                    <select
+                      id="invite-role"
+                      className={cn(SELECT, 'h-9')}
+                      value={role}
+                      onChange={(e) => setRole(e.target.value as 'admin' | 'member')}>
+                      <option value="member">member</option>
+                      <option value="admin">admin</option>
+                    </select>
+                  </div>
+                )}
+                <Button type="submit" disabled={create.isPending}>
+                  {create.isPending ? 'Creating…' : 'Create invite'}
+                </Button>
               </div>
-            )}
-          </form>
-        </CardContent>
-      </Card>
+              {projectsQuery.isError && <ErrorLine message={projectsQuery.error.message} />}
+              {create.isError && <ErrorLine message={create.error.message} />}
+              {createdId && (
+                <div className="space-y-2">
+                  <p className="text-muted-foreground text-sm">Send them this link:</p>
+                  <CopyField value={linkFor(createdId)} />
+                </div>
+              )}
+            </form>
+          </CardContent>
+        </Card>
       )}
     </div>
   )

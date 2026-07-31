@@ -4,10 +4,19 @@ import { z } from 'zod'
 import { inviteEmail, sendEmail } from './email'
 import { env } from './env'
 import { isPlatformAdmin, orgHasFeature, requireAdmin, userHasFeature } from './features'
+import { ORG_MAX_GRIPES, ORG_QUOTA_BYTES } from './ingest'
+import { log } from './logger'
 import { canSeeGripe, requireMembership, requireOrgScope, slugify } from './membership'
 import { prisma } from './prisma'
 import { latestRecorderRelease } from './releases'
-import { deletePrefix, gripeKey, gripePrefix, isSafePath, presignGet } from './storage'
+import {
+  copyObject,
+  deletePrefix,
+  gripeKey,
+  gripePrefix,
+  isSafePath,
+  presignGet,
+} from './storage'
 import { protectedProcedure, publicProcedure, router } from './trpc'
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000
@@ -62,24 +71,24 @@ const orgsRouter = router({
       return { id: org.id, name: org.name, slug: org.slug }
     }),
 
+  rename: protectedProcedure
+    .input(z.object({ orgId: z.string(), name: z.string().trim().min(1).max(80) }))
+    .mutation(async ({ ctx, input }) => {
+      await requireMembership(ctx.session.user.id, input.orgId, 'admin')
+      // The slug stays: it's the org's stable handle; only the display name moves.
+      await prisma.org.update({ where: { id: input.orgId }, data: { name: input.name } })
+      return { ok: true }
+    }),
+
   members: protectedProcedure
     .input(z.object({ orgId: z.string() }))
     .query(async ({ ctx, input }) => {
-      const access = await requireMembership(ctx.session.user.id, input.orgId)
+      await requireMembership(ctx.session.user.id, input.orgId, 'admin')
       const rows = await prisma.membership.findMany({
-        // Guests only see who shares their slice: full members plus guests
-        // with an overlapping project — not the whole roster's emails.
-        where: {
-          orgId: input.orgId,
-          ...(access.projectIds
-            ? {
-                OR: [
-                  { scope: 'org' },
-                  { projectAccess: { some: { projectId: { in: access.projectIds } } } },
-                ],
-              }
-            : {}),
-        },
+        // The roster is the owner's business: who else is in a workspace, and
+        // at what address, isn't something a member needs. Members and guests
+        // get FORBIDDEN here, and the Team page never calls this for them.
+        where: { orgId: input.orgId },
         include: {
           user: { select: { id: true, name: true, email: true } },
           projectAccess: { select: { project: { select: { id: true, name: true } } } },
@@ -470,6 +479,28 @@ const projectsRouter = router({
       })
       return { id: p.id, slug: p.slug }
     }),
+
+  update: protectedProcedure
+    .input(
+      z.object({
+        orgId: z.string(),
+        projectId: z.string(),
+        name: z.string().trim().min(1).max(80),
+        originHints: z.array(z.string().trim().max(200)).max(20).default([]),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const access = await requireMembership(ctx.session.user.id, input.orgId)
+      requireOrgScope(access)
+      const p = await prisma.project.findUnique({ where: { id: input.projectId } })
+      if (!p || p.orgId !== input.orgId) throw new TRPCError({ code: 'NOT_FOUND' })
+      // Slug stays for the same reason an org's does.
+      await prisma.project.update({
+        where: { id: p.id },
+        data: { name: input.name, originHints: input.originHints },
+      })
+      return { ok: true }
+    }),
 })
 
 const gripeListSelect = {
@@ -637,6 +668,21 @@ const gripesRouter = router({
       return { ok: true }
     }),
 
+  /** Same access bar as setStatus — anyone who can see the gripe can title it. */
+  rename: protectedProcedure
+    .input(z.object({ gripeId: z.string(), title: z.string().trim().min(1).max(300) }))
+    .mutation(async ({ ctx, input }) => {
+      const g = await prisma.gripe.findUnique({
+        where: { id: input.gripeId },
+        select: { orgId: true, projectId: true },
+      })
+      if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
+      const access = await requireMembership(ctx.session.user.id, g.orgId)
+      if (!canSeeGripe(access, g.projectId)) throw new TRPCError({ code: 'NOT_FOUND' })
+      await prisma.gripe.update({ where: { id: input.gripeId }, data: { title: input.title } })
+      return { ok: true }
+    }),
+
   assignProject: protectedProcedure
     .input(z.object({ gripeId: z.string(), projectId: z.string().nullable() }))
     .mutation(async ({ ctx, input }) => {
@@ -656,6 +702,92 @@ const gripesRouter = router({
         data: { projectId: input.projectId },
       })
       return { ok: true }
+    }),
+
+  /**
+   * Move a gripe to another workspace the caller also holds in full.
+   *
+   * Order matters: copy the objects, flip the row, then delete the originals.
+   * A crash mid-copy leaves the gripe untouched where it was; a crash after the
+   * flip leaves orphaned objects under the old prefix, which is a cleanup
+   * problem rather than a lost or half-visible gripe. The reverse order would
+   * trade that for a row pointing at keys that no longer exist.
+   *
+   * Presigned URLs handed out before the move keep pointing at the old keys and
+   * die with them — by design; the viewer re-signs against the new prefix.
+   */
+  moveToOrg: protectedProcedure
+    .input(z.object({ gripeId: z.string(), orgId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const gripe = await prisma.gripe.findUnique({
+        where: { id: input.gripeId },
+        // Only uploaded files exist as objects — a pending row (declared but
+        // never finished) would make the copy throw NoSuchKey and strand the move.
+        include: { files: { select: { path: true }, where: { status: 'uploaded' } } },
+      })
+      if (!gripe) throw new TRPCError({ code: 'NOT_FOUND' })
+      // Both ends have to be whole-workspace access: a guest must not be able
+      // to walk a project's gripe out into an org of their own.
+      requireOrgScope(await requireMembership(ctx.session.user.id, gripe.orgId))
+      requireOrgScope(await requireMembership(ctx.session.user.id, input.orgId))
+      if (input.orgId === gripe.orgId) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Already in that workspace' })
+      }
+
+      // The destination's quota is the same one ingest enforces — a move is
+      // another way to put bytes in a workspace.
+      const dest = await prisma.gripe.aggregate({
+        where: { orgId: input.orgId },
+        _sum: { bytes: true },
+        _count: true,
+      })
+      if ((dest._sum.bytes ?? 0n) + gripe.bytes > BigInt(ORG_QUOTA_BYTES)) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'That workspace is at its storage quota',
+        })
+      }
+      if (dest._count >= ORG_MAX_GRIPES) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'That workspace is at its gripe limit' })
+      }
+
+      // Suffix until free — a move must never replace a gripe already there.
+      let slug = gripe.slug
+      for (
+        let n = 2;
+        await prisma.gripe.findUnique({ where: { orgId_slug: { orgId: input.orgId, slug } } });
+        n++
+      ) {
+        slug = `${gripe.slug}-${n}`
+      }
+
+      // A gripe can hold hundreds of files; copy server-side, 8 at a time.
+      const paths = gripe.files.map((f) => f.path)
+      for (let i = 0; i < paths.length; i += 8) {
+        await Promise.all(
+          paths
+            .slice(i, i + 8)
+            .map((path) =>
+              copyObject(
+                gripeKey(gripe.orgId, gripe.id, path),
+                gripeKey(input.orgId, gripe.id, path)
+              )
+            )
+        )
+      }
+
+      await prisma.gripe.update({
+        where: { id: gripe.id },
+        // Projects are per-org, so the assignment cannot survive the move.
+        data: { orgId: input.orgId, projectId: null, slug },
+      })
+
+      try {
+        await deletePrefix(gripePrefix(gripe.orgId, gripe.id))
+      } catch (err) {
+        log.warn('move: source cleanup failed', { gripeId: gripe.id, orgId: gripe.orgId, err })
+      }
+      return { ok: true, orgId: input.orgId, slug }
     }),
 
   delete: protectedProcedure

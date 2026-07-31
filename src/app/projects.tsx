@@ -45,6 +45,8 @@ function ProjectsBody({ org }: { org: OrgSummary }) {
   const [origins, setOrigins] = useState('')
   const [invited, setInvited] = useState<{ projectId: string; link: string } | null>(null)
   const [copied, setCopied] = useState(false)
+  // One project is edited at a time; opening another closes the last.
+  const [editingId, setEditingId] = useState<string | null>(null)
 
   // Guests see the list of what they've been let into, but can't reshape the workspace.
   const fullAccess = org.scope === 'org'
@@ -63,14 +65,24 @@ function ProjectsBody({ org }: { org: OrgSummary }) {
       },
     })
   )
+  const invalidateProjects = () =>
+    queryClient.invalidateQueries({
+      queryKey: trpc.projects.list.queryKey({ orgId: org.id }),
+    })
   const create = useMutation(
     trpc.projects.create.mutationOptions({
       onSuccess: () => {
         setName('')
         setOrigins('')
-        queryClient.invalidateQueries({
-          queryKey: trpc.projects.list.queryKey({ orgId: org.id }),
-        })
+        invalidateProjects()
+      },
+    })
+  )
+  const update = useMutation(
+    trpc.projects.update.mutationOptions({
+      onSuccess: () => {
+        invalidateProjects()
+        setEditingId(null)
       },
     })
   )
@@ -98,72 +110,104 @@ function ProjectsBody({ org }: { org: OrgSummary }) {
           <>
             <div className="border-border text-muted-foreground flex items-center gap-4 border-b pb-2 text-xs font-medium tracking-wide uppercase">
               <span className="min-w-0 flex-1">Project</span>
-              {canInvite && <span className="w-16 shrink-0" />}
+              {(fullAccess || canInvite) && <span className="w-32 shrink-0" />}
               <span className="w-20 shrink-0 text-right">Gripes</span>
             </div>
             <div className="divide-border divide-y">
               {projectsQuery.data.map((p) => (
-                <div key={p.id} className="flex items-start gap-4 py-3">
-                  <div className="min-w-0 flex-1 space-y-1.5">
-                    <p className="text-sm font-semibold">
-                      {p.name}{' '}
-                      <span className="text-muted-foreground ml-1 font-mono text-xs font-normal">
-                        {p.slug}
-                      </span>
-                    </p>
-                    {p.originHints.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5">
-                        {p.originHints.map((origin) => (
-                          <span
-                            key={origin}
-                            className="border-border text-muted-foreground rounded border px-1.5 py-0.5 font-mono text-xs">
-                            {origin}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    {invited?.projectId === p.id && (
-                      <div className="space-y-1 pt-1">
-                        <div className="flex items-center gap-2">
-                          <input
-                            readOnly
-                            value={invited.link}
-                            onFocus={(e) => e.currentTarget.select()}
-                            className="border-input bg-background h-8 min-w-0 flex-1 rounded-md border px-2 font-mono text-xs"
-                          />
+                <div key={p.id} className="py-3">
+                  <div className="flex items-start gap-4">
+                    <div className="min-w-0 flex-1 space-y-1.5">
+                      <p className="text-sm font-semibold">
+                        {p.name}{' '}
+                        <span className="text-muted-foreground ml-1 font-mono text-xs font-normal">
+                          {p.slug}
+                        </span>
+                      </p>
+                      {p.originHints.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {p.originHints.map((origin) => (
+                            <span
+                              key={origin}
+                              className="border-border text-muted-foreground rounded border px-1.5 py-0.5 font-mono text-xs">
+                              {origin}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {invited?.projectId === p.id && (
+                        <div className="space-y-1 pt-1">
+                          <div className="flex items-center gap-2">
+                            <input
+                              readOnly
+                              value={invited.link}
+                              onFocus={(e) => e.currentTarget.select()}
+                              className="border-input bg-background h-8 min-w-0 flex-1 rounded-md border px-2 font-mono text-xs"
+                            />
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                void navigator.clipboard.writeText(invited.link).then(() => {
+                                  setCopied(true)
+                                  setTimeout(() => setCopied(false), 1500)
+                                })
+                              }}>
+                              {copied ? <Check /> : <Copy />}
+                              {copied ? 'Copied' : 'Copy'}
+                            </Button>
+                          </div>
+                          <p className="text-muted-foreground text-xs">
+                            Anyone with this link joins as a guest of {p.name} — they'll see only
+                            this project's gripes. Expires in seven days.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                    {(fullAccess || canInvite) && (
+                      <div className="flex w-32 shrink-0 justify-end gap-1">
+                        {fullAccess && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              // A failed save's error belongs to the row it happened
+                              // on, not to whichever editor opens next.
+                              update.reset()
+                              setEditingId(editingId === p.id ? null : p.id)
+                            }}>
+                            Edit
+                          </Button>
+                        )}
+                        {canInvite && (
                           <Button
                             type="button"
                             variant="outline"
                             size="sm"
-                            onClick={() => {
-                              void navigator.clipboard.writeText(invited.link).then(() => {
-                                setCopied(true)
-                                setTimeout(() => setCopied(false), 1500)
-                              })
-                            }}>
-                            {copied ? <Check /> : <Copy />}
-                            {copied ? 'Copied' : 'Copy'}
+                            disabled={invite.isPending}
+                            onClick={() => invite.mutate({ orgId: org.id, projectId: p.id })}>
+                            Invite
                           </Button>
-                        </div>
-                        <p className="text-muted-foreground text-xs">
-                          Anyone with this link joins as a guest of {p.name} — they'll see only this
-                          project's gripes. Expires in seven days.
-                        </p>
+                        )}
                       </div>
                     )}
+                    <span className="w-20 shrink-0 text-right font-mono text-sm">
+                      {p.gripeCount}
+                    </span>
                   </div>
-                  {canInvite && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="w-16 shrink-0"
-                      disabled={invite.isPending}
-                      onClick={() => invite.mutate({ orgId: org.id, projectId: p.id })}>
-                      Invite
-                    </Button>
+                  {editingId === p.id && (
+                    <ProjectEditor
+                      project={p}
+                      pending={update.isPending}
+                      error={update.isError ? update.error.message : null}
+                      onSave={(name, originHints) =>
+                        update.mutate({ orgId: org.id, projectId: p.id, name, originHints })
+                      }
+                      onCancel={() => setEditingId(null)}
+                    />
                   )}
-                  <span className="w-20 shrink-0 text-right font-mono text-sm">{p.gripeCount}</span>
                 </div>
               ))}
             </div>
@@ -228,6 +272,72 @@ function ProjectsBody({ org }: { org: OrgSummary }) {
           </CardContent>
         </Card>
       )}
+    </div>
+  )
+}
+
+/** Inline editor for one project: its name and its origins. The slug never moves. */
+function ProjectEditor({
+  project,
+  pending,
+  error,
+  onSave,
+  onCancel,
+}: {
+  project: { id: string; name: string; originHints: string[] }
+  pending: boolean
+  error: string | null
+  onSave: (name: string, originHints: string[]) => void
+  onCancel: () => void
+}) {
+  const [name, setName] = useState(project.name)
+  const [origins, setOrigins] = useState(project.originHints.join('\n'))
+  const trimmed = name.trim()
+
+  return (
+    <div className="border-border bg-muted/40 mt-3 space-y-3 rounded-md border p-3">
+      <div className="space-y-2">
+        <Label htmlFor={`project-name-${project.id}`}>Name</Label>
+        <Input
+          id={`project-name-${project.id}`}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          autoComplete="off"
+        />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor={`project-origins-${project.id}`}>Origins</Label>
+        <textarea
+          id={`project-origins-${project.id}`}
+          rows={3}
+          value={origins}
+          onChange={(e) => setOrigins(e.target.value)}
+          spellCheck={false}
+          className="border-input bg-background placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 w-full rounded-md border px-3 py-2 font-mono text-xs shadow-xs outline-none focus-visible:ring-[3px]"
+        />
+        <p className="text-muted-foreground text-xs">One URL origin per line.</p>
+      </div>
+      <div className="flex items-center gap-2">
+        <Button
+          type="button"
+          size="sm"
+          disabled={pending || trimmed === ''}
+          onClick={() =>
+            onSave(
+              trimmed,
+              origins
+                .split('\n')
+                .map((line) => line.trim())
+                .filter((line) => line !== '')
+            )
+          }>
+          {pending ? 'Saving…' : 'Save'}
+        </Button>
+        <Button type="button" size="sm" variant="ghost" onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+      {error && <p className="text-destructive text-sm">{error}</p>}
     </div>
   )
 }
