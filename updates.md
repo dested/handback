@@ -2,6 +2,14 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-07-30 — shipped: commit + push (deploy) + Recorder 1.1.0 release
+Asked: "commit, push and run a build of the extension and tag a release." Done: everything pending
+committed (`67d64ae` — hosted MCP + /connect + /recorder + panel redesign) and pushed → Drydock
+deploy rolling; extension bumped to **1.1.0** (`fda426f`, old Inloop tags v1.0.0/v1.0.1 already
+held the low numbers), rebuilt, and released as **v1.1.0** with `handback-recorder.zip` attached —
+`releases/latest` (what /recorder links) verified pointing at it.
+Touched: extension/{public/manifest.json,package.json}, updates.md.
+
 ## 2026-07-30 — /recorder one-click extension link + panel redesign
 Asked: "the extension has to be easier to link… deep link it after install, no generating keys.
 And the panel UI is pretty bad — record too small, done confusing." Done (3 Opus agents + Fable):
