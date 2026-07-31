@@ -116,12 +116,14 @@ export function TeamPage() {
 
 function TeamBody({ org }: { org: OrgSummary }) {
   const canManage = org.role === 'owner' || org.role === 'admin'
+  // Guests are scoped to a project or two; the workspace-wide surfaces aren't theirs.
+  const fullAccess = org.scope === 'org'
   const [tab, setTab] = useState<Tab>('members')
 
   const tabs: Array<[Tab, string]> = [
     ['members', 'Members'],
     ...(canManage ? ([['invites', 'Invites']] as Array<[Tab, string]>) : []),
-    ['tokens', 'API tokens'],
+    ...(fullAccess ? ([['tokens', 'API tokens']] as Array<[Tab, string]>) : []),
   ]
 
   return (
@@ -184,13 +186,19 @@ function MembersTab({ org }: { org: OrgSummary }) {
 
       <div className="divide-border divide-y">
         {membersQuery.data.map((m) => {
-          const showRoleSelect = isOwner && m.role !== 'owner'
+          const isGuest = m.scope === 'projects'
+          const showRoleSelect = isOwner && m.role !== 'owner' && !isGuest
           const showRemove = canRemove && m.role !== 'owner' && m.userId !== myUserId
           return (
             <div key={m.membershipId} className="flex items-center gap-4 py-3">
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium">{m.name}</p>
                 <p className="text-muted-foreground truncate text-sm">{m.email}</p>
+                {isGuest && (
+                  <p className="text-muted-foreground truncate text-xs">
+                    Only: {m.projects.join(', ') || 'no projects'}
+                  </p>
+                )}
               </div>
               <div className="w-36 shrink-0">
                 {showRoleSelect ? (
@@ -209,6 +217,8 @@ function MembersTab({ org }: { org: OrgSummary }) {
                     <option value="admin">admin</option>
                     <option value="member">member</option>
                   </select>
+                ) : isGuest ? (
+                  <RoleChip role="guest" />
                 ) : (
                   <RoleChip role={m.role} />
                 )}
@@ -249,9 +259,11 @@ function InvitesTab({ org }: { org: OrgSummary }) {
   const { copied, copy } = useCopy()
   const [email, setEmail] = useState('')
   const [role, setRole] = useState<'admin' | 'member'>('member')
+  const [projectId, setProjectId] = useState('')
   const [createdId, setCreatedId] = useState<string | null>(null)
 
   const invitesQuery = useQuery(trpc.invites.list.queryOptions({ orgId: org.id }))
+  const projectsQuery = useQuery(trpc.projects.list.queryOptions({ orgId: org.id }))
   const invalidate = () =>
     queryClient.invalidateQueries({ queryKey: trpc.invites.list.queryKey({ orgId: org.id }) })
 
@@ -290,8 +302,14 @@ function InvitesTab({ org }: { org: OrgSummary }) {
                     Expires <span className="font-mono">{fmtDate(i.expiresAt)}</span>
                   </p>
                 </div>
-                <div className="w-24 shrink-0">
-                  <RoleChip role={i.role} />
+                <div className="w-36 shrink-0">
+                  {i.projectName ? (
+                    <span className="bg-muted text-muted-foreground inline-block max-w-full truncate rounded px-2 py-0.5 align-middle text-xs font-medium">
+                      {i.projectName}
+                    </span>
+                  ) : (
+                    <RoleChip role={i.role} />
+                  )}
                 </div>
                 <Button
                   type="button"
@@ -324,7 +342,8 @@ function InvitesTab({ org }: { org: OrgSummary }) {
         <CardHeader>
           <CardTitle>Invite someone</CardTitle>
           <CardDescription>
-            Leave the email blank for a link anyone can use. Invites expire after seven days.
+            Leave the email blank for a link anyone can use. Invites expire after seven days. Scope
+            an invite to one project and they'll only see that project's gripes.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -335,7 +354,7 @@ function InvitesTab({ org }: { org: OrgSummary }) {
               const trimmed = email.trim()
               create.mutate({
                 orgId: org.id,
-                role,
+                ...(projectId ? { projectId } : { role }),
                 ...(trimmed ? { email: trimmed } : {}),
               })
             }}>
@@ -352,20 +371,38 @@ function InvitesTab({ org }: { org: OrgSummary }) {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="invite-role">Role</Label>
+                <Label htmlFor="invite-access">Access</Label>
                 <select
-                  id="invite-role"
+                  id="invite-access"
                   className={cn(SELECT, 'h-9')}
-                  value={role}
-                  onChange={(e) => setRole(e.target.value as 'admin' | 'member')}>
-                  <option value="member">member</option>
-                  <option value="admin">admin</option>
+                  value={projectId}
+                  onChange={(e) => setProjectId(e.target.value)}>
+                  <option value="">Entire workspace</option>
+                  {(projectsQuery.data ?? []).map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} only
+                    </option>
+                  ))}
                 </select>
               </div>
+              {projectId === '' && (
+                <div className="space-y-2">
+                  <Label htmlFor="invite-role">Role</Label>
+                  <select
+                    id="invite-role"
+                    className={cn(SELECT, 'h-9')}
+                    value={role}
+                    onChange={(e) => setRole(e.target.value as 'admin' | 'member')}>
+                    <option value="member">member</option>
+                    <option value="admin">admin</option>
+                  </select>
+                </div>
+              )}
               <Button type="submit" disabled={create.isPending}>
                 {create.isPending ? 'Creating…' : 'Create invite'}
               </Button>
             </div>
+            {projectsQuery.isError && <ErrorLine message={projectsQuery.error.message} />}
             {create.isError && <ErrorLine message={create.error.message} />}
             {createdId && (
               <div className="space-y-2">

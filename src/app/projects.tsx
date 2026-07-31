@@ -4,6 +4,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
+import { Check, Copy } from 'lucide-react'
 import { Button } from '~/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '~/components/ui/card'
 import { Input } from '~/components/ui/input'
@@ -42,8 +43,25 @@ function ProjectsBody({ org }: { org: OrgSummary }) {
   const queryClient = useQueryClient()
   const [name, setName] = useState('')
   const [origins, setOrigins] = useState('')
+  const [invited, setInvited] = useState<{ projectId: string; link: string } | null>(null)
+  const [copied, setCopied] = useState(false)
+
+  // Guests see the list of what they've been let into, but can't reshape the workspace.
+  const fullAccess = org.scope === 'org'
+  const canManage = org.role === 'owner' || org.role === 'admin'
 
   const projectsQuery = useQuery(trpc.projects.list.queryOptions({ orgId: org.id }))
+  const invite = useMutation(
+    trpc.invites.create.mutationOptions({
+      onSuccess: (result, vars) => {
+        setCopied(false)
+        setInvited({
+          projectId: vars.projectId ?? '',
+          link: `${window.location.origin}/join/${result.id}`,
+        })
+      },
+    })
+  )
   const create = useMutation(
     trpc.projects.create.mutationOptions({
       onSuccess: () => {
@@ -71,12 +89,15 @@ function ProjectsBody({ org }: { org: OrgSummary }) {
           <p className="text-destructive text-sm">{projectsQuery.error.message}</p>
         )}
         {projectsQuery.data?.length === 0 && (
-          <p className="text-muted-foreground text-sm">No projects yet.</p>
+          <p className="text-muted-foreground text-sm">
+            {fullAccess ? 'No projects yet.' : "You haven't been given access to any projects yet."}
+          </p>
         )}
         {projectsQuery.data && projectsQuery.data.length > 0 && (
           <>
             <div className="border-border text-muted-foreground flex items-center gap-4 border-b pb-2 text-xs font-medium tracking-wide uppercase">
               <span className="min-w-0 flex-1">Project</span>
+              {canManage && <span className="w-16 shrink-0" />}
               <span className="w-20 shrink-0 text-right">Gripes</span>
             </div>
             <div className="divide-border divide-y">
@@ -100,69 +121,112 @@ function ProjectsBody({ org }: { org: OrgSummary }) {
                         ))}
                       </div>
                     )}
+                    {invited?.projectId === p.id && (
+                      <div className="space-y-1 pt-1">
+                        <div className="flex items-center gap-2">
+                          <input
+                            readOnly
+                            value={invited.link}
+                            onFocus={(e) => e.currentTarget.select()}
+                            className="border-input bg-background h-8 min-w-0 flex-1 rounded-md border px-2 font-mono text-xs"
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              void navigator.clipboard.writeText(invited.link).then(() => {
+                                setCopied(true)
+                                setTimeout(() => setCopied(false), 1500)
+                              })
+                            }}>
+                            {copied ? <Check /> : <Copy />}
+                            {copied ? 'Copied' : 'Copy'}
+                          </Button>
+                        </div>
+                        <p className="text-muted-foreground text-xs">
+                          Anyone with this link joins as a guest of {p.name} — they'll see only this
+                          project's gripes. Expires in seven days.
+                        </p>
+                      </div>
+                    )}
                   </div>
+                  {canManage && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="w-16 shrink-0"
+                      disabled={invite.isPending}
+                      onClick={() => invite.mutate({ orgId: org.id, projectId: p.id })}>
+                      Invite
+                    </Button>
+                  )}
                   <span className="w-20 shrink-0 text-right font-mono text-sm">{p.gripeCount}</span>
                 </div>
               ))}
             </div>
           </>
         )}
+        {invite.isError && <p className="text-destructive text-sm">{invite.error.message}</p>}
       </section>
 
-      <Card className="max-w-xl">
-        <CardHeader>
-          <CardTitle>New project</CardTitle>
-          <CardDescription>
-            Origins are matched against the page a gripe was recorded on.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form
-            className="space-y-4"
-            onSubmit={(e) => {
-              e.preventDefault()
-              const trimmed = name.trim()
-              if (!trimmed) return
-              create.mutate({
-                orgId: org.id,
-                name: trimmed,
-                originHints: origins
-                  .split('\n')
-                  .map((line) => line.trim())
-                  .filter((line) => line !== ''),
-              })
-            }}>
-            <div className="space-y-2">
-              <Label htmlFor="project-name">Name</Label>
-              <Input
-                id="project-name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Checkout"
-                autoComplete="off"
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="project-origins">Origins</Label>
-              <textarea
-                id="project-origins"
-                rows={3}
-                value={origins}
-                onChange={(e) => setOrigins(e.target.value)}
-                placeholder={'https://app.example.com\nhttps://staging.example.com'}
-                spellCheck={false}
-                className="border-input bg-background placeholder:text-muted-foreground w-full rounded-md border px-3 py-2 font-mono text-xs shadow-xs outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
-              />
-              <p className="text-muted-foreground text-xs">One URL origin per line.</p>
-            </div>
-            {create.isError && <p className="text-destructive text-sm">{create.error.message}</p>}
-            <Button type="submit" disabled={create.isPending}>
-              {create.isPending ? 'Creating…' : 'Create project'}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+      {fullAccess && (
+        <Card className="max-w-xl">
+          <CardHeader>
+            <CardTitle>New project</CardTitle>
+            <CardDescription>
+              Origins are matched against the page a gripe was recorded on.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form
+              className="space-y-4"
+              onSubmit={(e) => {
+                e.preventDefault()
+                const trimmed = name.trim()
+                if (!trimmed) return
+                create.mutate({
+                  orgId: org.id,
+                  name: trimmed,
+                  originHints: origins
+                    .split('\n')
+                    .map((line) => line.trim())
+                    .filter((line) => line !== ''),
+                })
+              }}>
+              <div className="space-y-2">
+                <Label htmlFor="project-name">Name</Label>
+                <Input
+                  id="project-name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Checkout"
+                  autoComplete="off"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="project-origins">Origins</Label>
+                <textarea
+                  id="project-origins"
+                  rows={3}
+                  value={origins}
+                  onChange={(e) => setOrigins(e.target.value)}
+                  placeholder={'https://app.example.com\nhttps://staging.example.com'}
+                  spellCheck={false}
+                  className="border-input bg-background placeholder:text-muted-foreground w-full rounded-md border px-3 py-2 font-mono text-xs shadow-xs outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
+                />
+                <p className="text-muted-foreground text-xs">One URL origin per line.</p>
+              </div>
+              {create.isError && <p className="text-destructive text-sm">{create.error.message}</p>}
+              <Button type="submit" disabled={create.isPending}>
+                {create.isPending ? 'Creating…' : 'Create project'}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }

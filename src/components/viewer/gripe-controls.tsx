@@ -47,8 +47,13 @@ export function GripeControls({ gripe }: { gripe: Gripe }) {
   )
 
   // Keyed off the gripe's own org, not the active one — reaching this page
-  // already proved membership, and the two can differ mid-switch.
-  const projects = useQuery(trpc.projects.list.queryOptions({ orgId: gripe.orgId }))
+  // already proved membership, and the two can differ mid-switch. Guests only
+  // hold a slice of the workspace, so filing a gripe elsewhere isn't theirs to do.
+  const canAssign = org?.id === gripe.orgId && org?.scope === 'org'
+  const projects = useQuery({
+    ...trpc.projects.list.queryOptions({ orgId: gripe.orgId }),
+    enabled: canAssign,
+  })
 
   // In-flight variables stand in for the server's answer, so the control moves
   // the instant it's clicked and snaps back on its own if the write fails.
@@ -74,21 +79,23 @@ export function GripeControls({ gripe }: { gripe: Gripe }) {
         onChange={(next) => setStatus.mutate({ gripeId: gripe.id, status: next })}
       />
 
-      <select
-        aria-label="Project"
-        className="border-input bg-background text-foreground rounded-md border px-2 py-1.5 text-sm disabled:opacity-60"
-        value={projectId}
-        disabled={assignProject.isPending || projects.isLoading}
-        onChange={(e) =>
-          assignProject.mutate({ gripeId: gripe.id, projectId: e.target.value || null })
-        }>
-        <option value="">— No project —</option>
-        {(projects.data ?? []).map((project) => (
-          <option key={project.id} value={project.id}>
-            {project.name}
-          </option>
-        ))}
-      </select>
+      {canAssign && (
+        <select
+          aria-label="Project"
+          className="border-input bg-background text-foreground rounded-md border px-2 py-1.5 text-sm disabled:opacity-60"
+          value={projectId}
+          disabled={assignProject.isPending || projects.isLoading}
+          onChange={(e) =>
+            assignProject.mutate({ gripeId: gripe.id, projectId: e.target.value || null })
+          }>
+          <option value="">— No project —</option>
+          {(projects.data ?? []).map((project) => (
+            <option key={project.id} value={project.id}>
+              {project.name}
+            </option>
+          ))}
+        </select>
+      )}
 
       <Button variant="outline" onClick={() => copy(agentBrief(gripe))}>
         {copied ? 'Copied' : 'Copy agent brief'}

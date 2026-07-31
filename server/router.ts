@@ -1,7 +1,9 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
-import { requireMembership, slugify } from './membership'
+import { inviteEmail, sendEmail } from './email'
+import { env } from './env'
+import { canSeeGripe, requireMembership, requireOrgScope, slugify } from './membership'
 import { prisma } from './prisma'
 import { deletePrefix, gripeKey, gripePrefix, isSafePath, presignGet } from './storage'
 import { protectedProcedure, publicProcedure, router } from './trpc'
@@ -25,6 +27,7 @@ const orgsRouter = router({
       name: m.org.name,
       slug: m.org.slug,
       role: m.role,
+      scope: m.scope,
     }))
   }),
 
@@ -50,10 +53,25 @@ const orgsRouter = router({
   members: protectedProcedure
     .input(z.object({ orgId: z.string() }))
     .query(async ({ ctx, input }) => {
-      await requireMembership(ctx.session.user.id, input.orgId)
+      const access = await requireMembership(ctx.session.user.id, input.orgId)
       const rows = await prisma.membership.findMany({
-        where: { orgId: input.orgId },
-        include: { user: { select: { id: true, name: true, email: true } } },
+        // Guests only see who shares their slice: full members plus guests
+        // with an overlapping project — not the whole roster's emails.
+        where: {
+          orgId: input.orgId,
+          ...(access.projectIds
+            ? {
+                OR: [
+                  { scope: 'org' },
+                  { projectAccess: { some: { projectId: { in: access.projectIds } } } },
+                ],
+              }
+            : {}),
+        },
+        include: {
+          user: { select: { id: true, name: true, email: true } },
+          projectAccess: { select: { project: { select: { name: true } } } },
+        },
         orderBy: { createdAt: 'asc' },
       })
       return rows.map((m) => ({
@@ -62,6 +80,8 @@ const orgsRouter = router({
         name: m.user.name,
         email: m.user.email,
         role: m.role,
+        scope: m.scope,
+        projects: m.projectAccess.map((a) => a.project.name),
         joinedAt: m.createdAt.toISOString(),
       }))
     }),
@@ -81,6 +101,9 @@ const orgsRouter = router({
       if (target.role === 'owner') {
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'Owners cannot be demoted here' })
       }
+      if (target.scope === 'projects') {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Project guests are always members' })
+      }
       await prisma.membership.update({ where: { id: target.id }, data: { role: input.role } })
       return { ok: true }
     }),
@@ -95,6 +118,12 @@ const orgsRouter = router({
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'The owner cannot be removed' })
       }
       await prisma.membership.delete({ where: { id: target.id } })
+      // Their org tokens die with the membership — a live token would keep
+      // reading the whole org through /api/ingest.
+      await prisma.apiToken.updateMany({
+        where: { orgId: input.orgId, userId: target.userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      })
       return { ok: true }
     }),
 })
@@ -104,12 +133,14 @@ const invitesRouter = router({
     await requireMembership(ctx.session.user.id, input.orgId, 'admin')
     const rows = await prisma.invite.findMany({
       where: { orgId: input.orgId, acceptedAt: null, expiresAt: { gt: new Date() } },
+      include: { project: { select: { name: true } } },
       orderBy: { createdAt: 'desc' },
     })
     return rows.map((i) => ({
       id: i.id,
       email: i.email,
       role: i.role,
+      projectName: i.project?.name ?? null,
       createdAt: i.createdAt.toISOString(),
       expiresAt: i.expiresAt.toISOString(),
     }))
@@ -121,20 +152,48 @@ const invitesRouter = router({
         orgId: z.string(),
         email: z.string().email().optional(),
         role: z.enum(['admin', 'member']).default('member'),
+        projectId: z.string().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
       await requireMembership(ctx.session.user.id, input.orgId, 'admin')
+      if (input.projectId) {
+        const p = await prisma.project.findUnique({ where: { id: input.projectId } })
+        if (!p || p.orgId !== input.orgId) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Unknown project' })
+        }
+      }
       const invite = await prisma.invite.create({
         data: {
           orgId: input.orgId,
           email: input.email ?? null,
-          role: input.role,
+          role: input.projectId ? 'member' : input.role,
+          projectId: input.projectId ?? null,
           createdById: ctx.session.user.id,
           expiresAt: new Date(Date.now() + INVITE_TTL_MS),
         },
       })
-      return { id: invite.id }
+
+      // An invite without an address is a link the admin copies by hand; with
+      // one, we send it. Either way the link is the credential, so the row is
+      // created first and the email is best-effort on top — a bounce must not
+      // lose an invitation that already exists.
+      let emailed = false
+      if (input.email) {
+        const org = await prisma.org.findUnique({
+          where: { id: input.orgId },
+          select: { name: true },
+        })
+        emailed = await sendEmail({
+          to: input.email,
+          ...inviteEmail({
+            org: org?.name ?? 'a workspace',
+            inviter: ctx.session.user.name || ctx.session.user.email,
+            url: `${env.BETTER_AUTH_URL}/join/${invite.id}`,
+          }),
+        })
+      }
+      return { id: invite.id, emailed }
     }),
 
   revoke: protectedProcedure
@@ -149,10 +208,14 @@ const invitesRouter = router({
   peek: publicProcedure.input(z.object({ inviteId: z.string() })).query(async ({ input }) => {
     const invite = await prisma.invite.findUnique({
       where: { id: input.inviteId },
-      include: { org: { select: { name: true } } },
+      include: { org: { select: { name: true } }, project: { select: { name: true } } },
     })
     if (!invite || invite.acceptedAt || invite.expiresAt < new Date()) return null
-    return { orgName: invite.org.name, email: invite.email }
+    return {
+      orgName: invite.org.name,
+      email: invite.email,
+      projectName: invite.project?.name ?? null,
+    }
   }),
 
   accept: protectedProcedure
@@ -167,7 +230,32 @@ const invitesRouter = router({
       })
       if (!existing) {
         await prisma.membership.create({
-          data: { orgId: invite.orgId, userId: ctx.session.user.id, role: invite.role },
+          data: {
+            orgId: invite.orgId,
+            userId: ctx.session.user.id,
+            role: invite.projectId ? 'member' : invite.role,
+            scope: invite.projectId ? 'projects' : 'org',
+            ...(invite.projectId
+              ? { projectAccess: { create: { projectId: invite.projectId } } }
+              : {}),
+          },
+        })
+      } else if (invite.projectId) {
+        // Org-wide members already see the project; extend a fellow guest.
+        if (existing.scope === 'projects') {
+          await prisma.projectAccess.upsert({
+            where: {
+              membershipId_projectId: { membershipId: existing.id, projectId: invite.projectId },
+            },
+            create: { membershipId: existing.id, projectId: invite.projectId },
+            update: {},
+          })
+        }
+      } else if (existing.scope === 'projects') {
+        // An org-wide invite upgrades a guest to full membership.
+        await prisma.membership.update({
+          where: { id: existing.id },
+          data: { role: invite.role, scope: 'org', projectAccess: { deleteMany: {} } },
         })
       }
       await prisma.invite.update({
@@ -198,7 +286,9 @@ const tokensRouter = router({
   create: protectedProcedure
     .input(z.object({ orgId: z.string(), name: z.string().trim().min(1).max(80) }))
     .mutation(async ({ ctx, input }) => {
-      await requireMembership(ctx.session.user.id, input.orgId)
+      const access = await requireMembership(ctx.session.user.id, input.orgId)
+      // A token reads the whole org through /api/ingest — guests get none.
+      requireOrgScope(access)
       const raw = `hb_${randomBytes(24).toString('base64url')}`
       await prisma.apiToken.create({
         data: {
@@ -226,9 +316,12 @@ const tokensRouter = router({
 
 const projectsRouter = router({
   list: protectedProcedure.input(z.object({ orgId: z.string() })).query(async ({ ctx, input }) => {
-    await requireMembership(ctx.session.user.id, input.orgId)
+    const access = await requireMembership(ctx.session.user.id, input.orgId)
     const rows = await prisma.project.findMany({
-      where: { orgId: input.orgId },
+      where: {
+        orgId: input.orgId,
+        ...(access.projectIds ? { id: { in: access.projectIds } } : {}),
+      },
       orderBy: { createdAt: 'asc' },
       include: { _count: { select: { gripes: true } } },
     })
@@ -250,7 +343,8 @@ const projectsRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      await requireMembership(ctx.session.user.id, input.orgId)
+      const access = await requireMembership(ctx.session.user.id, input.orgId)
+      requireOrgScope(access)
       const base = slugify(input.name)
       let slug = base
       for (
@@ -297,12 +391,19 @@ const gripesRouter = router({
       })
     )
     .query(async ({ ctx, input }) => {
-      await requireMembership(ctx.session.user.id, input.orgId)
+      const access = await requireMembership(ctx.session.user.id, input.orgId)
+      if (input.projectId && !canSeeGripe(access, input.projectId)) {
+        throw new TRPCError({ code: 'FORBIDDEN' })
+      }
       const rows = await prisma.gripe.findMany({
         where: {
           orgId: input.orgId,
           finalizedAt: { not: null },
-          ...(input.projectId ? { projectId: input.projectId } : {}),
+          ...(input.projectId
+            ? { projectId: input.projectId }
+            : access.projectIds
+              ? { projectId: { in: access.projectIds } }
+              : {}),
           ...(input.status ? { status: input.status } : {}),
         },
         orderBy: { recordedAt: 'desc' },
@@ -339,7 +440,8 @@ const gripesRouter = router({
       },
     })
     if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
-    await requireMembership(ctx.session.user.id, g.orgId)
+    const access = await requireMembership(ctx.session.user.id, g.orgId)
+    if (!canSeeGripe(access, g.projectId)) throw new TRPCError({ code: 'NOT_FOUND' })
     return {
       id: g.id,
       orgId: g.orgId,
@@ -389,10 +491,11 @@ const gripesRouter = router({
       if (!isSafePath(input.path)) throw new TRPCError({ code: 'BAD_REQUEST' })
       const g = await prisma.gripe.findUnique({
         where: { id: input.gripeId },
-        select: { orgId: true },
+        select: { orgId: true, projectId: true },
       })
       if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
-      await requireMembership(ctx.session.user.id, g.orgId)
+      const access = await requireMembership(ctx.session.user.id, g.orgId)
+      if (!canSeeGripe(access, g.projectId)) throw new TRPCError({ code: 'NOT_FOUND' })
       const file = await prisma.gripeFile.findUnique({
         where: { gripeId_path: { gripeId: input.gripeId, path: input.path } },
       })
@@ -407,10 +510,11 @@ const gripesRouter = router({
     .mutation(async ({ ctx, input }) => {
       const g = await prisma.gripe.findUnique({
         where: { id: input.gripeId },
-        select: { orgId: true },
+        select: { orgId: true, projectId: true },
       })
       if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
-      await requireMembership(ctx.session.user.id, g.orgId)
+      const access = await requireMembership(ctx.session.user.id, g.orgId)
+      if (!canSeeGripe(access, g.projectId)) throw new TRPCError({ code: 'NOT_FOUND' })
       await prisma.gripe.update({
         where: { id: input.gripeId },
         data: {
@@ -429,7 +533,8 @@ const gripesRouter = router({
         select: { orgId: true },
       })
       if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
-      await requireMembership(ctx.session.user.id, g.orgId)
+      const access = await requireMembership(ctx.session.user.id, g.orgId)
+      requireOrgScope(access)
       if (input.projectId) {
         const p = await prisma.project.findUnique({ where: { id: input.projectId } })
         if (!p || p.orgId !== g.orgId) throw new TRPCError({ code: 'BAD_REQUEST' })

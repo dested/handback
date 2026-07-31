@@ -58,6 +58,12 @@ export function JoinPage() {
             <CardTitle className="font-display text-2xl leading-snug font-semibold">
               You're invited to join {inviteQuery.data.orgName}
             </CardTitle>
+            {inviteQuery.data.projectName && (
+              <CardDescription>
+                Guest access to the {inviteQuery.data.projectName} project — you'll see only its
+                gripes.
+              </CardDescription>
+            )}
             {inviteQuery.data.email && (
               <CardDescription className="font-mono text-xs">
                 {inviteQuery.data.email}

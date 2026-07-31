@@ -102,13 +102,30 @@ model Membership {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   role      String   @default("member") // owner | admin | member
   createdAt DateTime @default(now()) @map("created_at")
+  // "org" members see the whole workspace; "projects" members (guests) see
+  // only the projects granted in projectAccess and are always role "member".
+  scope         String          @default("org") // org | projects
+  projectAccess ProjectAccess[]
 
   @@unique([orgId, userId])
   @@map("membership")
 }
 
-// The invite id IS the link token (/join/<id>). No email sending in v1 —
-// the creator copies the link.
+model ProjectAccess {
+  id           String     @id @default(uuid())
+  membershipId String     @map("membership_id")
+  membership   Membership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  projectId    String     @map("project_id")
+  project      Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now()) @map("created_at")
+
+  @@unique([membershipId, projectId])
+  @@map("project_access")
+}
+
+// The invite id IS the link token (/join/<id>). It's emailed when an address
+// was given and Resend is configured; the creator gets the link back either
+// way, so a failed send degrades to copy-paste.
 model Invite {
   id           String    @id @default(uuid())
   orgId        String    @map("org_id")
@@ -120,6 +137,9 @@ model Invite {
   expiresAt    DateTime  @map("expires_at")
   acceptedById String?   @map("accepted_by_id")
   acceptedAt   DateTime? @map("accepted_at")
+  // Set = a guest invite scoped to one project (role is forced to member).
+  projectId    String?   @map("project_id")
+  project      Project?  @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@map("invite")
 }
@@ -135,7 +155,9 @@ model Project {
   originHints String[] @map("origin_hints")
   createdAt   DateTime @default(now()) @map("created_at")
 
-  gripes Gripe[]
+  gripes  Gripe[]
+  access  ProjectAccess[]
+  invites Invite[]
 
   @@unique([orgId, slug])
   @@map("project")
