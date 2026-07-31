@@ -2,6 +2,12 @@
 //
 //   claude mcp add handback --env HANDBACK_TOKEN=hb_... -- bun /abs/path/cli/mcp.ts
 //
+// **Most people should not use this.** The hosted endpoint (`server/mcp.ts`,
+// `claude mcp add --transport http handback https://handback.dev/mcp`) needs no
+// clone and no bun, and /connect walks you through it. This one stays for
+// contributors working against a local server and for anyone who'd rather their
+// agent talk to a process they can read.
+//
 // Three tools over the token-authed read API in server/ingest.ts: list the
 // team's gripes, pull one gripe's full brief (report.md + presigned URLs for
 // video/keyframes/transcript), and move a gripe through review.
@@ -12,12 +18,9 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
+import { formatGripe, type FormattableGripe } from '../server/mcp-format'
 
 const DEFAULT_SERVER = 'https://handback.dev'
-
-// A gripe can carry thousands of keyframes; dumping every URL would bury the
-// report. The agent gets a workable sample and the endpoint to page the rest.
-const MAX_FRAMES = 30
 
 const server = (process.env.HANDBACK_SERVER ?? DEFAULT_SERVER).replace(/\/+$/, '')
 const token = process.env.HANDBACK_TOKEN
@@ -27,14 +30,6 @@ if (!token) {
 }
 
 const statusSchema = z.enum(['open', 'in_review', 'resolved'])
-
-type GripeFile = { path: string; size: number; contentType: string; url: string }
-
-type GripeDetail = {
-  reportMd: string | null
-  files: GripeFile[]
-  [key: string]: unknown
-}
 
 type ToolResult = {
   content: { type: 'text'; text: string }[]
@@ -99,40 +94,6 @@ async function api<T>(
   return { data: (await res.json()) as T }
 }
 
-const isFrame = (path: string) => path.includes('/frames/')
-
-/** The metadata JSON, then report.md, then one `path — url` line per file. */
-function formatGripe(gripe: GripeDetail): string {
-  const { reportMd, files, ...meta } = gripe
-
-  let framesShown = 0
-  let framesOmitted = 0
-  const lines: string[] = []
-  for (const f of files) {
-    if (isFrame(f.path)) {
-      if (framesShown >= MAX_FRAMES) {
-        framesOmitted++
-        continue
-      }
-      framesShown++
-    }
-    lines.push(`${f.path} — ${f.url}`)
-  }
-  if (framesOmitted > 0) {
-    lines.push(
-      `(+${framesOmitted} more frames omitted; fetch via files list of GET /api/ingest/gripes/:id)`
-    )
-  }
-
-  return [
-    JSON.stringify(meta, null, 2),
-    '--- report.md ---',
-    reportMd ?? '(no report.md was uploaded with this gripe)',
-    '--- files ---',
-    lines.join('\n'),
-  ].join('\n\n')
-}
-
 registerTool(
   'list_gripes',
   {
@@ -160,7 +121,7 @@ registerTool(
     inputSchema: { gripeId: z.string().describe('Gripe id from list_gripes') },
   },
   async ({ gripeId }) => {
-    const result = await api<GripeDetail>(`/gripes/${encodeURIComponent(gripeId)}`)
+    const result = await api<FormattableGripe>(`/gripes/${encodeURIComponent(gripeId)}`)
     if ('error' in result) return result.error
     return text(formatGripe(result.data))
   }

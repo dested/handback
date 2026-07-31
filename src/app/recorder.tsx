@@ -1,0 +1,498 @@
+// /recorder — the page that gets the Handback Recorder installed and pointed at
+// this workspace. The whole design goal is that nobody copies a token: the page
+// mints one and hands it to the extension over Chrome's external messaging
+// channel, so "linked" is one click rather than a trip through a settings pane.
+//
+// Everything here that touches `window.chrome` happens in effects and handlers.
+// The page renders on the server, where there is no window and no extension.
+
+import { useCallback, useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { useMutation, useQuery } from '@tanstack/react-query'
+import { Check, Copy } from 'lucide-react'
+import { Step } from '~/components/setup-step'
+import { Button } from '~/components/ui/button'
+import { useCopy } from '~/components/viewer/use-copy'
+import { useActiveOrg, type OrgSummary } from '~/lib/org'
+import { useTRPC } from '~/lib/trpc'
+
+/** Fixed by the `key` in extension/public/manifest.json — same ID unpacked and in the Web Store. */
+const EXTENSION_ID = 'gmggnebbenlmpakojgocnjfcnpmifdci'
+/** Set when the Chrome Web Store listing goes live; null renders the zip path instead. */
+const STORE_URL: string | null = null
+const RELEASES_URL = 'https://github.com/dested/handback/releases/latest'
+
+/**
+ * The only part of the `chrome` API a web page can reach: `sendMessage` to an
+ * extension that lists this origin in `externally_connectable`. Typed here
+ * rather than pulling in @types/chrome, which describes an API surface this
+ * page can't touch anyway.
+ */
+interface ChromeRuntimeLite {
+  sendMessage: (
+    extensionId: string,
+    message: unknown,
+    callback: (response: unknown) => void
+  ) => void
+  lastError?: { message?: string }
+}
+
+declare global {
+  interface Window {
+    chrome?: { runtime?: ChromeRuntimeLite }
+  }
+}
+
+type Presence = { version: string; linked: boolean; serverUrl: string }
+type LinkResult = { ok: boolean; error?: string }
+
+const NO_ANSWER = 'no answer from the extension'
+
+/**
+ * "Is it installed, and where is it pointed?" — sent every couple of seconds so
+ * the page turns green the moment someone finishes installing, without a
+ * reload. Silence is the normal answer (nothing installed), so every failure
+ * mode resolves null rather than throwing.
+ */
+function pingExtension(): Promise<Presence | null> {
+  return new Promise((resolve) => {
+    const runtime = window.chrome?.runtime
+    if (!runtime) {
+      resolve(null)
+      return
+    }
+    try {
+      runtime.sendMessage(EXTENSION_ID, { type: 'handback:ping' }, (response) => {
+        // Reading lastError is what stops Chrome logging "unchecked
+        // runtime.lastError" every two seconds while nothing is installed.
+        if (window.chrome?.runtime?.lastError) {
+          resolve(null)
+          return
+        }
+        resolve(readPresence(response))
+      })
+    } catch {
+      resolve(null)
+    }
+  })
+}
+
+/** Hands the extension a freshly minted token. It answers, or it didn't hear us. */
+function linkExtension(apiToken: string, orgName: string): Promise<LinkResult> {
+  return new Promise((resolve) => {
+    const runtime = window.chrome?.runtime
+    if (!runtime) {
+      resolve({ ok: false, error: NO_ANSWER })
+      return
+    }
+    try {
+      runtime.sendMessage(
+        EXTENSION_ID,
+        { type: 'handback:link', apiToken, orgName },
+        (response) => {
+          if (window.chrome?.runtime?.lastError) {
+            resolve({ ok: false, error: NO_ANSWER })
+            return
+          }
+          resolve(readLinkResult(response))
+        }
+      )
+    } catch {
+      resolve({ ok: false, error: NO_ANSWER })
+    }
+  })
+}
+
+function readPresence(response: unknown): Presence | null {
+  if (typeof response !== 'object' || response === null) return null
+  if (!('ok' in response) || response.ok !== true) return null
+  if (!('version' in response) || typeof response.version !== 'string') return null
+  if (!('linked' in response) || typeof response.linked !== 'boolean') return null
+  if (!('serverUrl' in response) || typeof response.serverUrl !== 'string') return null
+  return { version: response.version, linked: response.linked, serverUrl: response.serverUrl }
+}
+
+function readLinkResult(response: unknown): LinkResult {
+  if (typeof response !== 'object' || response === null) return { ok: false, error: NO_ANSWER }
+  if (!('ok' in response) || typeof response.ok !== 'boolean') {
+    return { ok: false, error: NO_ANSWER }
+  }
+  if (response.ok) return { ok: true }
+  const error =
+    'error' in response && typeof response.error === 'string' ? response.error : NO_ANSWER
+  return { ok: false, error }
+}
+
+export function RecorderPage() {
+  const { org, orgsLoaded } = useActiveOrg()
+
+  if (!org) {
+    return orgsLoaded ? (
+      <div className="max-w-3xl">
+        <h1 className="font-display text-3xl font-semibold">Set up the recorder</h1>
+        <p className="text-muted-foreground mt-3 text-sm">
+          Name a workspace first —{' '}
+          <Link to="/app" className="text-primary underline underline-offset-4">
+            head to the inbox
+          </Link>
+          . Recordings belong to a workspace, so there has to be one to belong to.
+        </p>
+      </div>
+    ) : (
+      <p className="text-muted-foreground text-sm">Loading…</p>
+    )
+  }
+
+  return <Recorder key={org.id} org={org} />
+}
+
+type Phase = 'idle' | 'linking' | 'linked' | 'failed'
+
+function Recorder({ org }: { org: OrgSummary }) {
+  // window is absent during SSR; render the production host, then correct it on
+  // mount so a local dev session shows its own origin.
+  const [origin, setOrigin] = useState('https://handback.dev')
+  useEffect(() => setOrigin(window.location.origin), [])
+
+  // null until mount decides — the server has no window to ask.
+  const [inChrome, setInChrome] = useState<boolean | null>(null)
+  const [presence, setPresence] = useState<Presence | null>(null)
+  const [checked, setChecked] = useState(false)
+
+  useEffect(() => {
+    // `chrome.runtime` only appears on this page once a matching extension is
+    // installed — its absence means "not installed yet", never "not Chrome".
+    // Chrome itself is read off the UA (every Chromium can load the extension),
+    // and pingExtension re-checks runtime on every tick.
+    const chromium = /Chrome\//.test(navigator.userAgent)
+    setInChrome(chromium)
+    if (!chromium) return
+    let live = true
+    const poll = async () => {
+      const found = await pingExtension()
+      if (!live) return
+      setPresence(found)
+      setChecked(true)
+    }
+    void poll()
+    const timer = setInterval(() => void poll(), 2000)
+    return () => {
+      live = false
+      clearInterval(timer)
+    }
+  }, [])
+
+  const trpc = useTRPC()
+  const connection = useQuery(trpc.tokens.connection.queryOptions({ orgId: org.id }))
+  const canConnect = connection.data?.canConnect ?? true
+
+  return (
+    <div className="max-w-3xl space-y-12">
+      <header className="space-y-4">
+        <p className="text-cobalt font-mono text-xs tracking-widest uppercase">
+          Are you the one who saw it break?
+        </p>
+        <h1 className="font-display text-4xl font-semibold tracking-tight">Set up the recorder</h1>
+        <p className="text-muted-foreground text-base leading-relaxed">
+          The Handback Recorder is a Chrome extension: hit record, walk through the problem out
+          loud, and the recording, transcript, and console errors land in {org.name}'s inbox as a
+          brief an agent can act on.
+        </p>
+      </header>
+
+      {!canConnect ? (
+        <GuestNotice />
+      ) : (
+        <>
+          {inChrome === false && <NotChromeNotice />}
+          <Step
+            n="01"
+            title="Install the extension"
+            blurb="Chrome only. It records the tab, your narration, and the console together, and only while you're recording.">
+            {STORE_URL ? (
+              <div>
+                <a
+                  href={STORE_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="bg-primary text-primary-foreground inline-flex h-9 items-center gap-2 rounded-md px-4 text-sm font-medium hover:opacity-90">
+                  Add to Chrome
+                </a>
+                <p className="text-muted-foreground mt-3 text-sm">
+                  Chrome will ask to confirm — the recorder only runs when you hit Record.
+                </p>
+              </div>
+            ) : (
+              <div>
+                <p className="text-muted-foreground text-sm">
+                  The Web Store listing is in review, so for now it installs from a zip — three
+                  steps, no build tools:
+                </p>
+                <ol className="text-muted-foreground mt-4 space-y-2 text-sm">
+                  <li className="flex gap-3">
+                    <span className="text-cobalt font-mono text-xs leading-5">1</span>
+                    <span>
+                      Download <code className="font-mono text-xs">handback-recorder.zip</code> from
+                      the{' '}
+                      <a
+                        href={RELEASES_URL}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-primary underline underline-offset-4">
+                        latest release
+                      </a>{' '}
+                      and unzip it.
+                    </span>
+                  </li>
+                  <li className="flex gap-3">
+                    <span className="text-cobalt font-mono text-xs leading-5">2</span>
+                    <span>
+                      Open <code className="font-mono text-xs">chrome://extensions</code>{' '}
+                      (copy-paste it — Chrome won't let a page link there), and flip on{' '}
+                      <strong>Developer mode</strong>, top right.
+                    </span>
+                  </li>
+                  <li className="flex gap-3">
+                    <span className="text-cobalt font-mono text-xs leading-5">3</span>
+                    <span>
+                      Hit <strong>Load unpacked</strong> and pick the unzipped folder.
+                    </span>
+                  </li>
+                </ol>
+              </div>
+            )}
+            {inChrome !== false && <PresenceIndicator presence={presence} checked={checked} />}
+          </Step>
+
+          <Step
+            n="02"
+            title="Link this workspace"
+            blurb={`One click hands the recorder a key to ${org.name} — no tokens to copy. Recordings upload straight to this inbox.`}>
+            <LinkStep org={org} origin={origin} presence={presence} />
+          </Step>
+
+          <Step n="03" title="Record" blurb="That's the whole setup.">
+            <ul className="text-muted-foreground space-y-2 text-sm">
+              <li className="flex gap-2">
+                <span className="text-cobalt">·</span>
+                <span>
+                  Pin it: puzzle-piece icon in Chrome's toolbar → pin{' '}
+                  <strong>Handback Recorder</strong>, then click it to open the side panel.
+                </span>
+              </li>
+              <li className="flex gap-2">
+                <span className="text-cobalt">·</span>
+                <span>
+                  Hit <strong>Record</strong>, pick the tab or screen, and talk — say what you
+                  expected and what happened instead.
+                </span>
+              </li>
+              <li className="flex gap-2">
+                <span className="text-cobalt">·</span>
+                <span>
+                  <code className="font-mono text-xs">Alt+Shift+M</code> marks a moment;{' '}
+                  <code className="font-mono text-xs">Alt+Shift+D</code> draws on the page in ink.
+                </span>
+              </li>
+              <li className="flex gap-2">
+                <span className="text-cobalt">·</span>
+                <span>
+                  Hit <strong>Send to Handback</strong> when you're done — the gripe lands in the
+                  inbox here, ready for an agent.
+                </span>
+              </li>
+            </ul>
+          </Step>
+        </>
+      )}
+
+      <CliAside origin={origin} />
+    </div>
+  )
+}
+
+function LinkStep({
+  org,
+  origin,
+  presence,
+}: {
+  org: OrgSummary
+  origin: string
+  presence: Presence | null
+}) {
+  const trpc = useTRPC()
+  const [phase, setPhase] = useState<Phase>('idle')
+  const [minted, setMinted] = useState<string | null>(null)
+
+  const create = useMutation(
+    trpc.tokens.create.mutationOptions({
+      onSuccess: async (result) => {
+        setMinted(result.token)
+        const outcome = await linkExtension(result.token, org.name)
+        setPhase(outcome.ok ? 'linked' : 'failed')
+      },
+      onError: () => setPhase('idle'),
+    })
+  )
+
+  const link = useCallback(() => {
+    setPhase('linking')
+    create.mutate({ orgId: org.id, name: 'recorder — chrome' })
+  }, [create, org.id])
+
+  // Linked, but at a different Handback. Violet, not amber — ui.md forbids the
+  // warm hues, and this is a "heads up", not a failure.
+  const linkedElsewhere = presence !== null && presence.linked && presence.serverUrl !== origin
+  const alreadyHere = presence !== null && presence.linked && !linkedElsewhere && phase === 'idle'
+  const busy = phase === 'linking' || create.isPending
+
+  return (
+    <div className="space-y-4">
+      {linkedElsewhere && (
+        <div className="border-review/40 bg-review-wash text-review rounded-md border p-4 text-sm">
+          The recorder is linked to <span className="font-mono text-xs">{presence.serverUrl}</span>.
+          Linking here points it at this workspace instead.
+        </div>
+      )}
+
+      {alreadyHere && (
+        <div className="border-approve/40 bg-approve-wash flex items-center gap-3 rounded-md border p-4">
+          <span className="bg-approve size-2 shrink-0 rounded-full" />
+          <p className="text-approve text-sm font-medium">Already linked to this workspace.</p>
+        </div>
+      )}
+
+      {phase === 'linked' && (
+        <div className="border-approve/40 bg-approve-wash flex items-center gap-3 rounded-md border p-4">
+          <span className="bg-approve size-2 shrink-0 rounded-full" />
+          <p className="text-approve text-sm font-medium">
+            Linked. The recorder now uploads to {org.name} — you can close this page and record from
+            any tab.
+          </p>
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-3">
+        <Button
+          type="button"
+          variant={alreadyHere ? 'outline' : 'default'}
+          disabled={presence === null || busy}
+          onClick={link}>
+          {busy ? 'Linking…' : alreadyHere ? 'Re-link' : `Link ${org.name}`}
+        </Button>
+        {presence === null && (
+          <span className="text-muted-foreground text-sm">
+            Install the extension in step 01 first.
+          </span>
+        )}
+      </div>
+
+      {alreadyHere && (
+        <p className="text-muted-foreground text-sm">
+          Re-linking mints a fresh token; the old one keeps working until you revoke it under{' '}
+          <Link to="/team" className="text-primary underline underline-offset-4">
+            Team → API tokens
+          </Link>
+          .
+        </p>
+      )}
+
+      {phase === 'failed' && minted && (
+        <div className="border-border bg-card space-y-3 rounded-md border p-4">
+          <p className="text-sm">
+            The extension didn't answer, but your token was created — paste it into the extension's
+            settings (server <span className="font-mono text-xs">{origin}</span>), or revoke it
+            under{' '}
+            <Link to="/team" className="text-primary underline underline-offset-4">
+              Team → API tokens
+            </Link>
+            .
+          </p>
+          <CopyRow value={minted} />
+        </div>
+      )}
+
+      {create.isError && <p className="text-destructive text-sm">{create.error.message}</p>}
+    </div>
+  )
+}
+
+/** The page's heartbeat: green the instant the extension answers a ping. */
+function PresenceIndicator({ presence, checked }: { presence: Presence | null; checked: boolean }) {
+  if (presence) {
+    return (
+      <div className="border-approve/40 bg-approve-wash mt-4 flex items-center gap-3 rounded-md border p-4">
+        <span className="bg-approve size-2 shrink-0 rounded-full" />
+        <p className="text-approve text-sm font-medium">
+          Handback Recorder {presence.version} is installed.
+        </p>
+      </div>
+    )
+  }
+  return (
+    <div
+      aria-busy={!checked}
+      className="border-border bg-muted/40 mt-4 flex items-center gap-3 rounded-md border p-4">
+      <span className="bg-muted-foreground/40 size-2 shrink-0 animate-pulse rounded-full" />
+      <p className="text-muted-foreground text-sm">
+        Waiting to spot the extension… it shows up here the moment it's installed. Installed it
+        already? Reload this page.
+      </p>
+    </div>
+  )
+}
+
+function NotChromeNotice() {
+  return (
+    <div className="border-border bg-muted/40 rounded-md border p-4">
+      <p className="text-muted-foreground text-sm">
+        This page can only talk to the extension from Chrome. Open{' '}
+        <span className="font-mono text-xs">handback.dev/recorder</span> in Chrome to finish setup.
+      </p>
+    </div>
+  )
+}
+
+function GuestNotice() {
+  return (
+    <div className="border-border bg-card rounded-xl border p-8">
+      <h2 className="font-display text-2xl font-semibold">You're a guest on this workspace</h2>
+      <p className="text-muted-foreground mt-3 text-sm leading-relaxed">
+        The recorder uploads with a workspace token, and only full members can hold one. Ask an
+        owner for full access, then come back — recording itself takes about a minute to set up.
+      </p>
+    </div>
+  )
+}
+
+function CliAside({ origin }: { origin: string }) {
+  return (
+    <section className="border-border border-t pt-6">
+      <h2 className="font-display text-xl font-semibold">Prefer the command line?</h2>
+      <p className="text-muted-foreground mt-2 text-sm">
+        A gripe folder pushes straight up with the CLI:
+      </p>
+      <pre className="border-border bg-muted/60 mt-3 overflow-x-auto rounded-md border p-3 font-mono text-xs">
+        HANDBACK_TOKEN=hb_… bun cli/push.ts &lt;gripe-folder&gt; --server {origin}
+      </pre>
+    </section>
+  )
+}
+
+function CopyRow({ value }: { value: string }) {
+  const { copied, copy } = useCopy()
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        readOnly
+        value={value}
+        onFocus={(e) => e.currentTarget.select()}
+        className="border-input bg-background h-9 min-w-0 flex-1 rounded-md border px-2 font-mono text-xs"
+      />
+      <Button type="button" variant="outline" size="sm" onClick={() => void copy(value)}>
+        {copied ? <Check /> : <Copy />}
+        {copied ? 'Copied' : 'Copy'}
+      </Button>
+    </div>
+  )
+}

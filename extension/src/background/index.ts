@@ -1,4 +1,10 @@
-import type { ContentCommand, Request } from '../lib/messages';
+import type {
+  ContentCommand,
+  ExternalLinkResult,
+  ExternalPong,
+  ExternalRequest,
+  Request,
+} from '../lib/messages';
 import type { RecordingMeta, Session, Settings, TimelineMove, TimelineRef } from '../lib/types';
 import { COBALT, DEFAULT_SETTINGS } from '../lib/types';
 import {
@@ -30,8 +36,12 @@ const RECORDING_ORIGIN = 'recordingOrigin';
 /** kv: { stripId, parentId } — the popped editor strip and the window it's pinned under. */
 const STRIP_DOCK = 'stripDock';
 
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener((details) => {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+  // Only on a fresh install — an update or a browser restart must not steal a tab.
+  if (details.reason === 'install') {
+    chrome.tabs.create({ url: `${DEFAULT_SETTINGS.serverUrl}/recorder` }).catch(() => {});
+  }
 });
 
 /**
@@ -538,5 +548,57 @@ chrome.runtime.onMessage.addListener((message: Request, _sender, sendResponse) =
         return { ok: false };
     }
   })().then(sendResponse, (error) => sendResponse({ error: String(error) }));
+  return true;
+});
+
+/** Anything a web page sends is unvalidated input; nothing past this is trusted. */
+function isExternalRequest(message: unknown): message is ExternalRequest {
+  if (typeof message !== 'object' || message === null || !('type' in message)) return false;
+  if (message.type === 'handback:ping') return true;
+  if (message.type !== 'handback:link') return false;
+  if (!('apiToken' in message) || typeof message.apiToken !== 'string') return false;
+  return !('orgName' in message) || typeof message.orgName === 'string';
+}
+
+/**
+ * A Handback page (the manifest says which ones) can ask whether the extension is
+ * installed and hand it a token for its own workspace. The workspace linked is
+ * `sender.origin` and never a URL from the payload — a matched page could
+ * otherwise point every future upload at a server the human never chose.
+ */
+chrome.runtime.onMessageExternal.addListener((message: unknown, sender, sendResponse) => {
+  (async (): Promise<ExternalPong | ExternalLinkResult> => {
+    const origin = sender.origin;
+    if (typeof origin !== 'string' || !origin.startsWith('http')) {
+      return { ok: false, error: 'unknown sender' };
+    }
+    if (!isExternalRequest(message)) return { ok: false, error: 'unknown request' };
+    switch (message.type) {
+      case 'handback:ping': {
+        const settings = await getSettings();
+        return {
+          ok: true,
+          version: chrome.runtime.getManifest().version,
+          linked: Boolean(settings.apiToken),
+          serverUrl: settings.serverUrl,
+        };
+      }
+      case 'handback:link': {
+        const apiToken = message.apiToken;
+        if (!apiToken.startsWith('hb_') || apiToken.length > 200) {
+          return { ok: false, error: 'that is not a Handback token' };
+        }
+        const next: Settings = {
+          ...(await getSettings()),
+          serverUrl: origin,
+          apiToken,
+          orgName: (message.orgName ?? '').slice(0, 80),
+        };
+        await kv.set(SETTINGS, next);
+        await broadcast();
+        return { ok: true };
+      }
+    }
+  })().then(sendResponse, (error) => sendResponse({ ok: false, error: String(error) }));
   return true;
 });

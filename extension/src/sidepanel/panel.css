@@ -25,7 +25,7 @@
   padding: 10px 12px;
 }
 .mark {
-  width: 30px;
+  width: 28px;
   height: 20px;
   flex: none;
 }
@@ -79,13 +79,75 @@
 }
 
 /* ── Record ─────────────────────────────────────────────────────────────── */
+/* With no gripe open the panel has exactly one thing to offer, so Record is the
+ * page rather than a control on it: full width, its own sentence underneath. */
 
-.controls {
+.hero {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  padding: 18px 12px 14px;
+}
+.hero .link {
+  align-self: flex-start;
+}
+.rec-hero {
   display: flex;
   align-items: center;
-  gap: var(--gap);
-  padding: 12px;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 54px;
+  background: var(--cobalt);
+  color: #fff;
+  border: 0;
+  border-radius: var(--radius);
+  padding: 0 16px;
+  font-size: var(--fs-3);
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
+.rec-hero:hover {
+  filter: brightness(1.06);
+}
+.rec-hero .dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #fff;
+  flex: none;
+}
+.hero-sub {
+  margin: 0;
+  font-size: var(--fs-1);
+  line-height: 1.45;
+  color: var(--ink);
+}
+.hero-keys {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-0);
+  color: var(--muted);
+}
+
+/* Unlinked is a state, not an error: it says what is true and where to fix it. */
+.linkbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--cobalt-wash);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-1);
+}
+.linkbar > span {
+  flex: 1;
+}
+.linkbar .link {
+  white-space: nowrap;
+}
+
 .rec {
   display: inline-flex;
   align-items: center;
@@ -120,6 +182,17 @@
 .rec.live .dot {
   background: var(--cobalt);
   animation: pulse 1.3s ease-in-out infinite;
+}
+/* A second take is an ordinary thing to want and never the loudest button on
+ * screen — that is the send below it. */
+.rec.ghost {
+  background: none;
+  border: 1px solid var(--cobalt);
+  color: var(--cobalt);
+  padding: 8px 15px;
+}
+.rec.ghost .dot {
+  background: var(--cobalt);
 }
 
 .dot.pulse {
@@ -159,7 +232,7 @@
 }
 .clock {
   font-family: var(--font-mono);
-  font-size: var(--fs-3);
+  font-size: var(--fs-4);
   font-variant-numeric: tabular-nums;
 }
 .stat {
@@ -167,18 +240,20 @@
   font-size: var(--fs-0);
   color: var(--muted);
 }
-.stop {
-  background: none;
-  border: 1px solid var(--border);
+/* Stopping is the only thing anyone wants from this screen, and it is being read
+ * mid-sentence out of the corner of an eye. It gets the full width. */
+.stop-big {
+  width: 100%;
+  height: 44px;
+  background: var(--cobalt);
+  color: #fff;
+  border: 0;
   border-radius: var(--radius);
-  padding: 5px 12px;
-  font-size: var(--fs-1);
+  font-size: var(--fs-2);
   font-weight: 600;
-  color: var(--ink);
 }
-.stop:hover:not(:disabled) {
-  border-color: var(--cobalt);
-  color: var(--cobalt);
+.stop-big:hover:not(:disabled) {
+  filter: brightness(1.06);
 }
 /* The dictation ticker holds its line so the panel doesn't jump word by word. */
 .ticker {
@@ -247,6 +322,12 @@ button.ticker.warn:hover {
   font-size: var(--fs-0);
   color: var(--muted);
 }
+.takerow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
 
 .empty {
   flex: 1;
@@ -308,21 +389,30 @@ button.ticker.warn:hover {
 
 /* ── Settings ───────────────────────────────────────────────────────────── */
 
+/* Paper, not card: the fields inside are white, and they have to read as inputs. */
 .settings {
-  padding: 4px 12px 8px;
+  padding: 10px 12px;
 }
-.settings-row {
-  background: none;
-  border: 0;
-  padding: 6px 0;
-  color: var(--muted);
+/* The link state leads the block, so it reads as a fact with two verbs, not a field. */
+.linked {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   font-size: var(--fs-1);
 }
-.settings-row:hover {
-  color: var(--ink);
+.linked strong {
+  font-weight: 600;
 }
-.gear {
-  font-size: var(--fs-2);
+.linked-actions {
+  display: flex;
+  gap: 12px;
+  flex: none;
+}
+.linkcta {
+  height: 36px;
+  padding: 0 14px;
+  font-size: var(--fs-1);
 }
 .fields {
   display: flex;
@@ -422,6 +512,41 @@ button.ticker.warn:hover {
   padding: 5px 12px;
   font-size: var(--fs-1);
 }
+/* The one irreversible thing the panel does, and it says where it is sending. */
+.send {
+  height: 46px;
+  padding: 0 14px;
+  font-size: var(--fs-3);
+}
+.send-sub {
+  margin: 0;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: var(--fs-0);
+  color: var(--muted);
+}
+
+.linkcard {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  background: var(--cobalt-wash);
+  border: 1px solid color-mix(in srgb, var(--cobalt) 35%, transparent);
+  border-radius: var(--radius);
+}
+.linkcard strong {
+  font-size: var(--fs-2);
+  font-weight: 600;
+}
+.linkcard p {
+  margin: 0;
+  font-size: var(--fs-1);
+  color: var(--muted);
+}
+.linkcard .link {
+  align-self: center;
+}
 
 .prog {
   display: flex;
@@ -445,16 +570,43 @@ button.ticker.warn:hover {
   background: var(--cobalt);
   transition: width 160ms;
 }
+/* A failed upload loses nothing — the gripe is still here — so this is a card that
+ * explains and offers the retry, never a red banner that reads like a loss. */
 .err {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  align-items: flex-start;
-  padding: 8px 10px;
-  border-left: 2px solid var(--danger);
+  gap: 5px;
+  padding: 10px 12px;
   background: var(--card);
-  font-size: var(--fs-1);
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--danger);
+  border-radius: var(--radius);
   color: var(--ink);
+}
+.err-head {
+  font-family: var(--font-mono);
+  font-size: var(--fs-0);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--danger);
+}
+.err p {
+  margin: 0;
+  font-size: var(--fs-1);
+}
+.err-actions {
+  display: flex;
+  gap: 12px;
+}
+.err-detail {
+  margin: 0;
+  max-height: 96px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: var(--fs-0);
+  color: var(--muted);
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .shipped {

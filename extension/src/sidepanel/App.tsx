@@ -87,9 +87,59 @@ function originOf(url: string): string {
   }
 }
 
+/** The workspace as a person would name it — `handback.dev`, not the whole URL. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
+}
+
 function reason(error: unknown): string {
   const text = error instanceof Error ? error.message : String(error);
-  return text.replace(/\s+/g, ' ').trim().slice(0, 160) || 'something went wrong';
+  return text.replace(/\s+/g, ' ').trim().slice(0, 300) || 'something went wrong';
+}
+
+/** An upload failure as a sentence, plus the raw server words for whoever wants them. */
+interface UploadExplanation {
+  line: string;
+  detail?: string;
+  /** The token itself is the problem — the panel offers the workspace page, not a retry. */
+  relink?: boolean;
+}
+
+/**
+ * `upload.ts` throws `declare failed (500): <body…>`, and the body is whatever the
+ * server felt like sending — often an HTML error page. The status is the only part
+ * worth trusting, so it picks the sentence and the body is demoted to a detail the
+ * reader can open if the sentence isn't enough.
+ */
+function explainUpload(raw: string, host: string): UploadExplanation {
+  const status = Number(/\((\d{3})\)/.exec(raw)?.[1] ?? 0);
+  const stripped = raw
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 300);
+  const says = (line: string) => (stripped && stripped !== line ? stripped : undefined);
+
+  if (status === 401 || status === 403) {
+    return { line: 'the workspace turned the token away — re-link and try again', relink: true };
+  }
+  if (status === 413 || /quota|too large|limit/i.test(raw)) {
+    const line = "the workspace refused the upload — it's over a size limit";
+    return { line, detail: says(line) };
+  }
+  if (status >= 500) {
+    const line = `the workspace hit an error (${status}). nothing is lost — the gripe is still here`;
+    return { line, detail: says(line) };
+  }
+  if (status >= 400) {
+    const line = `the workspace said no (${status})`;
+    return { line, detail: says(line) };
+  }
+  return { line: `couldn't reach ${host} — check the connection and try again` };
 }
 
 const mb = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
@@ -99,7 +149,7 @@ export function App() {
   const [flash, setFlash] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [showSessions, setShowSessions] = useState(false);
-  /** The one collapsed block at the bottom. Nothing in here is needed to use the product. */
+  /** The gear's panel, under the header. Nothing in here is needed to use the product. */
   const [showSettings, setShowSettings] = useState(false);
   /** Whether the recorded tab can host the on-page dock — chrome:// pages can't. */
   const [pageDock, setPageDock] = useState(false);
@@ -111,6 +161,8 @@ export function App() {
   const [whisperIds, setWhisperIds] = useState<string[]>([]);
   const [progress, setProgress] = useState<UploadProgress | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  /** The server's own words, folded away until someone asks for them. */
+  const [showErrDetail, setShowErrDetail] = useState(false);
   const [shipped, setShipped] = useState<Shipped | null>(null);
   const whisperQueue = useRef<string[]>([]);
   const whisperRunning = useRef(false);
@@ -481,13 +533,14 @@ export function App() {
     }
     if (!state.settings.apiToken.trim()) {
       setShowSettings(true);
-      setUploadError('paste your Handback API token below — that is where the gripe goes');
+      say('link a workspace first');
       return;
     }
     await navigator.clipboard
       .writeText(agentPrompt(target, undefined, takes.length))
       .catch(() => {});
     setUploadError(null);
+    setShowErrDetail(false);
     setProgress({ phase: 'declare', done: 0, total: 0, bytesDone: 0, bytesTotal: 0 });
     try {
       const bundle = await buildFileSet(target, takes);
@@ -556,6 +609,17 @@ export function App() {
   /** Other gripes than this one — the only reason the history button exists. */
   const others = state.sessions.filter((s) => s.id !== state.activeSessionId).length;
 
+  /**
+   * A token is the whole of "linked": without one the recorder still records, it
+   * just has nowhere to hand anything to. The workspace's /recorder page is where
+   * that gets fixed in one click, so every dead end in the panel points at it.
+   */
+  const linked = Boolean(state.settings.apiToken);
+  const serverUrl = state.settings.serverUrl || 'https://handback.dev';
+  const serverHost = hostOf(serverUrl);
+  const recorderUrl = `${serverUrl.replace(/\/+$/, '')}/recorder`;
+  const openRecorderUrl = () => void chrome.tabs.create({ url: recorderUrl });
+
   const summary = [
     // Duration, not a count — the panel presents one timeline.
     takes.length ? `${mmss(totalMs(partSpans(takes)))} recorded` : '',
@@ -574,6 +638,8 @@ export function App() {
   const uploadPct =
     progress && progress.bytesTotal ? (progress.bytesDone / progress.bytesTotal) * 100 : 0;
 
+  const explained = uploadError ? explainUpload(uploadError, serverHost) : null;
+
   /** What the handoff is doing, or why it stopped. Shown in the panel and the strip. */
   const statusRow = (
     <>
@@ -585,12 +651,26 @@ export function App() {
           </div>
         </div>
       )}
-      {uploadError && (
+      {explained && (
         <div className="err">
-          <span>{uploadError}</span>
-          <button className="link" onClick={() => void finish()}>
-            try again
-          </button>
+          <div className="err-head">upload failed</div>
+          <p>{explained.line}</p>
+          <div className="err-actions">
+            <button className="link" onClick={() => void finish()}>
+              try again
+            </button>
+            {explained.relink && (
+              <button className="link" onClick={openRecorderUrl}>
+                re-link
+              </button>
+            )}
+            {explained.detail && (
+              <button className="link" onClick={() => setShowErrDetail((v) => !v)}>
+                details
+              </button>
+            )}
+          </div>
+          {showErrDetail && explained.detail && <pre className="err-detail">{explained.detail}</pre>}
         </div>
       )}
       {!uploading && !uploadError && hasContent && whisperLabel && (
@@ -600,6 +680,9 @@ export function App() {
       )}
     </>
   );
+
+  /** The footer is the handoff. With nothing to hand over and nothing to say, it isn't there. */
+  const hasStatus = Boolean(uploadLine || uploadError || (hasContent && whisperLabel));
 
   const shippedCard = shipped && (
     <div className="shipped">
@@ -654,7 +737,7 @@ export function App() {
             disabled={!hasContent || recording || uploading}
             onClick={() => void finish()}
           >
-            {uploading ? 'sending…' : 'done'}
+            {uploading ? 'sending…' : 'send'}
           </button>
         </header>
         {(uploadLine || uploadError) && <div className="striprow">{statusRow}</div>}
@@ -673,13 +756,30 @@ export function App() {
       <header className="head">
         <Mark />
         <span className="wordmark">handback</span>
-        <span className="spacer" />
         {/* The gripe's own line below says the duration; up here it would only repeat it. */}
+        <span className="spacer" />
+        <button className="icon" title="Settings" onClick={() => setShowSettings((v) => !v)}>
+          ⚙
+        </button>
         <button className="icon" title="Pop the editor out along the bottom" onClick={() => void popOut()}>
           ⧉
         </button>
       </header>
       <div className="rule" />
+
+      {showSettings && (
+        <>
+          <section className="settings">
+            <SettingsBlock
+              settings={state.settings}
+              onPatch={patchSettings}
+              onOpenRecorder={openRecorderUrl}
+              serverHost={serverHost}
+            />
+          </section>
+          <div className="rule" />
+        </>
+      )}
 
       {recUpdate ? (
         <section className="live">
@@ -690,9 +790,6 @@ export function App() {
               {recUpdate.frameCount} frames kept · {recUpdate.segmentCount} lines
               {recUpdate.markCount ? ` · ${recUpdate.markCount} marked` : ''}
             </span>
-            <button className="stop" onClick={() => void stopRecording()} disabled={stopping}>
-              {stopping ? 'saving…' : 'stop'}
-            </button>
           </div>
           {recUpdate.micState === 'denied' ? (
             <button
@@ -708,19 +805,38 @@ export function App() {
             </div>
           )}
           {pageDock && <div className="note">draw and stop from the little bar on the page</div>}
-        </section>
-      ) : (
-        <section className="controls">
-          <button className="rec" onClick={() => void startRecording()}>
-            <span className="dot" />
-            Record
+          <button className="stop-big" onClick={() => void stopRecording()} disabled={stopping}>
+            {stopping ? 'saving…' : 'stop recording'}
           </button>
-          {others > 0 && (
-            <button className="link" onClick={() => setShowSessions((v) => !v)}>
-              {showSessions ? 'hide earlier gripes' : `earlier gripes · ${others}`}
-            </button>
-          )}
         </section>
+      ) : session ? null : (
+        <>
+          {!linked && (
+            <div className="linkbar">
+              <span>Not linked to a workspace yet — recordings stay on this machine.</span>
+              <button className="link" onClick={openRecorderUrl}>
+                link it →
+              </button>
+            </div>
+          )}
+          <section className="hero">
+            {shippedCard}
+            <button className="rec-hero" onClick={() => void startRecording()}>
+              <span className="dot" />
+              Record a walkthrough
+            </button>
+            <p className="hero-sub">
+              Screen + voice. Talk through what's wrong — it becomes a brief your team's agent can
+              act on.
+            </p>
+            <p className="hero-keys">alt+shift+M mark a moment · alt+shift+D draw</p>
+            {others > 0 && (
+              <button className="link" onClick={() => setShowSessions((v) => !v)}>
+                {showSessions ? 'hide earlier gripes' : `earlier gripes · ${others}`}
+              </button>
+            )}
+          </section>
+        </>
       )}
 
       {showSessions && (
@@ -752,7 +868,7 @@ export function App() {
         </div>
       )}
 
-      {session ? (
+      {session && (
         <>
           <section className="gripe">
             <input
@@ -766,47 +882,86 @@ export function App() {
             <div className="meta">
               {whisperLabel ?? (hasContent ? summary : 'recording lands here')}
             </div>
+            {!recording && (
+              <div className="takerow">
+                <button className="rec ghost" onClick={() => void startRecording()}>
+                  <span className="dot" />
+                  record another take
+                </button>
+                {others > 0 && (
+                  <button className="link" onClick={() => setShowSessions((v) => !v)}>
+                    {showSessions ? 'hide earlier gripes' : `earlier gripes · ${others}`}
+                  </button>
+                )}
+              </div>
+            )}
           </section>
           <Timeline session={session} recordings={state.recordings} />
         </>
-      ) : (
-        <div className="empty">
-          {shippedCard ?? 'Hit Record and talk through what is broken.'}
-        </div>
       )}
 
-      <div className="rule" />
-      <section className="settings">
-        <button className="settings-row" onClick={() => setShowSettings((v) => !v)}>
-          <span className="gear">⚙</span> settings
-        </button>
-        {showSettings && (
-          <SettingsBlock settings={state.settings} onPatch={patchSettings} />
-        )}
-      </section>
-
-      <footer className="foot">
-        {statusRow}
-        <button
-          className="primary"
-          disabled={!hasContent || recording || uploading}
-          title="Upload this gripe to your workspace, copy the brief, and close it"
-          onClick={() => void finish()}
-        >
-          {uploading ? 'handing it over…' : 'done'}
-        </button>
-      </footer>
+      {session && (hasContent || !linked || hasStatus) && (
+        <footer className="foot">
+          {statusRow}
+          {linked && hasContent && (
+            <>
+              <button
+                className="primary send"
+                disabled={recording || uploading}
+                title="Upload this gripe to your workspace, copy the brief, and close it"
+                onClick={() => void finish()}
+              >
+                {uploading ? 'sending…' : 'send to Handback'}
+              </button>
+              <p className="send-sub">uploads to {serverHost} · copies a brief for your agent</p>
+            </>
+          )}
+          {!linked && (
+            <div className="linkcard">
+              <strong>Link your workspace to send</strong>
+              <p>One click on the workspace page connects this recorder — no keys to paste.</p>
+              <button className="primary" onClick={openRecorderUrl}>
+                link workspace →
+              </button>
+              <button className="link" onClick={() => setShowSettings(true)}>
+                or paste a token by hand
+              </button>
+            </div>
+          )}
+        </footer>
+      )}
       {flash && <div className="flash">{flash}</div>}
     </div>
   );
 }
 
-/** Two interlocked rings, ink and cobalt — the same mark as the web app. */
+/**
+ * The return mark: out along the top in ink, a U-turn, and back in cobalt with the
+ * arrowhead landing left. Same geometry as the web app's `ReturnMark` and the
+ * extension icons — the panel must not carry a second logo.
+ */
 function Mark() {
   return (
-    <svg className="mark" viewBox="0 0 24 16" aria-hidden>
-      <circle cx="9" cy="8" r="5.2" fill="none" stroke="var(--ink)" strokeWidth="1.6" />
-      <circle cx="15" cy="8" r="5.2" fill="none" stroke="var(--cobalt)" strokeWidth="1.6" />
+    <svg className="mark" viewBox="0 0 28 20" fill="none" aria-hidden>
+      <path
+        d="M4 6.2 H18 A3.8 3.8 0 0 1 21.8 10"
+        stroke="var(--ink)"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+      />
+      <path
+        d="M21.8 10 A3.8 3.8 0 0 1 18 13.8 H8"
+        stroke="var(--cobalt)"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+      />
+      <path
+        d="M11.4 9.4 L6.2 13.8 L11.4 18.2"
+        stroke="var(--cobalt)"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
@@ -814,13 +969,19 @@ function Mark() {
 /**
  * Everything optional, in sentences. The server and token live in this browser's
  * IndexedDB and nowhere else — worth saying out loud next to a password field.
+ * The link state leads because the fields below it are the manual way round; a
+ * hand-pasted token has no workspace name to show, so pasting one clears it.
  */
 function SettingsBlock({
   settings,
   onPatch,
+  onOpenRecorder,
+  serverHost,
 }: {
   settings: Settings;
   onPatch: (patch: Partial<Settings>) => Promise<void>;
+  onOpenRecorder: () => void;
+  serverHost: string;
 }) {
   const [server, setServer] = useState(settings.serverUrl);
   const [token, setToken] = useState(settings.apiToken);
@@ -835,6 +996,28 @@ function SettingsBlock({
 
   return (
     <div className="fields">
+      {settings.apiToken ? (
+        <div className="linked">
+          <span>
+            linked to <strong>{settings.orgName || serverHost}</strong>
+          </span>
+          <span className="linked-actions">
+            <button className="link" onClick={onOpenRecorder}>
+              manage
+            </button>
+            <button className="link" onClick={() => commit({ apiToken: '', orgName: '' })}>
+              unlink
+            </button>
+          </span>
+        </div>
+      ) : (
+        <>
+          <button className="primary linkcta" onClick={onOpenRecorder}>
+            link your workspace →
+          </button>
+          <em>Or paste a server and token by hand below.</em>
+        </>
+      )}
       <label className="field">
         <span>Where your team's gripes go</span>
         <input
@@ -854,7 +1037,11 @@ function SettingsBlock({
           spellCheck={false}
           placeholder="hb_…"
           onChange={(e) => setToken(e.target.value)}
-          onBlur={() => commit({ apiToken: token })}
+          onBlur={() =>
+            // An unchanged field must not cost the workspace name — only a new
+            // token has an unknown home.
+            commit(token === settings.apiToken ? {} : { apiToken: token, orgName: '' })
+          }
           onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
         />
         <em>It stays in this browser on this machine — nothing else reads it.</em>

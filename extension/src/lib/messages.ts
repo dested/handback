@@ -86,6 +86,25 @@ export type Broadcast =
   // The mark hotkey fired. It's a command, so only the worker hears it.
   | { type: 'recording:mark' };
 
+/** What a Handback web page may send via chrome.runtime.sendMessage(EXTENSION_ID, …). */
+export type ExternalRequest =
+  | { type: 'handback:ping' }
+  | { type: 'handback:link'; apiToken: string; orgName?: string };
+
+/** Answer to handback:ping — enough for the page to render "installed" and "linked". */
+export interface ExternalPong {
+  ok: true;
+  version: string;
+  linked: boolean;
+  /** The workspace this extension currently uploads to. */
+  serverUrl: string;
+}
+
+export interface ExternalLinkResult {
+  ok: boolean;
+  error?: string;
+}
+
 export function send<T = unknown>(message: Request): Promise<T> {
   return chrome.runtime.sendMessage(message) as Promise<T>;
 }

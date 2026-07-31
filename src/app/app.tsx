@@ -1,11 +1,12 @@
 // The inbox — the main workspace list. Three states live here: first run (no
-// org yet), the filtered gripe list, and the empty "push your first gripe"
-// guide. Status colors are fixed by ui.md: open = cobalt, in_review = violet,
+// org yet), the filtered gripe list, and the empty "nothing here yet" guide.
+// Status colors are fixed by ui.md: open = cobalt, in_review = violet,
 // resolved = green.
 
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
+import { ArrowRight, X } from 'lucide-react'
 import { Button } from '~/components/ui/button'
 import { Input } from '~/components/ui/input'
 import { Label } from '~/components/ui/label'
@@ -64,6 +65,7 @@ function Inbox({ orgId }: { orgId: string }) {
 
   return (
     <div>
+      <ConnectBanner orgId={orgId} />
       <div className="mb-6 flex flex-wrap items-center gap-4">
         <h1 className="font-display text-3xl font-semibold">Inbox</h1>
         <div className="ml-auto flex flex-wrap items-center gap-2">
@@ -211,40 +213,95 @@ function FirstRun() {
   )
 }
 
-/** Org exists, inbox is genuinely empty: how to get a gripe in here. */
-function FirstGripeGuide() {
-  // window is absent during SSR; render a placeholder host, then fill it in.
-  const [origin, setOrigin] = useState('https://your-handback-host')
-  useEffect(() => setOrigin(window.location.origin), [])
+/**
+ * The one thing worth interrupting the inbox for: an inbox full of gripes is
+ * useless if the person who fixes them can't reach it. Shown until an agent has
+ * actually called in (`lastUsedAt`), then gone for good — and dismissible in
+ * the meantime, because a banner you can't close is a banner people learn to
+ * hate. Guests can't hold tokens, so they never see it.
+ */
+const DISMISS_KEY = 'handback.connectBannerDismissed'
 
+function ConnectBanner({ orgId }: { orgId: string }) {
+  const trpc = useTRPC()
+  const connection = useQuery(trpc.tokens.connection.queryOptions({ orgId }))
+  // localStorage is unavailable during SSR; assume not-dismissed and correct on
+  // mount, so the server and first client render agree.
+  const [dismissed, setDismissed] = useState(false)
+  useEffect(() => setDismissed(localStorage.getItem(DISMISS_KEY) === '1'), [])
+
+  const data = connection.data
+  if (!data || !data.canConnect || data.lastUsedAt || dismissed) return null
+
+  return (
+    <div className="border-cobalt/30 bg-cobalt-wash mb-6 flex flex-wrap items-center gap-x-6 gap-y-3 rounded-xl border p-5">
+      <div className="min-w-56 flex-1">
+        <p className="font-display text-lg font-semibold">
+          Are you the engineer who's going to fix these?
+        </p>
+        <p className="text-muted-foreground mt-1 text-sm">
+          Connect Claude Code and it can read a gripe end to end — narration, keyframes, console
+          errors — then hand the fix back for sign-off. One command, about a minute.
+        </p>
+      </div>
+      <Link
+        to="/connect"
+        className="bg-primary text-primary-foreground inline-flex shrink-0 items-center gap-2 rounded-md px-4 py-2 text-sm font-medium hover:opacity-90">
+        Connect an agent
+        <ArrowRight className="size-4" />
+      </Link>
+      <button
+        type="button"
+        aria-label="Dismiss"
+        className="text-muted-foreground hover:text-foreground shrink-0"
+        onClick={() => {
+          localStorage.setItem(DISMISS_KEY, '1')
+          setDismissed(true)
+        }}>
+        <X className="size-4" />
+      </button>
+    </div>
+  )
+}
+
+/** Org exists, inbox is genuinely empty: the two halves of getting one here. */
+function FirstGripeGuide() {
   return (
     <div className="bg-card border-border max-w-2xl rounded-xl border p-8 shadow-sm">
       <h2 className="font-display text-xl font-semibold">No gripes yet.</h2>
-      <ol className="mt-6 space-y-5 text-sm">
-        <li className="grid grid-cols-[1.5rem_1fr] gap-3">
-          <span className="text-muted-foreground font-mono">1.</span>
-          <span>
-            Create an API token under{' '}
-            <Link to="/team" className="text-primary underline underline-offset-4">
-              Team → API tokens
-            </Link>
-            .
-          </span>
-        </li>
-        <li className="grid grid-cols-[1.5rem_1fr] gap-3">
-          <span className="text-muted-foreground font-mono">2.</span>
-          <div className="min-w-0">
-            <p>Push a recorded gripe folder:</p>
-            <pre className="border-border bg-muted/60 mt-2 overflow-x-auto rounded-md border p-3 font-mono text-xs">
-              HANDBACK_TOKEN=hb_… bun cli/push.ts &lt;gripe-folder&gt; --server {origin}
-            </pre>
-          </div>
-        </li>
-        <li className="grid grid-cols-[1.5rem_1fr] gap-3">
-          <span className="text-muted-foreground font-mono">3.</span>
-          <span>It appears here, filed by origin.</span>
-        </li>
-      </ol>
+      <p className="text-muted-foreground mt-2 text-sm">
+        A gripe is a recorded walkthrough of something being wrong. Two sides to set up: the person
+        recording, and the agent fixing.
+      </p>
+
+      <div className="mt-6 space-y-6">
+        <section>
+          <h3 className="text-sm font-semibold">Get one in</h3>
+          <p className="text-muted-foreground mt-1 text-sm">
+            Install the Handback recorder — a Chrome extension. Record a walkthrough of the problem
+            and it uploads straight to this inbox.
+          </p>
+          <Link
+            to="/recorder"
+            className="text-primary mt-3 inline-flex items-center gap-1.5 text-sm font-medium underline underline-offset-4">
+            Set up the recorder
+            <ArrowRight className="size-3.5" />
+          </Link>
+        </section>
+
+        <section className="border-border border-t pt-5">
+          <h3 className="text-sm font-semibold">Get one out</h3>
+          <p className="text-muted-foreground mt-1 text-sm">
+            Connect a coding agent now and gripes are actionable the moment they land.
+          </p>
+          <Link
+            to="/connect"
+            className="text-primary mt-3 inline-flex items-center gap-1.5 text-sm font-medium underline underline-offset-4">
+            Connect Claude Code
+            <ArrowRight className="size-3.5" />
+          </Link>
+        </section>
+      </div>
     </div>
   )
 }

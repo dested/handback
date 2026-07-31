@@ -2,6 +2,44 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-07-30 — /recorder one-click extension link + panel redesign
+Asked: "the extension has to be easier to link… deep link it after install, no generating keys.
+And the panel UI is pretty bad — record too small, done confusing." Done (3 Opus agents + Fable):
+**stable extension ID** (`key` in manifest → `gmggnebbenlmpakojgocnjfcnpmifdci`) +
+`externally_connectable` (handback.dev, localhost) + background `onMessageExternal`
+(ping/link — serverUrl always `sender.origin`) + fresh install opens `/recorder`. **/recorder
+page** (nav: Recorder): install step (Web Store button behind a `STORE_URL` constant, zip +
+load-unpacked until then), live "extension installed" ping indicator, one-click **Link
+{workspace}** (mints `hb_` token → handshake, no copy-paste), guest notice, CLI aside; inbox
+empty state now points there instead of printing the CLI. **Panel redesign**: hero Record button,
+full-width stop, "done" → "send to Handback" (+ uploads-to sub-line), unlinked state links to
+/recorder instead of demanding a token, human-readable upload errors (status-mapped line +
+details toggle), settings behind a header gear with linked-to/unlink, return mark replaces the
+old two-rings logo. Fixed in review: chrome.runtime absence ≠ not-Chrome (UA detect), token-blur
+wiping orgName. e2e: `handback_test` needed `db:push` (pre-existing; User.isAdmin), spec updated,
+baselines re-shot, 4/4 green; both typechecks + extension build green; panel states eyeballed in
+the preview harness.
+Touched: extension/public/manifest.json, extension/src/{background/index,lib/{messages,types},sidepanel/{App.tsx,panel.css}},
+src/app/{recorder,connect,app,routes,layout}.tsx, src/components/setup-step.tsx, e2e/smoke.spec.ts.
+
+## 2026-07-30 — hosted MCP at /mcp + the /connect page ("are you the engineer who fixes these?")
+Asked: "how can you access this — is there an mcp server that is spun up?" → then "this needs to
+be made crystal clear right now on the webpage… a whole thing on how to link your claude code to
+handback, with api token generation and everything… openai codex coming soon." Done:
+**hosted MCP** (`server/mcp.ts`) — StreamableHTTP at `/mcp`, stateless, `hb_` bearer auth, the
+same three tools, so setup is one line with no clone and no bun (see decisions.md). Read side
+extracted to **`server/gripes-api.ts`** and the formatter to **`server/mcp-format.ts`**, both now
+shared by `ingest.ts` and both MCP servers. **`/connect`** — four numbered steps in the editorial
+style: mint a token inline, a command block with that token already interpolated, a live
+"connected" indicator polling `tokens.connection`, and a paste-in prompt for working a gripe;
+Claude Code / OpenAI Codex ("soon") picker, guest notice, tool reference. **Inbox** gets a
+dismissible "Are you the engineer who's going to fix these?" banner that disappears once a token
+has actually been used, and its empty state now teaches both halves (get one in / get one out).
+Nav gained Connect. Verified live: initialize + tools/list + list_gripes over HTTP, 401 on a bad
+token, 405 on GET; token minted in-browser and the command filled itself in. typecheck green.
+Touched: server/{mcp,gripes-api,mcp-format,ingest,router}.ts, server.ts, cli/mcp.ts,
+src/app/{connect,app,routes,layout}.tsx, e2e/smoke.spec.ts, cliffnotes.md, decisions.md.
+
 ## 2026-07-30 — member access editor, team as a paid switch, and a real /admin
 Asked: "change project/projects assigned to each member… team is a paid feature, but I want to
 turn it on for particular users, via the admin (I need a full admin)." Done (2 Opus agents +

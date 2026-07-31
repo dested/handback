@@ -35,11 +35,14 @@ the Gripe extension.
 - **Extension:** `bun run build:extension` (root) or `cd extension && npm run build` →
   load-unpacked `extension/dist`;
   `npm run preview` → http://localhost:8777/gallery.html (layout harness, no Chrome needed)
-- **MCP:** `claude mcp add handback --env HANDBACK_TOKEN=hb_… --env HANDBACK_SERVER=<url> -- bun <repo>/cli/mcp.ts`
+- **MCP (the real one):** `claude mcp add --transport http handback https://handback.dev/mcp --header "Authorization: Bearer hb_…"`
+  — hosted, nothing installed; **/connect** in the app walks a user through it and mints the token
+  inline. Local stdio fallback: `claude mcp add handback --env HANDBACK_TOKEN=hb_… --env HANDBACK_SERVER=<url> -- bun <repo>/cli/mcp.ts`
 - **GitHub:** dested/handback (private; renamed from dested/inloop — redirect holds). **Deploy:
-  still live at https://inloop.dested.com until the portal re-wire** — Drydock, auto-deploys on
-  push to `main`; target domain **handback.dev** (checklist in
-  `plans/2026-07-30-handback-rename.md`).
+  https://handback.dev is live and serving** (`/healthz` 200, verified 2026-07-30 night);
+  `inloop.dested.com` no longer answers — its TLS handshake fails, so treat it as gone. Drydock,
+  auto-deploys on push to `main`. The rest of the re-wire checklist (S3 provisioning, SSM, cleanup)
+  is still Sal's — `plans/2026-07-30-handback-rename.md`.
 
 ## Stack
 
@@ -65,8 +68,12 @@ server/
   features.ts           entitlements: isPlatformAdmin (User.isAdmin OR ADMIN_EMAILS env),
                         orgHasFeature('team') checked at the org's OWNER, requireAdmin
   router.ts             THE tRPC API: orgs, invites, tokens, projects, gripes
-  ingest.ts             Token-authed REST (Bearer hb_…): two-phase upload + agent reads,
-                        size caps + per-org quota, /transcribe and /polish
+  ingest.ts             Token-authed REST (Bearer hb_…): two-phase upload, size caps + per-org
+                        quota, /transcribe and /polish; read side delegates to gripes-api
+  gripes-api.ts         THE agent-facing surface: token auth + list/get/setStatus. Shared by
+                        ingest.ts AND both MCP servers so they can't drift
+  mcp.ts                Hosted MCP at /mcp — StreamableHTTP, stateless, hb_ bearer auth
+  mcp-format.ts         Pure formatter for a gripe brief; shared with cli/mcp.ts
   storage.ts            S3: presignPut/Get, getObjectText, deletePrefix, key layout, isSafePath
   transcribe.ts         speech-to-text via Groq whisper-large-v3-turbo; segments in ms
   polish.ts             transcript cleanup via claude-haiku-4-5 — text only, timings untouched
@@ -75,20 +82,27 @@ server/
   prisma.ts / logger.ts PrismaClient singleton · ANSI request logger
 cli/
   push.ts               `inloop push` — walks a gripe folder, declare → PUT xN → finalize
-  mcp.ts                stdio MCP server: list_gripes / get_gripe / set_gripe_status
+  mcp.ts                stdio MCP server — the LOCAL fallback; prod uses server/mcp.ts at /mcp
   dev-bootstrap.ts      idempotent dev seed: user (admin + team) + org + fresh API token (prints it)
   make-admin.ts         promote an account to platform admin by email (dev; prod uses ADMIN_EMAILS)
 prisma/schema.prisma    better-auth models + Org/Membership/Invite/Project/Gripe/Take/GripeFile/ApiToken
 src/
   app/
     routes.tsx          All routes + loaders (appLoader guards session, prefetches orgs.mine)
-    layout.tsx          Shell: marketing chrome vs app chrome (org switcher, Inbox/Projects/Team)
+    layout.tsx          Shell: marketing chrome vs app chrome (org switcher, Inbox/Projects/
+                        Team/Connect)
     home.tsx            Landing page (assembles src/components/landing/*)
     sign-in/up.tsx      Auth cards (better-auth client flows)
     app.tsx             InboxPage: first-run org creation, filters, gripe list
     gripe.tsx           GripePage: the viewer (assembles src/components/viewer/*)
     projects.tsx        Projects list + create (origin hints)
     team.tsx            Members / Invites / API tokens tabs
+    connect.tsx         /connect — THE agent onboarding: mint a token, one copy-paste
+                        `claude mcp add` with the token baked in, live "connected" check,
+                        disconnect instructions. Codex is a "soon" tab.
+    recorder.tsx        /recorder — THE recorder onboarding: install (Web Store button behind
+                        a STORE_URL constant, zip/load-unpacked until then), live install ping,
+                        one-click Link (token minted + handed over, nothing pasted)
     join.tsx            /join/:inviteId — peek + accept
     admin.tsx           /admin — platform admin: stats, user search, team/admin toggles
     forgot-password.tsx /forgot-password — same answer whether or not the account exists
@@ -97,6 +111,7 @@ src/
     terms.tsx           /terms — alpha status, recording consent, Arizona law
   components/
     logo.tsx            ReturnMark + Wordmark — THE identity (the returning stroke), never redraw
+    setup-step.tsx      the numbered editorial Step shared by /connect and /recorder
     legal.tsx           LegalPage/Section/Terms/Notice — shared chrome for /privacy + /terms
     ui/                 button, card, input, label (shadcn new-york style, no asChild)
     landing/            hero, how-it-works, distill, gripe-manifest, agent-view, pricing,
@@ -139,11 +154,14 @@ extension/              Inloop Recorder — the Chrome MV3 extension (own npm wo
 | `/app` | Inbox (gripe list, first-run org creation) | `src/app/app.tsx` |
 | `/gripes/:gripeId` | The viewer | `src/app/gripe.tsx` |
 | `/projects` · `/team` | Projects · Members/Invites/Tokens | `src/app/{projects,team}.tsx` |
+| `/connect` | Connect a coding agent (token + `claude mcp add` + disconnect) | `src/app/connect.tsx` |
+| `/recorder` | Install + one-click-link the extension (detects install, mints token, handshake) | `src/app/recorder.tsx` |
 | `/admin` | Platform admin (admins only; nav link hidden otherwise) | `src/app/admin.tsx` |
 | `/dashboard` | redirect → /app (legacy) | `routes.tsx` |
 | `/healthz` | DB probe | `server.ts` |
 | `/api/auth/*` · `/api/trpc/*` | better-auth · tRPC | `server.ts` |
 | `/api/ingest/*` | Token-authed REST (below) | `server/ingest.ts` |
+| `/mcp` | **Hosted MCP** (POST only, `hb_` bearer). What agents connect to | `server/mcp.ts` |
 
 ### /api/ingest (Bearer `hb_…` token; org comes from the token)
 
@@ -183,13 +201,16 @@ IAM user `inloop-app` (us-west-2, account 114394156384, profile `dested`) still 
 slated for deletion. Everything moves via presigned URLs (PUT 1h, GET 1h) — `gripes.get` presigns
 every file in one call so the viewer never round-trips per frame.
 
-## Deploy (Drydock — MID-RENAME: old `inloop` project still serving)
+## Deploy (Drydock — handback.dev is serving; re-wire partly done)
 
-**Transition state (2026-07-30):** prod still runs as Drydock project `inloop` at
-https://inloop.dested.com; the repo now says Handback everywhere. Sal's portal checklist to move
-it to **handback.dev** (zone + delegation, project recreate, SSM env, S3 provisioning) lives in
-`plans/2026-07-30-handback-rename.md`. `Dockerfile`/`drydock.yaml`/`.github/workflows/drydock.yml`
-still carry inloop names on purpose — Drydock regenerates all three on re-wire.
+**State (2026-07-30 night):** **https://handback.dev answers** — `/healthz` returns 200 — and
+`inloop.dested.com` no longer completes a TLS handshake. So the domain half of the move has
+landed. What has NOT been re-verified from this repo: which Drydock project/db name is actually
+behind it, and whether S3 provisioning happened (see Storage — if it didn't, uploads still 403).
+Check the portal before trusting either. The rest of Sal's checklist (zone + delegation, project
+recreate, SSM env, cleanup) lives in `plans/2026-07-30-handback-rename.md`.
+`Dockerfile`/`drydock.yaml`/`.github/workflows/drydock.yml` may still carry inloop names — Drydock
+regenerates all three on re-wire, so don't hand-fix them.
 
 Deployed by **Drydock** (`G:\code\drydock`, local portal at http://localhost:4400) onto the shared
 ARM EC2 box: Caddy auto-TLS, shared Postgres container, Route53 A record → the box's EIP
@@ -227,6 +248,19 @@ reaches the container on a plain push.
   contain `<pre>` and mono lines that never wrap — a missing `min-w-0` drags the whole page
   wider than a phone (doc `scrollWidth` 510 at a 390 viewport). Re-check `scrollWidth` at 390
   after touching any landing grid.
+- **Two MCP servers, one implementation.** `server/mcp.ts` (hosted, `/mcp`) and `cli/mcp.ts`
+  (stdio) both go through `server/gripes-api.ts` + `server/mcp-format.ts`. Change what an agent
+  sees in those two files, never in one server. `/api/ingest`'s read routes are thin wrappers over
+  the same functions.
+- **`/mcp` is stateless and POST-only.** Fresh `McpServer` + transport per request
+  (`sessionIdGenerator: undefined`, `enableJsonResponse: true`); GET/DELETE answer 405. Don't add
+  a tool that streams or sends server-initiated notifications without revisiting that — there's no
+  session to send them on. It's mounted before the SSR catch-all on purpose; move it after and a
+  JSON-RPC client gets a page of HTML.
+- **The inbox's connect banner is gated on `tokens.connection.lastUsedAt`**, which
+  `authenticateToken` stamps on every ingest/MCP call. So "has an agent connected?" means "has a
+  token ever completed a request", not "does a token exist". Guests get `canConnect: false` and
+  never see it.
 - **`./server/*` never imports into `src/*`** except `import type` (starter rule; leaks secrets).
 - **tRPC returns must be JSON-safe** — Dates → ISO strings at the procedure, `bytes` BigInt →
   Number, or SSR/hydration markup diverges.
@@ -288,6 +322,20 @@ reaches the container on a plain push.
   polished (`report.ts` → `engineName`) because a reader is deciding how far to trust the words.
 - **Extension uploads with the panel's saved `hb_` token** (settings → serverUrl+apiToken,
   defaults to https://handback.dev) through the same two-phase `/api/ingest` flow as the CLI.
+- **The extension's ID is pinned** by the `key` in `manifest.json` →
+  `gmggnebbenlmpakojgocnjfcnpmifdci`, identical unpacked and (on first upload) in the Web Store.
+  `/recorder` deep-links through it: page → `chrome.runtime.sendMessage(ID, handback:ping|link)`,
+  answered by `onMessageExternal` in the background, which stamps `serverUrl` from
+  **`sender.origin`** — never trust a URL in the payload. `externally_connectable` allows only
+  handback.dev + localhost; a new origin (staging etc.) must be added there or the page can't see
+  the extension at all. `chrome.runtime` is *absent* on the page until a matching extension is
+  installed — absence means "not installed", not "not Chrome".
+- **When the Web Store listing lands, set `STORE_URL`** in `src/app/recorder.tsx` — the zip/
+  load-unpacked instructions collapse behind it automatically.
+- **The e2e DB needs its own `db:push`.** `handback_test` is truncated, never migrated, by the
+  suite — after any schema change run
+  `DATABASE_URL=postgres://…/handback_test bunx prisma db push` or sign-up 500s with a
+  ColumnNotFound that surfaces as a blank "Sign up failed".
 
 ## Status
 
@@ -326,7 +374,18 @@ reaches the container on a plain push.
   `extension/src/sidepanel/polish.ts` — "handbag" → "Handback", "cores" → "CORS", verified against
   real mangled speech). Privacy page updated in the same pass: Anthropic and Resend named as
   processors. Web Store listing copy written in full.
-- **Next** — Sal's Drydock/DNS checklist in the rename plan (zone, project, S3 via
+- **Done (2026-07-30, night, later still)** — **the agent onboarding path**: a hosted MCP server at
+  **`/mcp`** (`server/mcp.ts` — StreamableHTTP, stateless, `hb_` bearer) so connecting an agent is
+  one copy-paste line with no clone and no bun, and **`/connect`** (`src/app/connect.tsx`) — mint a
+  token inline, get a command with that token already in it, watch a live "connected" indicator,
+  and read how to disconnect (remove the server ≠ revoke the token). Inbox gained a dismissible
+  "Are you the engineer who's going to fix these?" banner that retires itself once a token has
+  actually been used. Read side refactored into `server/gripes-api.ts` + `server/mcp-format.ts`,
+  shared by REST and both MCP servers. Verified against a live server: initialize, tools/list,
+  a real `list_gripes` call, 401 on a bad token, 405 on GET.
+- **Next** — **deploy, then re-test the loop**: `/mcp` and `/connect` only exist locally until the
+  next push to `main`, so the command `/connect` prints for handback.dev 404s until then. Sal's
+  Drydock/DNS checklist in the rename plan (zone, project, S3 via
   `G:\code\drydock\plans\2026-07-30-s3-buckets.md`), load-unpacked QA of the extension, then **the
   go-live blockers in `plans/2026-07-30-go-live.md`** (Chrome Web Store submission first — it's
   the only queue we don't control), then the strategy backlog in

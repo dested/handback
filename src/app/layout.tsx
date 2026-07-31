@@ -15,7 +15,7 @@ import { useTRPC } from '~/lib/trpc'
 import { cn } from '~/lib/utils'
 import type { RootLoaderData } from './routes'
 
-const APP_PREFIXES = ['/app', '/gripes', '/team', '/projects', '/admin']
+const APP_PREFIXES = ['/app', '/gripes', '/team', '/projects', '/recorder', '/connect', '/admin']
 
 export function Layout() {
   const data = useRouteLoaderData('root') as RootLoaderData | undefined
@@ -116,6 +116,12 @@ function AppHeader({ email }: { email: string }) {
           </NavLink>
           <NavLink to="/team" className={tab}>
             Team
+          </NavLink>
+          <NavLink to="/recorder" className={tab}>
+            Recorder
+          </NavLink>
+          <NavLink to="/connect" className={tab}>
+            Connect
           </NavLink>
           {adminStatus.data?.isAdmin && (
             <NavLink to="/admin" className={tab}>

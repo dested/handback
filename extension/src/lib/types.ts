@@ -163,6 +163,8 @@ export interface Settings {
   serverUrl: string;
   /** Bearer token (hb_…) minted under Team → API tokens. Stored locally only. */
   apiToken: string;
+  /** Workspace name the link handshake reported — display only; '' when the token was pasted by hand. */
+  orgName: string;
   /**
    * Transcribe in this browser instead of on the workspace. Slower by minutes
    * and it spins the fan, but no audio ever leaves the machine — the answer for
@@ -176,6 +178,7 @@ export const DEFAULT_SETTINGS: Settings = {
   lang: '',
   serverUrl: 'https://handback.dev',
   apiToken: '',
+  orgName: '',
   onDeviceTranscription: false,
 };
 

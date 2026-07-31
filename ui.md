@@ -79,9 +79,15 @@ Fonts inside an extension): `ui-sans-serif` body, `ui-monospace` for
 timestamps/keycaps/transcript times. Tokens are duplicated as plain CSS custom
 properties in `extension/src/sidepanel/styles.css` (no Tailwind there).
 
-- **Panel** (`panel.css`): paper ground, white cards, cobalt `record`/`done`
-  buttons, hairline rules between sections. The review callout is a
-  cobalt-wash block; "looks right" confirm is the green approve outline.
+- **Panel** (`panel.css`): paper ground, white cards, hairline rules. One big
+  cobalt action per state: idle = the full-width `Record a walkthrough` hero,
+  recording = full-width `stop recording`, review = `send to Handback` (46px,
+  with a mono "uploads to <host>" sub-line). "Record another take" is the cobalt
+  *outline* ghost — never louder than send. Settings live behind the header
+  gear and lead with the linked-to line; unlinked states point at `/recorder`
+  (cobalt-wash callout), they never demand a pasted token. Upload errors are a
+  white card with a 2px danger left rule: mono `UPLOAD FAILED` head, one human
+  sentence, `try again`/`details` links — never a raw server body.
 - **Timeline** (`timeline.css`): white track on paper, mono ruler, cobalt mark
   carets and selection, dashed hairline take seams, thumbnail filmstrip with
   stamped `take·m:ss` labels, voice lane as ink-gray density bars.

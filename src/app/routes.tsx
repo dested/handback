@@ -6,6 +6,7 @@ import type { Session } from '../../server/auth'
 import type { AppRouter } from '../../server/router'
 import { AdminPage } from './admin'
 import { InboxPage } from './app'
+import { ConnectPage } from './connect'
 import { RouteErrorBoundary } from './error-boundary'
 import { GripePage } from './gripe'
 import { HomePage } from './home'
@@ -15,6 +16,7 @@ import { ForgotPasswordPage } from './forgot-password'
 import { PrivacyPage } from './privacy'
 import { ResetPasswordPage } from './reset-password'
 import { ProjectsPage } from './projects'
+import { RecorderPage } from './recorder'
 import { SignInPage } from './sign-in'
 import { SignUpPage } from './sign-up'
 import { TeamPage } from './team'
@@ -85,6 +87,8 @@ export const routes: RouteObject[] = [
       { path: 'terms', Component: TermsPage },
       { path: 'app', Component: InboxPage, loader: appLoader },
       { path: 'gripes/:gripeId', Component: GripePage, loader: appLoader },
+      { path: 'connect', Component: ConnectPage, loader: appLoader },
+      { path: 'recorder', Component: RecorderPage, loader: appLoader },
       { path: 'projects', Component: ProjectsPage, loader: appLoader },
       { path: 'team', Component: TeamPage, loader: appLoader },
       { path: 'admin', Component: AdminPage, loader: appLoader },

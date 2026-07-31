@@ -357,6 +357,29 @@ const tokensRouter = router({
     }))
   }),
 
+  /**
+   * "Has an agent actually reached us yet?" — what /connect polls and what
+   * decides whether the inbox still nags you to connect one. `lastUsedAt` is
+   * stamped by `authenticateToken` on every ingest and MCP call, so a non-null
+   * value here means a real agent completed a real request. Never throws for a
+   * guest; they can't hold tokens, they just get `canConnect: false`.
+   */
+  connection: protectedProcedure
+    .input(z.object({ orgId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      const access = await requireMembership(ctx.session.user.id, input.orgId)
+      if (access.projectIds) return { canConnect: false, tokenCount: 0, lastUsedAt: null }
+      const rows = await prisma.apiToken.findMany({
+        where: { orgId: input.orgId, userId: ctx.session.user.id, revokedAt: null },
+        select: { lastUsedAt: true },
+      })
+      const lastUsed = rows.reduce<Date | null>(
+        (latest, r) => (r.lastUsedAt && (!latest || r.lastUsedAt > latest) ? r.lastUsedAt : latest),
+        null
+      )
+      return { canConnect: true, tokenCount: rows.length, lastUsedAt: iso(lastUsed) }
+    }),
+
   /** The raw token is returned exactly once, at creation. */
   create: protectedProcedure
     .input(z.object({ orgId: z.string(), name: z.string().trim().min(1).max(80) }))

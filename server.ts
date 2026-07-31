@@ -8,6 +8,7 @@ import { auth } from './server/auth'
 import { env } from './server/env'
 import { ingestRouter } from './server/ingest'
 import { formatError, log, requestLogger, startupBanner } from './server/logger'
+import { mcpRouter } from './server/mcp'
 import { prisma } from './server/prisma'
 import { appRouter } from './server/router'
 import { createContext } from './server/trpc'
@@ -53,6 +54,12 @@ async function createServer() {
   // Token-authed upload surface for the CLI / extension / MCP. Parses its own
   // JSON bodies; keep it after the auth mount, which needs the raw stream.
   app.use('/api/ingest', ingestRouter)
+
+  // The hosted MCP server. Deliberately at the root and not under /api — this
+  // URL is copy-pasted by hand into `claude mcp add`, and it has to be short
+  // enough to read back over someone's shoulder. Must be mounted before the SSR
+  // catch-all, which would otherwise answer a JSON-RPC client with HTML.
+  app.use('/mcp', mcpRouter)
 
   app.use(
     '/api/trpc',
@@ -153,7 +160,7 @@ async function createServer() {
       port: PORT,
       isProd,
       databaseUrl: env.DATABASE_URL,
-      routes: ['/', '/sign-in', '/sign-up', '/dashboard', '/healthz', '/api/trpc', '/api/auth'],
+      routes: ['/', '/sign-in', '/sign-up', '/connect', '/healthz', '/api/trpc', '/mcp'],
     })
   })
 }

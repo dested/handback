@@ -2,6 +2,43 @@
 
 > ADR-lite: what was decided, why, what was rejected. Append-only.
 
+## 2026-07-30 — The recorder links by handshake, not by pasted token
+**Why:** installing the extension ended at a settings pane asking for a server URL and an `hb_`
+token from Team → API tokens — the recorder's whole audience is the person *least* likely to
+tolerate that. The extension now pins its identity with a `key` in `manifest.json` (ID
+`gmggnebbenlmpakojgocnjfcnpmifdci`, same unpacked and in the Web Store — the store keeps a
+manifest-key ID on first upload) and declares `externally_connectable` for `https://handback.dev`
++ `http://localhost`. The new **/recorder** page pings that ID to detect the install live, mints a
+token server-side on one click, and hands it over via `chrome.runtime.sendMessage`; the
+background stamps `serverUrl` from **`sender.origin`**, never from the payload, so a matched page
+can only ever link the workspace it is. Fresh installs open `/recorder` themselves
+(`onInstalled`), closing the loop from either end. Manual server+token fields survive in the
+panel's settings as the dev/edge path.
+**Rejected:** keeping token-paste as the primary flow (the friction this exists to kill); a
+custom protocol/deep-link URL (extensions can't register one); reading the page's session cookie
+from the extension (silent auth a user never sees — the click on /recorder *is* the consent);
+content-script-based handshake on handback.dev (needs host permissions on our own site and is
+invisible to the "is it installed?" check `externally_connectable` gives for free).
+
+## 2026-07-30 — The MCP server is hosted at `/mcp`; stdio becomes the fallback
+**Why:** the setup instructions were the product's real bottleneck. Connecting an agent meant
+`claude mcp add handback -- bun <repo>/cli/mcp.ts` — which requires cloning a private repo and
+having bun, so the only person who could ever follow it was someone who already had the source.
+The person who fixes a gripe is usually not the person who deployed Handback. Handback is already
+an HTTP server, so it now speaks MCP directly: `StreamableHTTPServerTransport` mounted at `/mcp`,
+authed by the same `hb_` bearer token as `/api/ingest`, and setup collapses to one copy-paste line
+with nothing installed. **Stateless** (`sessionIdGenerator: undefined`, fresh McpServer per POST):
+a session id would pin a client to one process, and this runs as a single ECS service that is
+replaced on every deploy — a promise we can't keep. `enableJsonResponse: true` so replies are
+plain JSON, not an SSE stream held open through Caddy; none of the three tools stream. Both
+servers call one implementation (`server/gripes-api.ts`) so they can't drift.
+**Rejected:** publishing an npm `handback-mcp` package for `npx` (a release pipeline and a version
+skew problem to solve a problem HTTP doesn't have); OAuth on the MCP endpoint (the `hb_` token
+model already exists, is revocable, and is what the CLI and extension use — a second auth system
+for one endpoint is not worth it); deleting `cli/mcp.ts` (still the right tool against a local dev
+server, and for anyone who'd rather their agent talk to a process they can read); stateful
+sessions (see above).
+
 ## 2026-07-30 — Renamed to "Handback" at handback.dev (supersedes 2026-07-29 "Named Inloop")
 **Why:** Sal bought handback.dev and called the rename same-day. The name states the product's
 moment more precisely than the loop metaphor: the agent does the work and *hands it back* for a
