@@ -57,10 +57,13 @@ server.ts               Express entry: /healthz, auth, ingest, tRPC, vite/SSR, 4
 server/
   env.ts                zod env: DATABASE_URL, BETTER_AUTH_*, AWS_REGION, S3_BUCKET, AWS keys,
                         GROQ_API_KEY / ANTHROPIC_API_KEY / RESEND_API_KEY + EMAIL_FROM (all
-                        optional — each unset one disables its feature, nothing crashes)
+                        optional — each unset one disables its feature, nothing crashes),
+                        ADMIN_EMAILS (comma-separated bootstrap platform admins)
   auth.ts               better-auth: email+password, autoSignIn, reset/verify email, rate limits
   trpc.ts               context (session from headers) + public/protectedProcedure
-  membership.ts         requireMembership(user, org, atLeast) role gate + slugify
+  membership.ts         requireMembership(user, org, atLeast) → Access{role, projectIds} + slugify
+  features.ts           entitlements: isPlatformAdmin (User.isAdmin OR ADMIN_EMAILS env),
+                        orgHasFeature('team') checked at the org's OWNER, requireAdmin
   router.ts             THE tRPC API: orgs, invites, tokens, projects, gripes
   ingest.ts             Token-authed REST (Bearer hb_…): two-phase upload + agent reads,
                         size caps + per-org quota, /transcribe and /polish
@@ -73,7 +76,8 @@ server/
 cli/
   push.ts               `inloop push` — walks a gripe folder, declare → PUT xN → finalize
   mcp.ts                stdio MCP server: list_gripes / get_gripe / set_gripe_status
-  dev-bootstrap.ts      idempotent dev seed: user + org + fresh API token (prints it)
+  dev-bootstrap.ts      idempotent dev seed: user (admin + team) + org + fresh API token (prints it)
+  make-admin.ts         promote an account to platform admin by email (dev; prod uses ADMIN_EMAILS)
 prisma/schema.prisma    better-auth models + Org/Membership/Invite/Project/Gripe/Take/GripeFile/ApiToken
 src/
   app/
@@ -86,6 +90,7 @@ src/
     projects.tsx        Projects list + create (origin hints)
     team.tsx            Members / Invites / API tokens tabs
     join.tsx            /join/:inviteId — peek + accept
+    admin.tsx           /admin — platform admin: stats, user search, team/admin toggles
     forgot-password.tsx /forgot-password — same answer whether or not the account exists
     reset-password.tsx  /reset-password?token=… — the link better-auth emails
     privacy.tsx         /privacy — what's collected, where it lives, subprocessors
@@ -134,6 +139,7 @@ extension/              Inloop Recorder — the Chrome MV3 extension (own npm wo
 | `/app` | Inbox (gripe list, first-run org creation) | `src/app/app.tsx` |
 | `/gripes/:gripeId` | The viewer | `src/app/gripe.tsx` |
 | `/projects` · `/team` | Projects · Members/Invites/Tokens | `src/app/{projects,team}.tsx` |
+| `/admin` | Platform admin (admins only; nav link hidden otherwise) | `src/app/admin.tsx` |
 | `/dashboard` | redirect → /app (legacy) | `routes.tsx` |
 | `/healthz` | DB probe | `server.ts` |
 | `/api/auth/*` · `/api/trpc/*` | better-auth · tRPC | `server.ts` |
@@ -238,8 +244,12 @@ reaches the container on a plain push.
 - **Guest scoping is enforced in `requireMembership`** (server/membership.ts): it returns
   `Access { role, projectIds }` (`null` = whole workspace). Any NEW tRPC procedure returning
   org data must respect `access.projectIds` (`canSeeGripe` / `requireOrgScope`) or guests leak.
-  `hb_` tokens are org-wide, so guests can't mint them, and `orgs.removeMember` revokes the
-  target's tokens.
+  `hb_` tokens are org-wide, so guests can't mint them, and both `orgs.removeMember` and a
+  restricting `orgs.setAccess` revoke the target's tokens.
+- **"team" is a paid entitlement checked at the org's owner** (server/features.ts): the only gate
+  is `invites.create`; the UI reads `orgs.mine → teamEnabled`. Platform admins (`User.isAdmin` or
+  `ADMIN_EMAILS` env, comma-separated) implicitly hold every feature — set `ADMIN_EMAILS` in SSM
+  to bootstrap prod admin, then grant from `/admin`.
 - **Prisma 7**: no `--skip-generate` flag; `prisma.config.ts` hand-loads `.env` — keep that block.
 - **The e2e suite boots its own server** on :3100 against `handback_test` with dummy S3 creds — any
   test that actually touches S3 will fail loudly (none do today).

@@ -19,6 +19,9 @@ const schema = z.object({
   // Powers the transcript cleanup pass. Unset = raw transcript, which is what
   // shipped before the pass existed.
   ANTHROPIC_API_KEY: z.string().min(1).optional(),
+  // Comma-separated emails that are platform admins even without the DB flag —
+  // the bootstrap path for prod, where there's no shell to run cli/make-admin.
+  ADMIN_EMAILS: z.string().default(''),
 })
 
 export const env = schema.parse(process.env)

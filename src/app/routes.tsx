@@ -4,6 +4,7 @@ import type { TRPCOptionsProxy } from '@trpc/tanstack-react-query'
 import { authClient } from '~/lib/auth-client'
 import type { Session } from '../../server/auth'
 import type { AppRouter } from '../../server/router'
+import { AdminPage } from './admin'
 import { InboxPage } from './app'
 import { RouteErrorBoundary } from './error-boundary'
 import { GripePage } from './gripe'
@@ -86,6 +87,7 @@ export const routes: RouteObject[] = [
       { path: 'gripes/:gripeId', Component: GripePage, loader: appLoader },
       { path: 'projects', Component: ProjectsPage, loader: appLoader },
       { path: 'team', Component: TeamPage, loader: appLoader },
+      { path: 'admin', Component: AdminPage, loader: appLoader },
       { path: 'dashboard', loader: () => redirect('/app') },
     ],
   },

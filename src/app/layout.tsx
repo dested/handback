@@ -7,13 +7,15 @@ import {
   useRevalidator,
   useRouteLoaderData,
 } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import { Wordmark } from '~/components/logo'
 import { authClient } from '~/lib/auth-client'
 import { OrgProvider, useActiveOrg } from '~/lib/org'
+import { useTRPC } from '~/lib/trpc'
 import { cn } from '~/lib/utils'
 import type { RootLoaderData } from './routes'
 
-const APP_PREFIXES = ['/app', '/gripes', '/team', '/projects']
+const APP_PREFIXES = ['/app', '/gripes', '/team', '/projects', '/admin']
 
 export function Layout() {
   const data = useRouteLoaderData('root') as RootLoaderData | undefined
@@ -67,7 +69,9 @@ function MarketingHeader({ signedIn }: { signedIn: boolean }) {
 function AppHeader({ email }: { email: string }) {
   const navigate = useNavigate()
   const revalidator = useRevalidator()
+  const trpc = useTRPC()
   const { orgs, org, setActiveOrgId } = useActiveOrg()
+  const adminStatus = useQuery(trpc.admin.status.queryOptions())
 
   async function signOut() {
     await authClient.signOut()
@@ -113,6 +117,11 @@ function AppHeader({ email }: { email: string }) {
           <NavLink to="/team" className={tab}>
             Team
           </NavLink>
+          {adminStatus.data?.isAdmin && (
+            <NavLink to="/admin" className={tab}>
+              Admin
+            </NavLink>
+          )}
         </div>
         <div className="ml-auto flex items-center gap-3 text-sm">
           <span className="text-muted-foreground hidden sm:inline">{email}</span>

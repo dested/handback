@@ -22,6 +22,9 @@ if (!user) {
   console.log(`user ${email} already exists`)
 }
 
+await prisma.user.update({ where: { id: user.id }, data: { isAdmin: true, features: ['team'] } })
+console.log('platform admin + team feature enabled')
+
 let membership = await prisma.membership.findFirst({
   where: { userId: user.id },
   include: { org: true },

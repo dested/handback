@@ -3,6 +3,7 @@ import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 import { inviteEmail, sendEmail } from './email'
 import { env } from './env'
+import { isPlatformAdmin, orgHasFeature, requireAdmin, userHasFeature } from './features'
 import { canSeeGripe, requireMembership, requireOrgScope, slugify } from './membership'
 import { prisma } from './prisma'
 import { deletePrefix, gripeKey, gripePrefix, isSafePath, presignGet } from './storage'
@@ -22,12 +23,22 @@ const orgsRouter = router({
       include: { org: true },
       orderBy: { createdAt: 'asc' },
     })
+    // Entitlements live on the owner, so a workspace inherits whatever its
+    // owner has been granted.
+    const owners = await prisma.membership.findMany({
+      where: { orgId: { in: memberships.map((m) => m.orgId) }, role: 'owner' },
+      select: { orgId: true, user: { select: { email: true, isAdmin: true, features: true } } },
+    })
+    const teamByOrg = new Map(owners.map((o) => [o.orgId, userHasFeature(o.user, 'team')]))
     return memberships.map((m) => ({
       id: m.org.id,
       name: m.org.name,
       slug: m.org.slug,
-      role: m.role,
+      // Clamped like requireMembership: a guest's stored role never leaks as
+      // anything above member, so the client can't render admin controls.
+      role: m.scope === 'projects' ? 'member' : m.role,
       scope: m.scope,
+      teamEnabled: teamByOrg.get(m.org.id) ?? false,
     }))
   }),
 
@@ -70,7 +81,7 @@ const orgsRouter = router({
         },
         include: {
           user: { select: { id: true, name: true, email: true } },
-          projectAccess: { select: { project: { select: { name: true } } } },
+          projectAccess: { select: { project: { select: { id: true, name: true } } } },
         },
         orderBy: { createdAt: 'asc' },
       })
@@ -81,7 +92,7 @@ const orgsRouter = router({
         email: m.user.email,
         role: m.role,
         scope: m.scope,
-        projects: m.projectAccess.map((a) => a.project.name),
+        projects: m.projectAccess.map((a) => a.project),
         joinedAt: m.createdAt.toISOString(),
       }))
     }),
@@ -105,6 +116,64 @@ const orgsRouter = router({
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'Project guests are always members' })
       }
       await prisma.membership.update({ where: { id: target.id }, data: { role: input.role } })
+      return { ok: true }
+    }),
+
+  setAccess: protectedProcedure
+    .input(
+      z.object({
+        orgId: z.string(),
+        membershipId: z.string(),
+        // null = entire workspace; ids = guest scoped to exactly these projects
+        projectIds: z.array(z.string()).nullable(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const actor = await requireMembership(ctx.session.user.id, input.orgId, 'admin')
+      const target = await prisma.membership.findUnique({ where: { id: input.membershipId } })
+      if (!target || target.orgId !== input.orgId) throw new TRPCError({ code: 'NOT_FOUND' })
+      if (target.role === 'owner') {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'The owner always has full access' })
+      }
+      if (target.role === 'admin' && input.projectIds && actor.role !== 'owner') {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only the owner can restrict an admin' })
+      }
+      const ids = input.projectIds
+      if (ids) {
+        const count = await prisma.project.count({
+          where: { orgId: input.orgId, id: { in: ids } },
+        })
+        if (count !== ids.length) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Unknown project' })
+        }
+      }
+      await prisma.$transaction(async (tx) => {
+        if (ids) {
+          // Restricting an admin demotes them — guests are always members.
+          await tx.membership.update({
+            where: { id: target.id },
+            data: { scope: 'projects', role: 'member' },
+          })
+          await tx.projectAccess.deleteMany({
+            where: { membershipId: target.id, projectId: { notIn: ids } },
+          })
+          await tx.projectAccess.createMany({
+            data: ids.map((projectId) => ({ membershipId: target.id, projectId })),
+            skipDuplicates: true,
+          })
+        } else {
+          await tx.membership.update({ where: { id: target.id }, data: { scope: 'org' } })
+          await tx.projectAccess.deleteMany({ where: { membershipId: target.id } })
+        }
+      })
+      // Restriction closes the org-wide side door too: their hb_ tokens read
+      // the whole org through /api/ingest.
+      if (ids) {
+        await prisma.apiToken.updateMany({
+          where: { orgId: input.orgId, userId: target.userId, revokedAt: null },
+          data: { revokedAt: new Date() },
+        })
+      }
       return { ok: true }
     }),
 
@@ -157,6 +226,12 @@ const invitesRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       await requireMembership(ctx.session.user.id, input.orgId, 'admin')
+      if (!(await orgHasFeature(input.orgId, 'team'))) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: "Team is a paid feature and isn't enabled for this workspace yet.",
+        })
+      }
       if (input.projectId) {
         const p = await prisma.project.findUnique({ where: { id: input.projectId } })
         if (!p || p.orgId !== input.orgId) {
@@ -561,6 +636,91 @@ const gripesRouter = router({
     }),
 })
 
+const adminRouter = router({
+  /** Cheap probe for the nav — never throws for non-admins. */
+  status: protectedProcedure.query(async ({ ctx }) => {
+    const u = await prisma.user.findUnique({
+      where: { id: ctx.session.user.id },
+      select: { email: true, isAdmin: true },
+    })
+    return { isAdmin: u !== null && isPlatformAdmin(u) }
+  }),
+
+  stats: protectedProcedure.query(async ({ ctx }) => {
+    await requireAdmin(ctx.session.user.id)
+    const [users, orgs, gripes, bytes] = await Promise.all([
+      prisma.user.count(),
+      prisma.org.count(),
+      prisma.gripe.count(),
+      prisma.gripe.aggregate({ _sum: { bytes: true } }),
+    ])
+    return { users, orgs, gripes, bytes: Number(bytes._sum.bytes ?? 0) }
+  }),
+
+  users: protectedProcedure
+    .input(z.object({ query: z.string().trim().max(100).default('') }))
+    .query(async ({ ctx, input }) => {
+      await requireAdmin(ctx.session.user.id)
+      const rows = await prisma.user.findMany({
+        where: input.query
+          ? {
+              OR: [
+                { email: { contains: input.query, mode: 'insensitive' } },
+                { name: { contains: input.query, mode: 'insensitive' } },
+              ],
+            }
+          : undefined,
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+        include: {
+          memberships: {
+            include: { org: { select: { name: true } } },
+            orderBy: { createdAt: 'asc' },
+          },
+        },
+      })
+      return rows.map((u) => ({
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        emailVerified: u.emailVerified,
+        // Effective admin, not the raw flag — ADMIN_EMAILS bootstrap admins
+        // must not render as "admin off".
+        isAdmin: isPlatformAdmin(u),
+        features: u.features,
+        createdAt: u.createdAt.toISOString(),
+        orgs: u.memberships.map((m) => ({ name: m.org.name, role: m.role })),
+      }))
+    }),
+
+  setFeature: protectedProcedure
+    .input(z.object({ userId: z.string(), feature: z.enum(['team']), enabled: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      await requireAdmin(ctx.session.user.id)
+      const u = await prisma.user.findUnique({
+        where: { id: input.userId },
+        select: { features: true },
+      })
+      if (!u) throw new TRPCError({ code: 'NOT_FOUND' })
+      const features = input.enabled
+        ? [...new Set([...u.features, input.feature])]
+        : u.features.filter((f) => f !== input.feature)
+      await prisma.user.update({ where: { id: input.userId }, data: { features } })
+      return { ok: true }
+    }),
+
+  setAdmin: protectedProcedure
+    .input(z.object({ userId: z.string(), isAdmin: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      await requireAdmin(ctx.session.user.id)
+      if (input.userId === ctx.session.user.id && !input.isAdmin) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'You cannot revoke your own admin' })
+      }
+      await prisma.user.update({ where: { id: input.userId }, data: { isAdmin: input.isAdmin } })
+      return { ok: true }
+    }),
+})
+
 export const appRouter = router({
   me: protectedProcedure.query(({ ctx }) => ctx.session.user),
   orgs: orgsRouter,
@@ -568,6 +728,7 @@ export const appRouter = router({
   tokens: tokensRouter,
   projects: projectsRouter,
   gripes: gripesRouter,
+  admin: adminRouter,
 })
 
 export type AppRouter = typeof appRouter

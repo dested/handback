@@ -2,6 +2,22 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-07-30 — member access editor, team as a paid switch, and a real /admin
+Asked: "change project/projects assigned to each member… team is a paid feature, but I want to
+turn it on for particular users, via the admin (I need a full admin)." Done (2 Opus agents +
+Fable): **orgs.setAccess** (entire workspace ↔ chosen project set; owner-only when restricting an
+admin, demotes to member, revokes the target's hb_ tokens) + inline Access editor on Team members.
+**Entitlements**: `User.features` ('team') + `User.isAdmin` + `ADMIN_EMAILS` env; a workspace has
+team when its OWNER does (server/features.ts); `invites.create` gated, upsell card replaces only
+the invite form (revoke stays reachable), per-project Invite buttons hidden. **/admin**: stats
+strip (users/workspaces/gripes/storage), user search, workspace chips, per-user team + admin
+toggles (no self-revoke; admins show implicit team), admin nav link, `cli/make-admin.ts`,
+dev-bootstrap seeds admin+team. Quality-gate fixes folded in (honest display for env-bootstrapped
+admins, guest role clamped in orgs.mine, editor loading state). db push'd, typecheck green,
+committed + pushed (deploys via Drydock).
+Touched: prisma/schema.prisma, server/{env,features,router}.ts, cli/{make-admin,dev-bootstrap}.ts,
+src/lib/org.tsx, src/app/{admin,team,projects,routes,layout}.tsx, decisions.md, cliffnotes.md.
+
 ## 2026-07-30 — the go-live batch: email, caps, limits, pricing, cleanup pass, store copy
 Asked: "let me know what i need to do next" → "do all that for me please", with Groq, Resend and
 Anthropic keys pasted in chat. Done, all six:

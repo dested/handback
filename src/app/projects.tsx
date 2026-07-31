@@ -49,6 +49,7 @@ function ProjectsBody({ org }: { org: OrgSummary }) {
   // Guests see the list of what they've been let into, but can't reshape the workspace.
   const fullAccess = org.scope === 'org'
   const canManage = org.role === 'owner' || org.role === 'admin'
+  const canInvite = canManage && org.teamEnabled
 
   const projectsQuery = useQuery(trpc.projects.list.queryOptions({ orgId: org.id }))
   const invite = useMutation(
@@ -97,7 +98,7 @@ function ProjectsBody({ org }: { org: OrgSummary }) {
           <>
             <div className="border-border text-muted-foreground flex items-center gap-4 border-b pb-2 text-xs font-medium tracking-wide uppercase">
               <span className="min-w-0 flex-1">Project</span>
-              {canManage && <span className="w-16 shrink-0" />}
+              {canInvite && <span className="w-16 shrink-0" />}
               <span className="w-20 shrink-0 text-right">Gripes</span>
             </div>
             <div className="divide-border divide-y">
@@ -151,7 +152,7 @@ function ProjectsBody({ org }: { org: OrgSummary }) {
                       </div>
                     )}
                   </div>
-                  {canManage && (
+                  {canInvite && (
                     <Button
                       type="button"
                       variant="outline"
@@ -215,7 +216,7 @@ function ProjectsBody({ org }: { org: OrgSummary }) {
                   onChange={(e) => setOrigins(e.target.value)}
                   placeholder={'https://app.example.com\nhttps://staging.example.com'}
                   spellCheck={false}
-                  className="border-input bg-background placeholder:text-muted-foreground w-full rounded-md border px-3 py-2 font-mono text-xs shadow-xs outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
+                  className="border-input bg-background placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 w-full rounded-md border px-3 py-2 font-mono text-xs shadow-xs outline-none focus-visible:ring-[3px]"
                 />
                 <p className="text-muted-foreground text-xs">One URL origin per line.</p>
               </div>

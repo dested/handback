@@ -7,7 +7,14 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTRPC } from '~/lib/trpc'
 
-export type OrgSummary = { id: string; name: string; slug: string; role: string; scope: string }
+export type OrgSummary = {
+  id: string
+  name: string
+  slug: string
+  role: string
+  scope: string
+  teamEnabled: boolean
+}
 
 type OrgContextValue = {
   orgs: OrgSummary[]

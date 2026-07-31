@@ -23,6 +23,10 @@ model User {
   email         String   @unique
   emailVerified Boolean  @default(false) @map("email_verified")
   image         String?
+  // Platform flags, set from /admin (billing doesn't exist yet): site admin +
+  // hand-granted feature entitlements ("team").
+  isAdmin       Boolean  @default(false) @map("is_admin")
+  features      String[] @default([])
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @default(now()) @map("updated_at")
 

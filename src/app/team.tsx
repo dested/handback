@@ -37,11 +37,7 @@ function roleChipClass(role: string) {
 
 function RoleChip({ role }: { role: string }) {
   return (
-    <span
-      className={cn(
-        'rounded px-2 py-0.5 text-xs font-medium capitalize',
-        roleChipClass(role)
-      )}>
+    <span className={cn('rounded px-2 py-0.5 text-xs font-medium capitalize', roleChipClass(role))}>
       {role}
     </span>
   )
@@ -164,10 +160,22 @@ function MembersTab({ org }: { org: OrgSummary }) {
   const myUserId = root?.session?.user.id ?? null
 
   const membersQuery = useQuery(trpc.orgs.members.queryOptions({ orgId: org.id }))
+  const projectsQuery = useQuery(trpc.projects.list.queryOptions({ orgId: org.id }))
+  const [editingId, setEditingId] = useState<string | null>(null)
   const invalidate = () =>
     queryClient.invalidateQueries({ queryKey: trpc.orgs.members.queryKey({ orgId: org.id }) })
   const setRole = useMutation(trpc.orgs.setRole.mutationOptions({ onSuccess: invalidate }))
-  const removeMember = useMutation(trpc.orgs.removeMember.mutationOptions({ onSuccess: invalidate }))
+  const removeMember = useMutation(
+    trpc.orgs.removeMember.mutationOptions({ onSuccess: invalidate })
+  )
+  const setAccess = useMutation(
+    trpc.orgs.setAccess.mutationOptions({
+      onSuccess: () => {
+        invalidate()
+        setEditingId(null)
+      },
+    })
+  )
 
   const isOwner = org.role === 'owner'
   const canRemove = isOwner || org.role === 'admin'
@@ -181,7 +189,7 @@ function MembersTab({ org }: { org: OrgSummary }) {
         <span className="min-w-0 flex-1">Member</span>
         <span className="w-36 shrink-0">Role</span>
         <span className="w-28 shrink-0">Joined</span>
-        <span className="w-20 shrink-0" />
+        <span className="w-40 shrink-0" />
       </div>
 
       <div className="divide-border divide-y">
@@ -189,59 +197,89 @@ function MembersTab({ org }: { org: OrgSummary }) {
           const isGuest = m.scope === 'projects'
           const showRoleSelect = isOwner && m.role !== 'owner' && !isGuest
           const showRemove = canRemove && m.role !== 'owner' && m.userId !== myUserId
+          // Admins can't restrict fellow admins — the server enforces it, the UI hides it.
+          const showAccess = canRemove && m.role !== 'owner' && (isOwner || m.role !== 'admin')
           return (
-            <div key={m.membershipId} className="flex items-center gap-4 py-3">
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium">{m.name}</p>
-                <p className="text-muted-foreground truncate text-sm">{m.email}</p>
-                {isGuest && (
-                  <p className="text-muted-foreground truncate text-xs">
-                    Only: {m.projects.join(', ') || 'no projects'}
-                  </p>
-                )}
+            <div key={m.membershipId} className="py-3">
+              <div className="flex items-center gap-4">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">{m.name}</p>
+                  <p className="text-muted-foreground truncate text-sm">{m.email}</p>
+                  {isGuest && (
+                    <p className="text-muted-foreground truncate text-xs">
+                      Only: {m.projects.map((p) => p.name).join(', ') || 'no projects'}
+                    </p>
+                  )}
+                </div>
+                <div className="w-36 shrink-0">
+                  {showRoleSelect ? (
+                    <select
+                      aria-label={`Role for ${m.email}`}
+                      className={SELECT}
+                      value={m.role}
+                      disabled={setRole.isPending}
+                      onChange={(e) =>
+                        setRole.mutate({
+                          orgId: org.id,
+                          membershipId: m.membershipId,
+                          role: e.target.value as 'admin' | 'member',
+                        })
+                      }>
+                      <option value="admin">admin</option>
+                      <option value="member">member</option>
+                    </select>
+                  ) : isGuest ? (
+                    <RoleChip role="guest" />
+                  ) : (
+                    <RoleChip role={m.role} />
+                  )}
+                </div>
+                <span className="text-muted-foreground w-28 shrink-0 font-mono text-xs">
+                  {fmtDate(m.joinedAt)}
+                </span>
+                <div className="w-40 shrink-0">
+                  <div className="flex justify-end gap-1">
+                    {showAccess && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() =>
+                          setEditingId(editingId === m.membershipId ? null : m.membershipId)
+                        }>
+                        Access
+                      </Button>
+                    )}
+                    {showRemove && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        disabled={removeMember.isPending}
+                        onClick={() => {
+                          if (!window.confirm(`Remove ${m.email} from ${org.name}?`)) return
+                          removeMember.mutate({ orgId: org.id, membershipId: m.membershipId })
+                        }}>
+                        Remove
+                      </Button>
+                    )}
+                  </div>
+                </div>
               </div>
-              <div className="w-36 shrink-0">
-                {showRoleSelect ? (
-                  <select
-                    aria-label={`Role for ${m.email}`}
-                    className={SELECT}
-                    value={m.role}
-                    disabled={setRole.isPending}
-                    onChange={(e) =>
-                      setRole.mutate({
-                        orgId: org.id,
-                        membershipId: m.membershipId,
-                        role: e.target.value as 'admin' | 'member',
-                      })
-                    }>
-                    <option value="admin">admin</option>
-                    <option value="member">member</option>
-                  </select>
-                ) : isGuest ? (
-                  <RoleChip role="guest" />
-                ) : (
-                  <RoleChip role={m.role} />
-                )}
-              </div>
-              <span className="text-muted-foreground w-28 shrink-0 font-mono text-xs">
-                {fmtDate(m.joinedAt)}
-              </span>
-              <div className="w-20 shrink-0">
-                {showRemove && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                    disabled={removeMember.isPending}
-                    onClick={() => {
-                      if (!window.confirm(`Remove ${m.email} from ${org.name}?`)) return
-                      removeMember.mutate({ orgId: org.id, membershipId: m.membershipId })
-                    }}>
-                    Remove
-                  </Button>
-                )}
-              </div>
+              {editingId === m.membershipId && (
+                <AccessEditor
+                  member={m}
+                  projects={projectsQuery.data ?? []}
+                  projectsLoading={projectsQuery.isPending}
+                  pending={setAccess.isPending}
+                  error={setAccess.isError ? setAccess.error.message : null}
+                  onSave={(projectIds) =>
+                    setAccess.mutate({ orgId: org.id, membershipId: m.membershipId, projectIds })
+                  }
+                  onCancel={() => setEditingId(null)}
+                />
+              )}
             </div>
           )
         })}
@@ -250,6 +288,114 @@ function MembersTab({ org }: { org: OrgSummary }) {
       {setRole.isError && <ErrorLine message={setRole.error.message} />}
       {removeMember.isError && <ErrorLine message={removeMember.error.message} />}
     </section>
+  )
+}
+
+/** Inline editor for one member's access: whole workspace, or a project subset. */
+function AccessEditor({
+  member,
+  projects,
+  projectsLoading,
+  pending,
+  error,
+  onSave,
+  onCancel,
+}: {
+  member: { membershipId: string; scope: string; projects: Array<{ id: string; name: string }> }
+  projects: Array<{ id: string; name: string }>
+  projectsLoading: boolean
+  pending: boolean
+  error: string | null
+  onSave: (projectIds: string[] | null) => void
+  onCancel: () => void
+}) {
+  const [scoped, setScoped] = useState(member.scope === 'projects')
+  const [selected, setSelected] = useState<ReadonlySet<string>>(
+    new Set(member.projects.map((p) => p.id))
+  )
+
+  function toggle(id: string) {
+    setSelected((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  return (
+    <div className="border-border bg-muted/40 mt-3 space-y-3 rounded-md border p-3">
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="radio"
+          className="accent-primary"
+          name={`access-${member.membershipId}`}
+          checked={!scoped}
+          onChange={() => setScoped(false)}
+        />
+        Entire workspace
+      </label>
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="radio"
+          className="accent-primary"
+          name={`access-${member.membershipId}`}
+          checked={scoped}
+          onChange={() => setScoped(true)}
+        />
+        Only selected projects
+      </label>
+      {scoped &&
+        (projectsLoading ? (
+          <p className="text-muted-foreground pl-6 text-xs">Loading projects…</p>
+        ) : projects.length === 0 ? (
+          <p className="text-muted-foreground pl-6 text-xs">No projects in this workspace yet.</p>
+        ) : (
+          <div className="flex flex-wrap gap-x-4 gap-y-1 pl-6">
+            {projects.map((p) => (
+              <label key={p.id} className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="accent-primary"
+                  checked={selected.has(p.id)}
+                  onChange={() => toggle(p.id)}
+                />
+                {p.name}
+              </label>
+            ))}
+          </div>
+        ))}
+      <div className="flex items-center gap-2">
+        <Button
+          size="sm"
+          disabled={pending || (scoped && (projectsLoading || selected.size === 0))}
+          onClick={() => onSave(scoped ? [...selected] : null)}>
+          {pending ? 'Saving…' : 'Save access'}
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+      {error && <ErrorLine message={error} />}
+    </div>
+  )
+}
+
+function TeamUpsell() {
+  return (
+    <Card className="max-w-xl">
+      <CardHeader>
+        <CardTitle>Team is a paid feature</CardTitle>
+        <CardDescription>
+          Inviting teammates and project guests isn't switched on for this workspace yet. During the
+          alpha it's enabled by hand — write{' '}
+          <a className="text-primary underline underline-offset-4" href="mailto:sal@dested.com">
+            sal@dested.com
+          </a>{' '}
+          and we'll turn it on.
+        </CardDescription>
+      </CardHeader>
+    </Card>
   )
 }
 
@@ -338,6 +484,10 @@ function InvitesTab({ org }: { org: OrgSummary }) {
         {revoke.isError && <ErrorLine message={revoke.error.message} />}
       </section>
 
+      {/* Turning team off must not orphan live links — the list + revoke above
+          stay; only creating new invites is paywalled. */}
+      {!org.teamEnabled && <TeamUpsell />}
+      {org.teamEnabled && (
       <Card className="max-w-xl">
         <CardHeader>
           <CardTitle>Invite someone</CardTitle>
@@ -413,6 +563,7 @@ function InvitesTab({ org }: { org: OrgSummary }) {
           </form>
         </CardContent>
       </Card>
+      )}
     </div>
   )
 }

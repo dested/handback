@@ -218,3 +218,16 @@ contains, on every take.
 **Rejected:** having the model return the whole transcript (one hallucinated timestamp corrupts the
 timeline), running it on-device (the thing we just moved off the user's machine), doing it inside
 `/transcribe` (a cleanup failure would then cost the transcript itself).
+
+## 2026-07-30 — Team is entitled per user, checked at the org's owner
+**Why:** "team" (inviting members and guests) is a paid feature with no billing behind it yet, so
+it's a hand-granted entitlement: `User.features` contains `'team'`, and a workspace has the feature
+when its **owner** does (`server/features.ts` → `orgHasFeature`). Granting Sal's customer one flag
+lights up every workspace they own — matches "turn it on for particular users" without inventing
+org-level plans before billing exists. Platform admins (`User.isAdmin` OR the `ADMIN_EMAILS` env
+list — the prod bootstrap, since prod has no shell) implicitly hold every feature. The only gate is
+`invites.create`; accepted members, invite revocation, and existing teams keep working if the flag
+is later withdrawn — turning team off stops growth, it doesn't amputate.
+**Rejected:** an org-level flag (would need granting per workspace instead of per customer),
+gating reads for existing members (punishes people who did nothing), a better-auth admin plugin
+(two tRPC procedures and one boolean did the job).
