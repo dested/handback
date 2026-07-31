@@ -304,6 +304,10 @@ reaches the container on a plain push.
   `/join/:id?accept=1`, and `redirectIfSignedIn` (routes.tsx) honours the same param. Drop any one
   of those and the account gets created while the invitation is orphaned — the failure is silent,
   because sign-up itself succeeds. Accept is idempotent, so a stale `?accept=1` is harmless.
+- **An addressed invite is bound to its address; an unaddressed one is an open link.** `invites.create`
+  with an `email` sends mail and `invites.accept` 403s anyone signed in as someone else (invite mail
+  gets forwarded). Omit the email and the link is the whole credential — that's the deliberate
+  copy-a-link path, and it is *not* rate-limited by address. Keep both branches when touching accept.
 - **`./server/*` never imports into `src/*`** except `import type` (starter rule; leaks secrets).
 - **tRPC returns must be JSON-safe** — Dates → ISO strings at the procedure, `bytes` BigInt →
   Number, or SSR/hydration markup diverges.

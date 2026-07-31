@@ -33,10 +33,16 @@ us" (had to generate a second link and click it again). `/join` sent signed-out 
 invitation orphaned. The invite id now rides through auth: `/join/:id` links to
 `/sign-{up,in}?invite=<id>`, both pages return to `/join/:id?accept=1` on success (and
 `redirectIfSignedIn` bounces there too instead of `/app`), and `/join` auto-accepts once on that
-flag. Sign-up prefills the invited address and reads "Then you'll join <Org>."
+flag. Sign-up prefills the invited address and reads "Then you'll join <Org>." Then, asked: block a
+mismatched address — an **addressed** invite now only accepts from that address (`invites.accept`,
+403, case-insensitive), because invite mail gets forwarded; `/join` says so up front instead of
+after the click and skips auto-accept. A **link with no address stays open** — that's the copy-a-link
+invite.
 Verified in a clean browser: signed-out join → create account → landed `/app` with a `member`/`org`
-membership and `acceptedAt` stamped; signed-in `/sign-up?invite=` 302s straight into accept.
-Touched: src/app/{join,sign-up,sign-in,routes}.tsx
+membership and `acceptedAt` stamped; signed-in `/sign-up?invite=` 302s straight into accept; direct
+`invites.accept` POSTs → wrong address 403, no-address 200, `DESTED@Gmail.com` vs `dested@gmail.com`
+200. Test rows cleaned out of the dev DB.
+Touched: src/app/{join,sign-up,sign-in,routes}.tsx, server/router.ts
 
 ## 2026-07-31 — eventCount → errorCount, and droppedCount reaches the agent
 Asked: "why was event count 0" → then "yes both" to the two fixes it surfaced. **The 0 was correct**:
