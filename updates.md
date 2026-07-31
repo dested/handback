@@ -8,8 +8,8 @@ Anthropic keys pasted in chat. Done, all six:
 **Email (Resend)** — `server/email.ts` (sender + reset/verify/invite templates, never throws; with
 no key it logs the message so a dev can click the link), better-auth `sendResetPassword` +
 `sendVerificationEmail`, `invites.create` emails the link, new `/forgot-password` +
-`/reset-password` pages. Sending domain created in Resend, DKIM/SPF written into Route53 — records
-resolve, Resend still reads `pending`, so mail doesn't land yet.
+`/reset-password` pages. Sending domain created in Resend, DKIM/SPF written into Route53, verified,
+and a real message delivered from noreply@handback.dev.
 **Upload caps** — `presignPut` signs `ContentLength` (S3 itself rejects a mismatch); 512 MB/file,
 2 GB/gripe, 20 GB + 500 gripes per org checked at declare, minus the gripe being replaced.
 **Rate limiting** — better-auth per-route rules + `server/ratelimit.ts` (per-IP ahead of auth,
