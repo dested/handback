@@ -25,3 +25,6 @@ bun.lockb.bak
 test-results
 playwright-report
 /playwright/.cache
+
+# Release artifact — rebuilt per release, attached to the GitHub release, never committed
+extension/handback-recorder.zip
