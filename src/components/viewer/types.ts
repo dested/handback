@@ -1,17 +1,17 @@
-// Shapes the viewer works with. The gripe itself comes from tRPC (so its type
+// Shapes the viewer works with. The walkthrough itself comes from tRPC (so its type
 // is inferred, never restated); each take's detail comes from the recorder's
 // own `rec-NN/recording.json`, fetched straight from S3 — that file is written
-// by the Gripe extension, so its shape is declared by hand here.
+// by the recorder extension, so its shape is declared by hand here.
 
 import type { inferRouterOutputs } from '@trpc/server'
 import type { AppRouter } from '../../../server/router'
 
 type Outputs = inferRouterOutputs<AppRouter>
 
-export type Gripe = Outputs['gripes']['get']
-export type Take = Gripe['takes'][number]
+export type Walkthrough = Outputs['walkthroughs']['get']
+export type Take = Walkthrough['takes'][number]
 
-export type GripeStatus = 'open' | 'in_review' | 'resolved'
+export type WalkthroughStatus = 'open' | 'in_review' | 'resolved'
 
 /** One deduped keyframe. `file` is take-relative, e.g. `frames/03-0125.jpg`. */
 export type Frame = {

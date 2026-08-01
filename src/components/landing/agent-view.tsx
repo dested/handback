@@ -1,13 +1,13 @@
-import { GRIPE, REPORT, type ReportBlock } from './demo-data'
+import { REPORT, WALKTHROUGH, type ReportBlock } from './demo-data'
 import { SHOTS } from './demo-shot'
 import { CheckoutShot } from './demo-shot'
 import { ContactSheet, Pane } from './mock'
 import { Section, SectionHeading, SectionLabel } from './section'
 
 /**
- * The handoff, shown from the agent's side. This used to be two install commands,
- * which sold the plumbing instead of the payoff — setup is now one quiet line at
- * the bottom and the section is the brief itself.
+ * The handoff, shown from the agent's side. This used to carry install commands,
+ * which sold the plumbing instead of the payoff — setup lives on /connect now and
+ * the section is the brief itself.
  *
  * The report is rendered from structured blocks (`demo-data.ts`) rather than
  * parsed from markdown, so the landing page ships no markdown parser. The block
@@ -15,9 +15,9 @@ import { Section, SectionHeading, SectionLabel } from './section'
  */
 
 const TOOLS = [
-  ['list_gripes', 'what’s open, and for which project'],
-  ['get_gripe', 'the brief, plus a signed link to every file in it'],
-  ['set_gripe_status', 'hand it back for review when the fix is up'],
+  ['list_walkthroughs', 'what’s open, and for which project'],
+  ['get_walkthrough', 'the brief, plus a signed link to every file in it'],
+  ['set_walkthrough_status', 'hand it back for review when the fix is up'],
 ]
 
 export function AgentView() {
@@ -38,19 +38,20 @@ export function AgentView() {
             <div className="space-y-2.5 p-4 font-mono text-[0.72rem] leading-relaxed">
               <p>
                 <span className="text-cobalt select-none">▸ </span>
-                get_gripe(<span className="text-muted-foreground">"promo-code-checkout"</span>)
+                get_walkthrough(<span className="text-muted-foreground">"promo-code-checkout"</span>
+                )
               </p>
               <ul className="text-muted-foreground space-y-1 pl-4">
                 <li>← report.md</li>
-                <li>← {GRIPE.sheets} contact sheets</li>
-                <li>← {GRIPE.keyframes} keyframes, pointer drawn in</li>
-                <li>← transcript.txt · {GRIPE.spoken} lines</li>
+                <li>← {WALKTHROUGH.sheets} contact sheets</li>
+                <li>← {WALKTHROUGH.keyframes} keyframes, pointer drawn in</li>
+                <li>← transcript.txt · {WALKTHROUGH.spoken} lines</li>
                 <li>← recording.json · frames, events, windows</li>
-                <li>← walkthrough.webm · {GRIPE.duration}</li>
+                <li>← walkthrough.webm · {WALKTHROUGH.duration}</li>
               </ul>
               <p className="pt-1.5">
                 <span className="text-cobalt select-none">▸ </span>
-                reading sheets 1–{GRIPE.sheets}…
+                reading sheets 1–{WALKTHROUGH.sheets}…
               </p>
             </div>
           </Pane>
@@ -66,23 +67,11 @@ export function AgentView() {
               ))}
             </dl>
           </div>
-
-          <div className="border-border border-t pt-6">
-            <p className="text-muted-foreground text-sm leading-relaxed">
-              Wired in once, from any repo:
-            </p>
-            <pre className="bg-background mt-3 overflow-x-auto rounded-md border px-3.5 py-3 font-mono text-[0.72rem]">
-              <code>
-                <span className="text-cobalt select-none">$ </span>
-                claude mcp add handback --env HANDBACK_TOKEN=hb_… -- bun cli/mcp.ts
-              </code>
-            </pre>
-          </div>
         </div>
 
         <Pane
           label="report.md"
-          meta={`${GRIPE.slug.slice(0, 10)} · ${GRIPE.origin}`}
+          meta={`${WALKTHROUGH.slug.slice(0, 10)} · ${WALKTHROUGH.origin}`}
           className="min-w-0 shadow-sm">
           <div className="max-h-[38rem] overflow-y-auto px-6 py-6 sm:px-8">
             {REPORT.map((block, i) => (
@@ -153,9 +142,7 @@ function Block({ block }: { block: ReportBlock }) {
       const shot = SHOTS[block.shot]
       return (
         <figure className="mt-4 max-w-[26rem]">
-          {shot && (
-            <CheckoutShot shot={shot} className="block w-full rounded-md border bg-white" />
-          )}
+          {shot && <CheckoutShot shot={shot} className="block w-full rounded-md border bg-white" />}
           <figcaption className="text-muted-foreground mt-2 font-mono text-[0.6rem]">
             {block.caption}
           </figcaption>

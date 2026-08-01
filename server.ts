@@ -145,6 +145,14 @@ async function createServer() {
       if (!isProd && vite) {
         template = fs.readFileSync(resolve('./index.html'), 'utf-8')
         template = await vite.transformIndexHtml(req.originalUrl, template)
+        // Dev serves app.css through the JS module graph, which lands a tick
+        // after the SSR HTML paints — a visible unstyled flash on every load.
+        // Link the compiled sheet directly (?direct = raw CSS, not a JS module)
+        // so first paint is styled; Vite's later injected copy is identical.
+        template = template.replace(
+          '</head>',
+          '<link rel="stylesheet" href="/src/styles/app.css?direct" /></head>'
+        )
         render = (await vite.ssrLoadModule('/src/entry-server.tsx')).render
       } else {
         template = indexProd

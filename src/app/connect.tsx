@@ -1,4 +1,4 @@
-// /connect — the page that turns "someone recorded a gripe" into "my agent can
+// /connect — the page that turns "someone recorded a walkthrough" into "my agent can
 // read it." Three numbered steps in the editorial style (ui.md): mint a token,
 // paste one command, confirm the agent landed.
 //
@@ -38,7 +38,7 @@ export function ConnectPage() {
       <Prose>
         <h1 className="font-display text-3xl font-semibold">Connect your coding agent</h1>
         <p className="text-muted-foreground mt-3 text-sm">
-          Name a workspace first —{' '}
+          Your workspace is still being set up —{' '}
           <Link to="/app" className="text-primary underline underline-offset-4">
             head to the inbox
           </Link>
@@ -86,9 +86,9 @@ function Connect({ org }: { org: OrgSummary }) {
           Connect your coding agent
         </h1>
         <p className="text-muted-foreground text-base leading-relaxed">
-          Every gripe in {org.name} was recorded for you: someone walked through the problem out
-          loud, and the recorder wrote it up as a brief. Point your agent at this workspace and it
-          can pull that brief — narration, keyframes, console errors and all — fix the thing, and
+          Every walkthrough in {org.name} was recorded for you: someone walked through the problem
+          out loud, and the recorder wrote it up as a brief. Point your agent at this workspace and
+          it can pull that brief — narration, keyframes, console errors and all — fix the thing, and
           hand it back for a human to sign off.
         </p>
       </header>
@@ -133,7 +133,146 @@ function Connect({ org }: { org: OrgSummary }) {
 
       <ToolReference />
       {agent === 'claude-code' && canConnect && <Disconnect origin={origin} />}
+      {canConnect && <TokenManager org={org} />}
     </div>
+  )
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+// Formatted from UTC parts on purpose: locale formatting differs between the
+// SSR runtime and the browser, which would break hydration.
+function fmtDate(value: string | null) {
+  if (!value) return 'never'
+  const d = new Date(value)
+  return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`
+}
+
+/**
+ * The management half: every token this workspace holds, and the door to a new
+ * one. Step 01 above mints tokens for the flow; this is the list you come back
+ * to when you need to revoke one.
+ */
+function TokenManager({ org }: { org: OrgSummary }) {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const [name, setName] = useState('')
+  const [rawToken, setRawToken] = useState<string | null>(null)
+
+  const tokensQuery = useQuery(trpc.tokens.list.queryOptions({ orgId: org.id }))
+  const invalidate = () => {
+    void queryClient.invalidateQueries({ queryKey: trpc.tokens.list.queryKey({ orgId: org.id }) })
+    void queryClient.invalidateQueries({
+      queryKey: trpc.tokens.connection.queryKey({ orgId: org.id }),
+    })
+  }
+
+  const create = useMutation(
+    trpc.tokens.create.mutationOptions({
+      onSuccess: (result) => {
+        setRawToken(result.token)
+        setName('')
+        invalidate()
+      },
+    })
+  )
+  const revoke = useMutation(trpc.tokens.revoke.mutationOptions({ onSuccess: invalidate }))
+
+  return (
+    <section className="border-border border-t pt-6">
+      <h2 className="font-display text-xl font-semibold">Your API tokens</h2>
+      <p className="text-muted-foreground mt-2 max-w-2xl text-sm leading-relaxed">
+        These authenticate the recorder, the CLI, and the MCP server. They're yours alone and scoped
+        to {org.name}; revoking one disconnects whatever holds it.
+      </p>
+
+      <div className="mt-5 space-y-3">
+        {tokensQuery.isPending && <p className="text-muted-foreground text-sm">Loading…</p>}
+        {tokensQuery.isError && (
+          <p className="text-destructive text-sm">{tokensQuery.error.message}</p>
+        )}
+        {tokensQuery.data?.length === 0 && (
+          <p className="text-muted-foreground text-sm">No tokens yet.</p>
+        )}
+        {tokensQuery.data && tokensQuery.data.length > 0 && (
+          <>
+            <div className="border-border text-muted-foreground flex items-center gap-4 border-b pb-2 text-xs font-medium tracking-wide uppercase">
+              <span className="min-w-0 flex-1">Name</span>
+              <span className="w-20 shrink-0">Token</span>
+              <span className="w-28 shrink-0">Created</span>
+              <span className="w-28 shrink-0">Last used</span>
+              <span className="w-20 shrink-0" />
+            </div>
+            <div className="divide-border divide-y">
+              {tokensQuery.data.map((t) => (
+                <div key={t.id} className="flex items-center gap-4 py-3">
+                  <p className="min-w-0 flex-1 truncate text-sm font-medium">{t.name}</p>
+                  <span className="w-20 shrink-0 font-mono text-xs">…{t.lastFour}</span>
+                  <span className="text-muted-foreground w-28 shrink-0 font-mono text-xs">
+                    {fmtDate(t.createdAt)}
+                  </span>
+                  <span className="text-muted-foreground w-28 shrink-0 font-mono text-xs">
+                    {fmtDate(t.lastUsedAt)}
+                  </span>
+                  <div className="w-20 shrink-0">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                      disabled={revoke.isPending}
+                      onClick={() => {
+                        if (!window.confirm(`Revoke "${t.name}"? Anything using it stops working.`))
+                          return
+                        revoke.mutate({ orgId: org.id, tokenId: t.id })
+                      }}>
+                      Revoke
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+        {revoke.isError && <p className="text-destructive text-sm">{revoke.error.message}</p>}
+      </div>
+
+      <form
+        className="mt-6 max-w-xl space-y-4"
+        onSubmit={(e) => {
+          e.preventDefault()
+          const trimmed = name.trim()
+          if (!trimmed || create.isPending) return
+          create.mutate({ orgId: org.id, name: trimmed })
+        }}>
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="min-w-48 flex-1 space-y-2">
+            <Label htmlFor="manage-token-name">New token</Label>
+            <Input
+              id="manage-token-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="laptop"
+              maxLength={80}
+              autoComplete="off"
+              required
+            />
+          </div>
+          <Button type="submit" disabled={create.isPending || !name.trim()}>
+            {create.isPending ? 'Creating…' : 'Create token'}
+          </Button>
+        </div>
+        {create.isError && <p className="text-destructive text-sm">{create.error.message}</p>}
+        {rawToken && (
+          <div className="border-cobalt/40 bg-cobalt-wash space-y-2 rounded-md border p-4">
+            <p className="text-cobalt text-sm font-medium">
+              Copy it now — it won't be shown again.
+            </p>
+            <CopyRow value={rawToken} />
+          </div>
+        )}
+      </form>
+    </section>
   )
 }
 
@@ -191,10 +330,8 @@ function Disconnect({ origin }: { origin: string }) {
           <p className="text-muted-foreground mt-1 text-sm">
             This is the one that actually cuts access. A token works from anywhere until it's
             revoked — another machine, an old shell profile, a CI job. Revoke it under{' '}
-            <Link to="/team" className="text-primary underline underline-offset-4">
-              Team → API tokens
-            </Link>
-            , and anything still using it starts getting 401s immediately.
+            <span className="font-medium">Your API tokens</span> at the bottom of this page, and
+            anything still using it starts getting 401s immediately.
           </p>
           <p className="text-muted-foreground mt-3 text-sm">
             Tokens can't be un-revoked and the raw value is never recoverable — if you revoke by
@@ -205,7 +342,7 @@ function Disconnect({ origin }: { origin: string }) {
       </div>
 
       <p className="text-muted-foreground mt-6 text-sm">
-        Nothing here deletes gripes. Both steps are about access to{' '}
+        Nothing here deletes walkthroughs. Both steps are about access to{' '}
         <span className="font-mono text-xs">{origin}/mcp</span>, not about the recordings
         themselves.
       </p>
@@ -285,20 +422,21 @@ function ClaudeCodeSteps({
         n="03"
         title="Check it worked"
         blurb="Start a session and ask for the queue. If the tools are wired up, Claude answers from your inbox instead of guessing.">
-        <PromptBlock>list my handback gripes</PromptBlock>
+        <PromptBlock>list my handback walkthroughs</PromptBlock>
         <ConnectionStatus lastUsedAt={lastUsedAt} tokenCount={tokenCount} />
       </Step>
 
       <Step
         n="04"
         title="Work one"
-        blurb="A gripe carries its own instructions — report.md is written for an agent, not for a person. Paste a line like this and the agent takes it from there.">
+        blurb="A walkthrough carries its own instructions — report.md is written for an agent, not for a person. Paste a line like this and the agent takes it from there.">
         <PromptBlock>
-          Pull the newest open gripe from handback, read its report.md, and fix it. Set it to
+          Pull the newest open walkthrough from handback, read its report.md, and fix it. Set it to
           in_review when the fix is up.
         </PromptBlock>
         <p className="text-muted-foreground mt-3 text-sm">
-          Or hand it a specific one — every gripe page has a copyable prompt with its id in it.
+          Or hand it a specific one — every walkthrough page has a copyable prompt with its id in
+          it.
         </p>
       </Step>
     </div>
@@ -374,11 +512,8 @@ function TokenMinter({
         <p className="text-muted-foreground mt-4 text-sm">
           This workspace already has {tokenCount} active {tokenCount === 1 ? 'token' : 'tokens'}. If
           you still have one, use it below — otherwise create a fresh one; old tokens keep working
-          until you revoke them under{' '}
-          <Link to="/team" className="text-primary underline underline-offset-4">
-            Team → API tokens
-          </Link>
-          .
+          until you revoke them under <span className="font-medium">Your API tokens</span> at the
+          bottom of this page.
         </p>
       )}
     </div>
@@ -511,21 +646,24 @@ function GuestNotice() {
     <div className="border-border bg-card rounded-xl border p-8">
       <h2 className="font-display text-2xl font-semibold">You're a guest on this workspace</h2>
       <p className="text-muted-foreground mt-3 text-sm leading-relaxed">
-        API tokens read every gripe in a workspace, so only full members can create them. Ask an
-        owner for access to the whole workspace, or have them run the agent side themselves.
+        API tokens read every walkthrough in a workspace, so only full members can create them. Ask
+        an owner for access to the whole workspace, or have them run the agent side themselves.
       </p>
     </div>
   )
 }
 
 const TOOLS: Array<{ name: string; does: string }> = [
-  { name: 'list_gripes', does: "The workspace's gripes, newest first. Filter by status." },
   {
-    name: 'get_gripe',
+    name: 'list_walkthroughs',
+    does: "The workspace's walkthroughs, newest first. Filter by status.",
+  },
+  {
+    name: 'get_walkthrough',
     does: 'One full brief: report.md, the transcript, and a link to the video and every keyframe.',
   },
   {
-    name: 'set_gripe_status',
+    name: 'set_walkthrough_status',
     does: 'open → in_review when the fix is up. A human marks it resolved.',
   },
 ]

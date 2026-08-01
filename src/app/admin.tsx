@@ -26,6 +26,17 @@ function fmtBytes(n: number) {
   return gb >= 1 ? `${gb.toFixed(1)} GB` : `${Math.round(n / 1024 ** 2)} MB`
 }
 
+function fmtDuration(ms: number) {
+  const total = Math.round(ms / 1000)
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`
+}
+
+const STATUS_CLASS: Record<string, string> = {
+  open: 'bg-cobalt-wash text-cobalt',
+  in_review: 'bg-review-wash text-review',
+  resolved: 'bg-approve-wash text-approve',
+}
+
 export function AdminPage() {
   const trpc = useTRPC()
   const status = useQuery(trpc.admin.status.queryOptions())
@@ -55,6 +66,7 @@ function AdminBody() {
 
   const [query, setQuery] = useState('')
   const [submitted, setSubmitted] = useState('')
+  const [expanded, setExpanded] = useState<string | null>(null)
 
   const stats = useQuery(trpc.admin.stats.queryOptions())
   const users = useQuery(trpc.admin.users.queryOptions({ query: submitted }))
@@ -90,9 +102,9 @@ function AdminBody() {
             </p>
           </div>
           <div>
-            <p className="font-mono text-2xl">{stats.data.gripes}</p>
+            <p className="font-mono text-2xl">{stats.data.walkthroughs}</p>
             <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-              Gripes
+              Walkthroughs
             </p>
           </div>
           <div>
@@ -135,85 +147,99 @@ function AdminBody() {
               <span className="w-64 shrink-0">Workspaces</span>
               <span className="w-24 shrink-0">Team</span>
               <span className="w-24 shrink-0">Admin</span>
+              <span className="w-20 shrink-0">Walkthroughs</span>
             </div>
             <div className="divide-border divide-y">
               {users.data.map((u) => {
                 const teamOn = u.features.includes('team')
+                const isOpen = expanded === u.id
                 return (
-                  <div key={u.id} className="flex items-center gap-4 py-3">
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium">
-                        {u.name}
-                        {u.id === myUserId && (
-                          <span className="text-muted-foreground font-normal"> · you</span>
+                  <div key={u.id} className="py-3">
+                    <div className="flex items-center gap-4">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">
+                          {u.name}
+                          {u.id === myUserId && (
+                            <span className="text-muted-foreground font-normal"> · you</span>
+                          )}
+                        </p>
+                        <p className="text-muted-foreground truncate text-sm">
+                          {u.email}
+                          {!u.emailVerified && ' · unverified'}
+                        </p>
+                      </div>
+                      <span className="text-muted-foreground w-28 shrink-0 font-mono text-xs">
+                        {fmtDate(u.createdAt)}
+                      </span>
+                      <div className="flex w-64 shrink-0 flex-wrap gap-1">
+                        {u.orgs.length === 0 ? (
+                          <span className="text-muted-foreground text-xs">—</span>
+                        ) : (
+                          u.orgs.map((o, i) => (
+                            <span
+                              key={i}
+                              className="border-border text-muted-foreground rounded border px-1.5 py-0.5 text-xs">
+                              {o.name} · {o.role}
+                            </span>
+                          ))
                         )}
-                      </p>
-                      <p className="text-muted-foreground truncate text-sm">
-                        {u.email}
-                        {!u.emailVerified && ' · unverified'}
-                      </p>
-                    </div>
-                    <span className="text-muted-foreground w-28 shrink-0 font-mono text-xs">
-                      {fmtDate(u.createdAt)}
-                    </span>
-                    <div className="flex w-64 shrink-0 flex-wrap gap-1">
-                      {u.orgs.length === 0 ? (
-                        <span className="text-muted-foreground text-xs">—</span>
-                      ) : (
-                        u.orgs.map((o, i) => (
-                          <span
-                            key={i}
-                            className="border-border text-muted-foreground rounded border px-1.5 py-0.5 text-xs">
-                            {o.name} · {o.role}
+                      </div>
+                      <div className="w-24 shrink-0">
+                        {u.isAdmin ? (
+                          // Admins have every feature implicitly — no toggle to lie with.
+                          <span className="bg-cobalt-wash text-cobalt rounded px-2 py-0.5 text-xs font-medium">
+                            team on
                           </span>
-                        ))
-                      )}
-                    </div>
-                    <div className="w-24 shrink-0">
-                      {u.isAdmin ? (
-                        // Admins have every feature implicitly — no toggle to lie with.
-                        <span className="bg-cobalt-wash text-cobalt rounded px-2 py-0.5 text-xs font-medium">
-                          team on
-                        </span>
-                      ) : (
+                        ) : (
+                          <button
+                            type="button"
+                            aria-pressed={teamOn}
+                            disabled={setFeature.isPending}
+                            onClick={() =>
+                              setFeature.mutate({ userId: u.id, feature: 'team', enabled: !teamOn })
+                            }
+                            className={cn(
+                              'rounded px-2 py-0.5 text-xs font-medium transition-colors',
+                              teamOn
+                                ? 'bg-cobalt-wash text-cobalt'
+                                : 'bg-muted text-muted-foreground hover:text-foreground'
+                            )}>
+                            {teamOn ? 'team on' : 'team off'}
+                          </button>
+                        )}
+                      </div>
+                      <div className="w-24 shrink-0">
+                        {u.id === myUserId ? (
+                          <span className="bg-cobalt-wash text-cobalt rounded px-2 py-0.5 text-xs font-medium">
+                            admin on
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            aria-pressed={u.isAdmin}
+                            disabled={setAdmin.isPending}
+                            onClick={() => setAdmin.mutate({ userId: u.id, isAdmin: !u.isAdmin })}
+                            className={cn(
+                              'rounded px-2 py-0.5 text-xs font-medium transition-colors',
+                              u.isAdmin
+                                ? 'bg-cobalt-wash text-cobalt'
+                                : 'bg-muted text-muted-foreground hover:text-foreground'
+                            )}>
+                            {u.isAdmin ? 'admin on' : 'admin off'}
+                          </button>
+                        )}
+                      </div>
+                      <div className="w-20 shrink-0">
                         <button
                           type="button"
-                          aria-pressed={teamOn}
-                          disabled={setFeature.isPending}
-                          onClick={() =>
-                            setFeature.mutate({ userId: u.id, feature: 'team', enabled: !teamOn })
-                          }
-                          className={cn(
-                            'rounded px-2 py-0.5 text-xs font-medium transition-colors',
-                            teamOn
-                              ? 'bg-cobalt-wash text-cobalt'
-                              : 'bg-muted text-muted-foreground hover:text-foreground'
-                          )}>
-                          {teamOn ? 'team on' : 'team off'}
+                          aria-expanded={isOpen}
+                          onClick={() => setExpanded(isOpen ? null : u.id)}
+                          className="text-cobalt text-xs font-medium hover:underline">
+                          {isOpen ? 'hide' : 'view'}
                         </button>
-                      )}
+                      </div>
                     </div>
-                    <div className="w-24 shrink-0">
-                      {u.id === myUserId ? (
-                        <span className="bg-cobalt-wash text-cobalt rounded px-2 py-0.5 text-xs font-medium">
-                          admin on
-                        </span>
-                      ) : (
-                        <button
-                          type="button"
-                          aria-pressed={u.isAdmin}
-                          disabled={setAdmin.isPending}
-                          onClick={() => setAdmin.mutate({ userId: u.id, isAdmin: !u.isAdmin })}
-                          className={cn(
-                            'rounded px-2 py-0.5 text-xs font-medium transition-colors',
-                            u.isAdmin
-                              ? 'bg-cobalt-wash text-cobalt'
-                              : 'bg-muted text-muted-foreground hover:text-foreground'
-                          )}>
-                          {u.isAdmin ? 'admin on' : 'admin off'}
-                        </button>
-                      )}
-                    </div>
+                    {isOpen && <UserWalkthroughs userId={u.id} />}
                   </div>
                 )
               })}
@@ -225,6 +251,96 @@ function AdminBody() {
         )}
         {setAdmin.isError && <p className="text-destructive text-sm">{setAdmin.error.message}</p>}
       </section>
+    </div>
+  )
+}
+
+/**
+ * Everything one account can see, workspace by workspace. Reading another
+ * workspace's walkthrough works because platform admins bypass membership on the
+ * read side (`requireViewAccess`) — the viewer opens read-only, with no
+ * status, project, move or delete controls.
+ */
+function UserWalkthroughs({ userId }: { userId: string }) {
+  const trpc = useTRPC()
+  const groups = useQuery(trpc.admin.userWalkthroughs.queryOptions({ userId }))
+
+  if (groups.isPending)
+    return <p className="text-muted-foreground py-3 pl-4 text-sm">Loading walkthroughs…</p>
+  if (groups.isError)
+    return <p className="text-destructive py-3 pl-4 text-sm">{groups.error.message}</p>
+  if (!groups.data || groups.data.length === 0)
+    return <p className="text-muted-foreground py-3 pl-4 text-sm">No workspaces.</p>
+
+  return (
+    <div className="border-cobalt/25 mt-3 ml-4 space-y-5 border-l pl-4">
+      {groups.data.map((group) => (
+        <div key={group.org.id} className="space-y-2">
+          <div className="flex flex-wrap items-baseline gap-2">
+            <p className="text-sm font-medium">{group.org.name}</p>
+            <span className="text-muted-foreground font-mono text-xs">
+              {group.org.slug} · {group.role}
+              {group.scoped && ' · guest'}
+            </span>
+            <span className="text-muted-foreground ml-auto font-mono text-xs">
+              {group.walkthroughs.length}{' '}
+              {group.walkthroughs.length === 1 ? 'walkthrough' : 'walkthroughs'}
+            </span>
+          </div>
+
+          {group.walkthroughs.length === 0 ? (
+            <p className="text-muted-foreground text-sm">
+              {group.scoped ? 'Nothing in the projects they can see.' : 'No walkthroughs yet.'}
+            </p>
+          ) : (
+            <div className="divide-border/70 divide-y">
+              {group.walkthroughs.map((g) => (
+                <div key={g.id} className="flex items-center gap-3 py-2">
+                  <span
+                    className={cn(
+                      'w-20 shrink-0 rounded px-2 py-0.5 text-center text-xs font-medium',
+                      STATUS_CLASS[g.status] ?? 'bg-muted text-muted-foreground'
+                    )}>
+                    {g.status === 'in_review' ? 'in review' : g.status}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <Link
+                      to={`/walkthroughs/${g.id}`}
+                      className="text-cobalt truncate text-sm font-medium hover:underline">
+                      {g.title}
+                    </Link>
+                    <p className="text-muted-foreground truncate font-mono text-xs">
+                      {g.slug}
+                      {g.projectName && ` · ${g.projectName}`}
+                      {g.origin && ` · ${g.origin}`}
+                    </p>
+                  </div>
+                  <span className="text-muted-foreground w-40 shrink-0 truncate text-xs">
+                    {g.uploadedByThem ? 'uploaded by them' : `by ${g.uploadedByName ?? 'unknown'}`}
+                  </span>
+                  <span className="text-muted-foreground w-14 shrink-0 text-right font-mono text-xs">
+                    {fmtDuration(g.durationMs)}
+                  </span>
+                  <span className="text-muted-foreground w-16 shrink-0 text-right font-mono text-xs">
+                    {fmtBytes(g.bytes)}
+                  </span>
+                  <span className="text-muted-foreground w-28 shrink-0 text-right font-mono text-xs">
+                    {fmtDate(g.uploadedAt)}
+                  </span>
+                  {/* Declared but never finalized — invisible everywhere else. */}
+                  <span className="w-20 shrink-0 text-right">
+                    {!g.finalized && (
+                      <span className="bg-review-wash text-review rounded px-1.5 py-0.5 font-mono text-[10px] uppercase">
+                        unfinished
+                      </span>
+                    )}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   )
 }

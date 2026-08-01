@@ -4,16 +4,23 @@ import { z } from 'zod'
 import { inviteEmail, sendEmail } from './email'
 import { env } from './env'
 import { isPlatformAdmin, orgHasFeature, requireAdmin, userHasFeature } from './features'
-import { ORG_MAX_GRIPES, ORG_QUOTA_BYTES } from './ingest'
+import { ORG_MAX_WALKTHROUGHS, ORG_QUOTA_BYTES } from './ingest'
 import { log } from './logger'
-import { canSeeGripe, requireMembership, requireOrgScope, slugify } from './membership'
+import {
+  canSeeWalkthrough,
+  requireMembership,
+  requireOrgScope,
+  requireViewAccess,
+  slugify,
+} from './membership'
+import { createPersonalOrg } from './orgs'
 import { prisma } from './prisma'
 import { latestRecorderRelease } from './releases'
 import {
   copyObject,
   deletePrefix,
-  gripeKey,
-  gripePrefix,
+  walkthroughKey,
+  walkthroughPrefix,
   isSafePath,
   presignGet,
 } from './storage'
@@ -48,13 +55,42 @@ const orgsRouter = router({
       // anything above member, so the client can't render admin controls.
       role: m.scope === 'projects' ? 'member' : m.role,
       scope: m.scope,
+      personal: m.org.personal,
       teamEnabled: teamByOrg.get(m.org.id) ?? false,
     }))
   }),
 
+  /** What this account may do at the platform level, independent of any org. */
+  entitlements: protectedProcedure.query(async ({ ctx }) => {
+    const u = await prisma.user.findUnique({
+      where: { id: ctx.session.user.id },
+      select: { email: true, isAdmin: true, features: true },
+    })
+    return { canCreateTeams: u !== null && userHasFeature(u, 'team') }
+  }),
+
+  /**
+   * The repair path for an account whose sign-up hook didn't land. Idempotent —
+   * a user who already has a workspace just gets its id back.
+   */
+  ensurePersonal: protectedProcedure.mutation(async ({ ctx }) => {
+    return await createPersonalOrg(ctx.session.user.id, ctx.session.user.name ?? '')
+  }),
+
+  /** Creating a workspace by hand means creating a team — a paid entitlement. */
   create: protectedProcedure
     .input(z.object({ name: z.string().trim().min(1).max(80) }))
     .mutation(async ({ ctx, input }) => {
+      const u = await prisma.user.findUnique({
+        where: { id: ctx.session.user.id },
+        select: { email: true, isAdmin: true, features: true },
+      })
+      if (!u || !userHasFeature(u, 'team')) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: "Teams are a paid feature and aren't enabled for your account yet.",
+        })
+      }
       const base = slugify(input.name)
       // Suffix until free — org slugs are global.
       let slug = base
@@ -236,6 +272,16 @@ const invitesRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       await requireMembership(ctx.session.user.id, input.orgId, 'admin')
+      const target = await prisma.org.findUnique({
+        where: { id: input.orgId },
+        select: { personal: true },
+      })
+      if (target?.personal) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'This is a personal workspace — create a team to invite people.',
+        })
+      }
       if (!(await orgHasFeature(input.orgId, 'team'))) {
         throw new TRPCError({
           code: 'FORBIDDEN',
@@ -441,14 +487,14 @@ const projectsRouter = router({
         ...(access.projectIds ? { id: { in: access.projectIds } } : {}),
       },
       orderBy: { createdAt: 'asc' },
-      include: { _count: { select: { gripes: true } } },
+      include: { _count: { select: { walkthroughs: true } } },
     })
     return rows.map((p) => ({
       id: p.id,
       name: p.name,
       slug: p.slug,
       originHints: p.originHints,
-      gripeCount: p._count.gripes,
+      walkthroughCount: p._count.walkthroughs,
     }))
   }),
 
@@ -486,7 +532,9 @@ const projectsRouter = router({
         orgId: z.string(),
         projectId: z.string(),
         name: z.string().trim().min(1).max(80),
-        originHints: z.array(z.string().trim().max(200)).max(20).default([]),
+        // Optional, not defaulted: the UI no longer edits hints, and a rename
+        // must not silently wipe the routing an upload depends on.
+        originHints: z.array(z.string().trim().max(200)).max(20).optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -497,13 +545,16 @@ const projectsRouter = router({
       // Slug stays for the same reason an org's does.
       await prisma.project.update({
         where: { id: p.id },
-        data: { name: input.name, originHints: input.originHints },
+        data: {
+          name: input.name,
+          ...(input.originHints ? { originHints: input.originHints } : {}),
+        },
       })
       return { ok: true }
     }),
 })
 
-const gripeListSelect = {
+const walkthroughListSelect = {
   id: true,
   slug: true,
   title: true,
@@ -522,7 +573,7 @@ const gripeListSelect = {
   _count: { select: { takes: true } },
 } as const
 
-const gripesRouter = router({
+const walkthroughsRouter = router({
   list: protectedProcedure
     .input(
       z.object({
@@ -533,10 +584,10 @@ const gripesRouter = router({
     )
     .query(async ({ ctx, input }) => {
       const access = await requireMembership(ctx.session.user.id, input.orgId)
-      if (input.projectId && !canSeeGripe(access, input.projectId)) {
+      if (input.projectId && !canSeeWalkthrough(access, input.projectId)) {
         throw new TRPCError({ code: 'FORBIDDEN' })
       }
-      const rows = await prisma.gripe.findMany({
+      const rows = await prisma.walkthrough.findMany({
         where: {
           orgId: input.orgId,
           finalizedAt: { not: null },
@@ -549,7 +600,7 @@ const gripesRouter = router({
         },
         orderBy: { recordedAt: 'desc' },
         take: 200,
-        select: gripeListSelect,
+        select: walkthroughListSelect,
       })
       return rows.map((g) => ({
         id: g.id,
@@ -571,95 +622,100 @@ const gripesRouter = router({
       }))
     }),
 
-  get: protectedProcedure.input(z.object({ gripeId: z.string() })).query(async ({ ctx, input }) => {
-    const g = await prisma.gripe.findUnique({
-      where: { id: input.gripeId },
-      include: {
-        takes: { orderBy: { index: 'asc' } },
-        files: { where: { status: 'uploaded' }, orderBy: { path: 'asc' } },
-        project: { select: { id: true, name: true, slug: true } },
-        uploadedBy: { select: { name: true } },
-      },
-    })
-    if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
-    const access = await requireMembership(ctx.session.user.id, g.orgId)
-    if (!canSeeGripe(access, g.projectId)) throw new TRPCError({ code: 'NOT_FOUND' })
-    return {
-      id: g.id,
-      orgId: g.orgId,
-      slug: g.slug,
-      title: g.title,
-      origin: g.origin,
-      status: g.status,
-      recordedAt: g.recordedAt.toISOString(),
-      uploadedAt: g.uploadedAt.toISOString(),
-      durationMs: g.durationMs,
-      frameCount: g.frameCount,
-      errorCount: g.errorCount,
-      droppedCount: g.droppedCount,
-      bytes: Number(g.bytes),
-      project: g.project,
-      uploadedByName: g.uploadedBy?.name ?? null,
-      takes: g.takes.map((t) => ({
-        id: t.id,
-        index: t.index,
-        dir: t.dir,
-        interrupted: t.interrupted,
-        startedAt: iso(t.startedAt),
-        durationMs: t.durationMs,
-        frameCount: t.frameCount,
-        transcriber: t.transcriber,
-        videoPath: t.videoPath,
-      })),
-      // Presigned per file so the viewer never round-trips per frame; signing
-      // is local HMAC work, cheap even at a few hundred files.
-      files: await Promise.all(
-        g.files.map(async (f) => ({
-          path: f.path,
-          size: f.size,
-          contentType: f.contentType,
-          url: await presignGet(gripeKey(g.orgId, g.id, f.path)),
-        }))
-      ),
-    }
-  }),
+  get: protectedProcedure
+    .input(z.object({ walkthroughId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      const g = await prisma.walkthrough.findUnique({
+        where: { id: input.walkthroughId },
+        include: {
+          takes: { orderBy: { index: 'asc' } },
+          files: { where: { status: 'uploaded' }, orderBy: { path: 'asc' } },
+          project: { select: { id: true, name: true, slug: true } },
+          uploadedBy: { select: { name: true } },
+        },
+      })
+      if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
+      const { access, isMember } = await requireViewAccess(ctx.session.user.id, g.orgId)
+      if (!canSeeWalkthrough(access, g.projectId)) throw new TRPCError({ code: 'NOT_FOUND' })
+      return {
+        id: g.id,
+        orgId: g.orgId,
+        // False when a platform admin is looking in from /admin — the viewer
+        // hides every control, because the mutations would 403 anyway.
+        viewerIsMember: isMember,
+        slug: g.slug,
+        title: g.title,
+        origin: g.origin,
+        status: g.status,
+        recordedAt: g.recordedAt.toISOString(),
+        uploadedAt: g.uploadedAt.toISOString(),
+        durationMs: g.durationMs,
+        frameCount: g.frameCount,
+        errorCount: g.errorCount,
+        droppedCount: g.droppedCount,
+        bytes: Number(g.bytes),
+        project: g.project,
+        uploadedByName: g.uploadedBy?.name ?? null,
+        takes: g.takes.map((t) => ({
+          id: t.id,
+          index: t.index,
+          dir: t.dir,
+          interrupted: t.interrupted,
+          startedAt: iso(t.startedAt),
+          durationMs: t.durationMs,
+          frameCount: t.frameCount,
+          transcriber: t.transcriber,
+          videoPath: t.videoPath,
+        })),
+        // Presigned per file so the viewer never round-trips per frame; signing
+        // is local HMAC work, cheap even at a few hundred files.
+        files: await Promise.all(
+          g.files.map(async (f) => ({
+            path: f.path,
+            size: f.size,
+            contentType: f.contentType,
+            url: await presignGet(walkthroughKey(g.orgId, g.id, f.path)),
+          }))
+        ),
+      }
+    }),
 
   /**
-   * Short-lived presigned GET for one file of a gripe. The viewer asks per
+   * Short-lived presigned GET for one file of a walkthrough. The viewer asks per
    * file (video, frame, report) as it needs them.
    */
   fileUrl: protectedProcedure
-    .input(z.object({ gripeId: z.string(), path: z.string() }))
+    .input(z.object({ walkthroughId: z.string(), path: z.string() }))
     .query(async ({ ctx, input }) => {
       if (!isSafePath(input.path)) throw new TRPCError({ code: 'BAD_REQUEST' })
-      const g = await prisma.gripe.findUnique({
-        where: { id: input.gripeId },
+      const g = await prisma.walkthrough.findUnique({
+        where: { id: input.walkthroughId },
         select: { orgId: true, projectId: true },
       })
       if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
-      const access = await requireMembership(ctx.session.user.id, g.orgId)
-      if (!canSeeGripe(access, g.projectId)) throw new TRPCError({ code: 'NOT_FOUND' })
-      const file = await prisma.gripeFile.findUnique({
-        where: { gripeId_path: { gripeId: input.gripeId, path: input.path } },
+      const { access } = await requireViewAccess(ctx.session.user.id, g.orgId)
+      if (!canSeeWalkthrough(access, g.projectId)) throw new TRPCError({ code: 'NOT_FOUND' })
+      const file = await prisma.walkthroughFile.findUnique({
+        where: { walkthroughId_path: { walkthroughId: input.walkthroughId, path: input.path } },
       })
       if (!file || file.status !== 'uploaded') throw new TRPCError({ code: 'NOT_FOUND' })
-      return { url: await presignGet(gripeKey(g.orgId, input.gripeId, input.path)) }
+      return { url: await presignGet(walkthroughKey(g.orgId, input.walkthroughId, input.path)) }
     }),
 
   setStatus: protectedProcedure
     .input(
-      z.object({ gripeId: z.string(), status: z.enum(['open', 'in_review', 'resolved']) })
+      z.object({ walkthroughId: z.string(), status: z.enum(['open', 'in_review', 'resolved']) })
     )
     .mutation(async ({ ctx, input }) => {
-      const g = await prisma.gripe.findUnique({
-        where: { id: input.gripeId },
+      const g = await prisma.walkthrough.findUnique({
+        where: { id: input.walkthroughId },
         select: { orgId: true, projectId: true },
       })
       if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
       const access = await requireMembership(ctx.session.user.id, g.orgId)
-      if (!canSeeGripe(access, g.projectId)) throw new TRPCError({ code: 'NOT_FOUND' })
-      await prisma.gripe.update({
-        where: { id: input.gripeId },
+      if (!canSeeWalkthrough(access, g.projectId)) throw new TRPCError({ code: 'NOT_FOUND' })
+      await prisma.walkthrough.update({
+        where: { id: input.walkthroughId },
         data: {
           status: input.status,
           resolvedAt: input.status === 'resolved' ? new Date() : null,
@@ -668,26 +724,29 @@ const gripesRouter = router({
       return { ok: true }
     }),
 
-  /** Same access bar as setStatus — anyone who can see the gripe can title it. */
+  /** Same access bar as setStatus — anyone who can see the walkthrough can title it. */
   rename: protectedProcedure
-    .input(z.object({ gripeId: z.string(), title: z.string().trim().min(1).max(300) }))
+    .input(z.object({ walkthroughId: z.string(), title: z.string().trim().min(1).max(300) }))
     .mutation(async ({ ctx, input }) => {
-      const g = await prisma.gripe.findUnique({
-        where: { id: input.gripeId },
+      const g = await prisma.walkthrough.findUnique({
+        where: { id: input.walkthroughId },
         select: { orgId: true, projectId: true },
       })
       if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
       const access = await requireMembership(ctx.session.user.id, g.orgId)
-      if (!canSeeGripe(access, g.projectId)) throw new TRPCError({ code: 'NOT_FOUND' })
-      await prisma.gripe.update({ where: { id: input.gripeId }, data: { title: input.title } })
+      if (!canSeeWalkthrough(access, g.projectId)) throw new TRPCError({ code: 'NOT_FOUND' })
+      await prisma.walkthrough.update({
+        where: { id: input.walkthroughId },
+        data: { title: input.title },
+      })
       return { ok: true }
     }),
 
   assignProject: protectedProcedure
-    .input(z.object({ gripeId: z.string(), projectId: z.string().nullable() }))
+    .input(z.object({ walkthroughId: z.string(), projectId: z.string().nullable() }))
     .mutation(async ({ ctx, input }) => {
-      const g = await prisma.gripe.findUnique({
-        where: { id: input.gripeId },
+      const g = await prisma.walkthrough.findUnique({
+        where: { id: input.walkthroughId },
         select: { orgId: true },
       })
       if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
@@ -697,110 +756,119 @@ const gripesRouter = router({
         const p = await prisma.project.findUnique({ where: { id: input.projectId } })
         if (!p || p.orgId !== g.orgId) throw new TRPCError({ code: 'BAD_REQUEST' })
       }
-      await prisma.gripe.update({
-        where: { id: input.gripeId },
+      await prisma.walkthrough.update({
+        where: { id: input.walkthroughId },
         data: { projectId: input.projectId },
       })
       return { ok: true }
     }),
 
   /**
-   * Move a gripe to another workspace the caller also holds in full.
+   * Move a walkthrough to another workspace the caller also holds in full.
    *
    * Order matters: copy the objects, flip the row, then delete the originals.
-   * A crash mid-copy leaves the gripe untouched where it was; a crash after the
+   * A crash mid-copy leaves the walkthrough untouched where it was; a crash after the
    * flip leaves orphaned objects under the old prefix, which is a cleanup
-   * problem rather than a lost or half-visible gripe. The reverse order would
+   * problem rather than a lost or half-visible walkthrough. The reverse order would
    * trade that for a row pointing at keys that no longer exist.
    *
    * Presigned URLs handed out before the move keep pointing at the old keys and
    * die with them — by design; the viewer re-signs against the new prefix.
    */
   moveToOrg: protectedProcedure
-    .input(z.object({ gripeId: z.string(), orgId: z.string() }))
+    .input(z.object({ walkthroughId: z.string(), orgId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const gripe = await prisma.gripe.findUnique({
-        where: { id: input.gripeId },
+      const walkthrough = await prisma.walkthrough.findUnique({
+        where: { id: input.walkthroughId },
         // Only uploaded files exist as objects — a pending row (declared but
         // never finished) would make the copy throw NoSuchKey and strand the move.
         include: { files: { select: { path: true }, where: { status: 'uploaded' } } },
       })
-      if (!gripe) throw new TRPCError({ code: 'NOT_FOUND' })
+      if (!walkthrough) throw new TRPCError({ code: 'NOT_FOUND' })
       // Both ends have to be whole-workspace access: a guest must not be able
-      // to walk a project's gripe out into an org of their own.
-      requireOrgScope(await requireMembership(ctx.session.user.id, gripe.orgId))
+      // to walk a project's walkthrough out into an org of their own.
+      requireOrgScope(await requireMembership(ctx.session.user.id, walkthrough.orgId))
       requireOrgScope(await requireMembership(ctx.session.user.id, input.orgId))
-      if (input.orgId === gripe.orgId) {
+      if (input.orgId === walkthrough.orgId) {
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'Already in that workspace' })
       }
 
       // The destination's quota is the same one ingest enforces — a move is
       // another way to put bytes in a workspace.
-      const dest = await prisma.gripe.aggregate({
+      const dest = await prisma.walkthrough.aggregate({
         where: { orgId: input.orgId },
         _sum: { bytes: true },
         _count: true,
       })
-      if ((dest._sum.bytes ?? 0n) + gripe.bytes > BigInt(ORG_QUOTA_BYTES)) {
+      if ((dest._sum.bytes ?? 0n) + walkthrough.bytes > BigInt(ORG_QUOTA_BYTES)) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
           message: 'That workspace is at its storage quota',
         })
       }
-      if (dest._count >= ORG_MAX_GRIPES) {
-        throw new TRPCError({ code: 'BAD_REQUEST', message: 'That workspace is at its gripe limit' })
+      if (dest._count >= ORG_MAX_WALKTHROUGHS) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'That workspace is at its walkthrough limit',
+        })
       }
 
-      // Suffix until free — a move must never replace a gripe already there.
-      let slug = gripe.slug
+      // Suffix until free — a move must never replace a walkthrough already there.
+      let slug = walkthrough.slug
       for (
         let n = 2;
-        await prisma.gripe.findUnique({ where: { orgId_slug: { orgId: input.orgId, slug } } });
+        await prisma.walkthrough.findUnique({
+          where: { orgId_slug: { orgId: input.orgId, slug } },
+        });
         n++
       ) {
-        slug = `${gripe.slug}-${n}`
+        slug = `${walkthrough.slug}-${n}`
       }
 
-      // A gripe can hold hundreds of files; copy server-side, 8 at a time.
-      const paths = gripe.files.map((f) => f.path)
+      // A walkthrough can hold hundreds of files; copy server-side, 8 at a time.
+      const paths = walkthrough.files.map((f) => f.path)
       for (let i = 0; i < paths.length; i += 8) {
         await Promise.all(
           paths
             .slice(i, i + 8)
             .map((path) =>
               copyObject(
-                gripeKey(gripe.orgId, gripe.id, path),
-                gripeKey(input.orgId, gripe.id, path)
+                walkthroughKey(walkthrough.orgId, walkthrough.id, path),
+                walkthroughKey(input.orgId, walkthrough.id, path)
               )
             )
         )
       }
 
-      await prisma.gripe.update({
-        where: { id: gripe.id },
+      await prisma.walkthrough.update({
+        where: { id: walkthrough.id },
         // Projects are per-org, so the assignment cannot survive the move.
         data: { orgId: input.orgId, projectId: null, slug },
       })
 
       try {
-        await deletePrefix(gripePrefix(gripe.orgId, gripe.id))
+        await deletePrefix(walkthroughPrefix(walkthrough.orgId, walkthrough.id))
       } catch (err) {
-        log.warn('move: source cleanup failed', { gripeId: gripe.id, orgId: gripe.orgId, err })
+        log.warn('move: source cleanup failed', {
+          walkthroughId: walkthrough.id,
+          orgId: walkthrough.orgId,
+          err,
+        })
       }
       return { ok: true, orgId: input.orgId, slug }
     }),
 
   delete: protectedProcedure
-    .input(z.object({ gripeId: z.string() }))
+    .input(z.object({ walkthroughId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const g = await prisma.gripe.findUnique({
-        where: { id: input.gripeId },
+      const g = await prisma.walkthrough.findUnique({
+        where: { id: input.walkthroughId },
         select: { orgId: true },
       })
       if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
       await requireMembership(ctx.session.user.id, g.orgId, 'admin')
-      await deletePrefix(gripePrefix(g.orgId, input.gripeId))
-      await prisma.gripe.delete({ where: { id: input.gripeId } })
+      await deletePrefix(walkthroughPrefix(g.orgId, input.walkthroughId))
+      await prisma.walkthrough.delete({ where: { id: input.walkthroughId } })
       return { ok: true }
     }),
 })
@@ -817,13 +885,13 @@ const adminRouter = router({
 
   stats: protectedProcedure.query(async ({ ctx }) => {
     await requireAdmin(ctx.session.user.id)
-    const [users, orgs, gripes, bytes] = await Promise.all([
+    const [users, orgs, walkthroughs, bytes] = await Promise.all([
       prisma.user.count(),
       prisma.org.count(),
-      prisma.gripe.count(),
-      prisma.gripe.aggregate({ _sum: { bytes: true } }),
+      prisma.walkthrough.count(),
+      prisma.walkthrough.aggregate({ _sum: { bytes: true } }),
     ])
-    return { users, orgs, gripes, bytes: Number(bytes._sum.bytes ?? 0) }
+    return { users, orgs, walkthroughs, bytes: Number(bytes._sum.bytes ?? 0) }
   }),
 
   users: protectedProcedure
@@ -859,6 +927,70 @@ const adminRouter = router({
         features: u.features,
         createdAt: u.createdAt.toISOString(),
         orgs: u.memberships.map((m) => ({ name: m.org.name, role: m.role })),
+      }))
+    }),
+
+  /**
+   * Every walkthrough one account can see, grouped by workspace — the drill-down
+   * behind a row on /admin. A guest's slice is honoured (only their granted
+   * projects), so this is genuinely "what this user sees", not "what their
+   * workspaces hold. Unfinalized walkthroughs are included and flagged: a declare
+   * that never finalized is invisible in the product and is exactly the kind
+   * of stuck upload an admin is looking for.
+   */
+  userWalkthroughs: protectedProcedure
+    .input(z.object({ userId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      await requireAdmin(ctx.session.user.id)
+      const memberships = await prisma.membership.findMany({
+        where: { userId: input.userId },
+        select: {
+          role: true,
+          scope: true,
+          org: { select: { id: true, name: true, slug: true } },
+          projectAccess: { select: { projectId: true } },
+        },
+        orderBy: { createdAt: 'asc' },
+      })
+      if (memberships.length === 0) return []
+
+      const walkthroughs = await prisma.walkthrough.findMany({
+        where: {
+          OR: memberships.map((m) =>
+            m.scope === 'projects'
+              ? { orgId: m.org.id, projectId: { in: m.projectAccess.map((a) => a.projectId) } }
+              : { orgId: m.org.id }
+          ),
+        },
+        orderBy: { uploadedAt: 'desc' },
+        take: 500,
+        include: {
+          project: { select: { name: true } },
+          uploadedBy: { select: { id: true, name: true } },
+        },
+      })
+
+      return memberships.map((m) => ({
+        org: m.org,
+        role: m.scope === 'projects' ? 'member' : m.role,
+        scoped: m.scope === 'projects',
+        walkthroughs: walkthroughs
+          .filter((g) => g.orgId === m.org.id)
+          .map((g) => ({
+            id: g.id,
+            slug: g.slug,
+            title: g.title,
+            status: g.status,
+            origin: g.origin,
+            uploadedAt: g.uploadedAt.toISOString(),
+            durationMs: g.durationMs,
+            bytes: Number(g.bytes),
+            finalized: g.finalizedAt !== null,
+            projectName: g.project?.name ?? null,
+            uploadedByName: g.uploadedBy?.name ?? null,
+            // Their own recording vs. one a workspace-mate uploaded.
+            uploadedByThem: g.uploadedById === input.userId,
+          })),
       }))
     }),
 
@@ -910,7 +1042,7 @@ export const appRouter = router({
   invites: invitesRouter,
   tokens: tokensRouter,
   projects: projectsRouter,
-  gripes: gripesRouter,
+  walkthroughs: walkthroughsRouter,
   admin: adminRouter,
 })
 

@@ -1,9 +1,9 @@
 import { cn } from '~/lib/utils'
-import type { GripeStatus } from './types'
+import type { WalkthroughStatus } from './types'
 
 // Status inks are fixed by ui.md: open = cobalt, in_review = violet,
 // resolved = green. The active segment wears its own wash.
-const SEGMENTS: { value: GripeStatus; label: string; active: string }[] = [
+const SEGMENTS: { value: WalkthroughStatus; label: string; active: string }[] = [
   { value: 'open', label: 'Open', active: 'bg-cobalt-wash text-cobalt' },
   { value: 'in_review', label: 'In review', active: 'bg-review-wash text-review' },
   { value: 'resolved', label: 'Resolved', active: 'bg-approve-wash text-approve' },
@@ -15,13 +15,13 @@ export function StatusControl({
   disabled,
 }: {
   status: string
-  onChange: (status: GripeStatus) => void
+  onChange: (status: WalkthroughStatus) => void
   disabled?: boolean
 }) {
   return (
     <div
       role="group"
-      aria-label="Gripe status"
+      aria-label="Walkthrough status"
       className="border-input inline-flex overflow-hidden rounded-md border">
       {SEGMENTS.map((segment, i) => {
         const active = segment.value === status

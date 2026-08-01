@@ -1,15 +1,13 @@
-// The inbox — the main workspace list. Three states live here: first run (no
-// org yet), the filtered gripe list, and the empty "nothing here yet" guide.
+// The inbox — the main workspace list. Three states live here: provisioning (no
+// org yet), the filtered walkthrough list, and the empty "nothing here yet" guide.
 // Status colors are fixed by ui.md: open = cobalt, in_review = violet,
 // resolved = green.
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { ArrowRight, X } from 'lucide-react'
 import { Button } from '~/components/ui/button'
-import { Input } from '~/components/ui/input'
-import { Label } from '~/components/ui/label'
 import { useActiveOrg } from '~/lib/org'
 import { useTRPC } from '~/lib/trpc'
 import { cn } from '~/lib/utils'
@@ -30,6 +28,15 @@ function statusMeta(status: string): { label: string; wash: string } {
   return { label: 'Open', wash: 'bg-cobalt-wash text-cobalt' }
 }
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+// UTC parts, not toLocaleDateString: locale formatting differs between the SSR
+// runtime and the browser, which would break hydration.
+function fmtDate(value: string): string {
+  const d = new Date(value)
+  return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`
+}
+
 function formatDuration(ms: number): string {
   const total = Math.max(0, Math.round(ms / 1000))
   const m = Math.floor(total / 60)
@@ -42,7 +49,7 @@ export function InboxPage() {
 
   // SSR and the first client paint land here: orgs unknown, show the shape.
   if (!orgsLoaded && !org) return <InboxSkeleton />
-  if (!org) return <FirstRun />
+  if (!org) return <ProvisioningWorkspace />
   return <Inbox orgId={org.id} />
 }
 
@@ -51,8 +58,8 @@ function Inbox({ orgId }: { orgId: string }) {
   const [status, setStatus] = useState<StatusFilter>(null)
   const [projectId, setProjectId] = useState<string | null>(null)
 
-  const gripes = useQuery(
-    trpc.gripes.list.queryOptions({
+  const walkthroughs = useQuery(
+    trpc.walkthroughs.list.queryOptions({
       orgId,
       ...(status ? { status } : {}),
       ...(projectId ? { projectId } : {}),
@@ -60,7 +67,7 @@ function Inbox({ orgId }: { orgId: string }) {
   )
   const projects = useQuery(trpc.projects.list.queryOptions({ orgId }))
 
-  const rows = gripes.data ?? []
+  const rows = walkthroughs.data ?? []
   const unfiltered = status === null && projectId === null
 
   return (
@@ -103,18 +110,18 @@ function Inbox({ orgId }: { orgId: string }) {
         </div>
       </div>
 
-      {gripes.isPending ? (
+      {walkthroughs.isPending ? (
         <SkeletonRows />
-      ) : gripes.isError ? (
+      ) : walkthroughs.isError ? (
         <p className="text-destructive py-8 text-sm">
-          Could not load the inbox. {gripes.error.message}
+          Could not load the inbox. {walkthroughs.error.message}
         </p>
       ) : rows.length === 0 ? (
         unfiltered ? (
-          <FirstGripeGuide />
+          <FirstWalkthroughGuide />
         ) : (
           <p className="text-muted-foreground border-border border-t py-10 text-sm">
-            No gripes match these filters.
+            No walkthroughs match these filters.
           </p>
         )
       ) : (
@@ -124,7 +131,7 @@ function Inbox({ orgId }: { orgId: string }) {
             return (
               <Link
                 key={g.id}
-                to={`/gripes/${g.id}`}
+                to={`/walkthroughs/${g.id}`}
                 className="hover:bg-accent/40 flex items-start gap-4 rounded-md px-3 py-4 transition-colors">
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-medium">{g.title}</p>
@@ -153,7 +160,7 @@ function Inbox({ orgId }: { orgId: string }) {
                   <div>
                     {g.takeCount} {g.takeCount === 1 ? 'take' : 'takes'} · {g.frameCount} frames
                   </div>
-                  <div>{new Date(g.recordedAt).toLocaleDateString()}</div>
+                  <div>{fmtDate(g.recordedAt)}</div>
                   {g.uploadedByName && <div className="truncate">{g.uploadedByName}</div>}
                 </div>
               </Link>
@@ -165,14 +172,18 @@ function Inbox({ orgId }: { orgId: string }) {
   )
 }
 
-/** No org yet — the very first thing a new account sees. */
-function FirstRun() {
+/**
+ * Signed in, but no workspace — an account whose sign-up hook didn't land.
+ * Repair it silently rather than asking someone to name something; the skeleton
+ * is the whole story a healthy account should ever see here.
+ */
+function ProvisioningWorkspace() {
   const trpc = useTRPC()
   const { refreshOrgs, setActiveOrgId } = useActiveOrg()
-  const [name, setName] = useState('')
+  const fired = useRef(false)
 
-  const create = useMutation(
-    trpc.orgs.create.mutationOptions({
+  const ensure = useMutation(
+    trpc.orgs.ensurePersonal.mutationOptions({
       onSuccess: (result) => {
         refreshOrgs()
         setActiveOrgId(result.id)
@@ -180,41 +191,35 @@ function FirstRun() {
     })
   )
 
-  function onSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    const trimmed = name.trim()
-    if (!trimmed || create.isPending) return
-    create.mutate({ name: trimmed })
+  const { mutate } = ensure
+  useEffect(() => {
+    if (fired.current) return
+    fired.current = true
+    mutate()
+  }, [mutate])
+
+  if (ensure.isError) {
+    return (
+      <div className="max-w-xl space-y-3 py-10">
+        <p className="text-destructive text-sm">
+          Couldn't set up your workspace. {ensure.error.message}
+        </p>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => mutate()}
+          disabled={ensure.isPending}>
+          {ensure.isPending ? 'Retrying…' : 'Try again'}
+        </Button>
+      </div>
+    )
   }
 
-  return (
-    <div className="bg-card border-border mx-auto mt-10 max-w-md rounded-xl border p-8 shadow-sm">
-      <h1 className="font-display text-2xl font-semibold">Name your workspace</h1>
-      <p className="text-muted-foreground mt-2 text-sm">Your team's gripes land in one inbox.</p>
-      <form onSubmit={onSubmit} className="mt-6 space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="org-name">Organization name</Label>
-          <Input
-            id="org-name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Acme Design"
-            maxLength={80}
-            autoFocus
-            required
-          />
-        </div>
-        {create.isError && <p className="text-destructive text-sm">{create.error.message}</p>}
-        <Button type="submit" className="w-full" disabled={create.isPending || !name.trim()}>
-          {create.isPending ? 'Creating…' : 'Create organization'}
-        </Button>
-      </form>
-    </div>
-  )
+  return <InboxSkeleton />
 }
 
 /**
- * The one thing worth interrupting the inbox for: an inbox full of gripes is
+ * The one thing worth interrupting the inbox for: an inbox full of walkthroughs is
  * useless if the person who fixes them can't reach it. Shown until an agent has
  * actually called in (`lastUsedAt`), then gone for good — and dismissible in
  * the meantime, because a banner you can't close is a banner people learn to
@@ -240,8 +245,8 @@ function ConnectBanner({ orgId }: { orgId: string }) {
           Are you the engineer who's going to fix these?
         </p>
         <p className="text-muted-foreground mt-1 text-sm">
-          Connect Claude Code and it can read a gripe end to end — narration, keyframes, console
-          errors — then hand the fix back for sign-off. One command, about a minute.
+          Connect Claude Code and it can read a walkthrough end to end — narration, keyframes,
+          console errors — then hand the fix back for sign-off. One command, about a minute.
         </p>
       </div>
       <Link
@@ -265,13 +270,13 @@ function ConnectBanner({ orgId }: { orgId: string }) {
 }
 
 /** Org exists, inbox is genuinely empty: the two halves of getting one here. */
-function FirstGripeGuide() {
+function FirstWalkthroughGuide() {
   return (
     <div className="bg-card border-border max-w-2xl rounded-xl border p-8 shadow-sm">
-      <h2 className="font-display text-xl font-semibold">No gripes yet.</h2>
+      <h2 className="font-display text-xl font-semibold">No walkthroughs yet.</h2>
       <p className="text-muted-foreground mt-2 text-sm">
-        A gripe is a recorded walkthrough of something being wrong. Two sides to set up: the person
-        recording, and the agent fixing.
+        A walkthrough is a narrated screen recording — a bug, review feedback, anything you'd rather
+        say than type. Two sides to set up: the person recording, and the agent fixing.
       </p>
 
       <div className="mt-6 space-y-6">
@@ -292,7 +297,7 @@ function FirstGripeGuide() {
         <section className="border-border border-t pt-5">
           <h3 className="text-sm font-semibold">Get one out</h3>
           <p className="text-muted-foreground mt-1 text-sm">
-            Connect a coding agent now and gripes are actionable the moment they land.
+            Connect a coding agent now and walkthroughs are actionable the moment they land.
           </p>
           <Link
             to="/connect"

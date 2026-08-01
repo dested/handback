@@ -106,6 +106,26 @@
   background: var(--tl-mat);
   border-bottom: 1px solid var(--border);
 }
+/* Both of these are about the stacked panel only. Popped out wide the monitor is
+   a fixed column beside the axis, and capping its *height* there would be
+   meaningless at best. */
+.tl:not(.wide) .tl-monitor {
+  /* It grows into slack, but never past half the editor — past that the picture
+     is winning an argument against the thing you are actually working in. */
+  max-height: 50%;
+}
+/* Nothing to show: stop growing and stop pretending. One line, not a slab. */
+.tl:not(.wide) .tl-monitor.bare {
+  flex: none;
+  min-height: 0;
+  background: var(--paper);
+}
+.tl-noshot {
+  padding: 10px 0;
+  color: var(--muted);
+  font-size: var(--fs-0);
+  font-family: var(--font-mono);
+}
 .tl-screen {
   flex: 1;
   min-height: 0;
@@ -316,9 +336,13 @@
 
 /* Ruler and tracks share one scroller, so they can never disagree about x. It
    hugs its lanes — a well with nothing in it is what makes an editor look broken. */
+/* The axis is the thing being edited, so it takes the slack and gives it up last.
+   It used to be `0 1 auto` against a monitor that grew — which crushed the ruler
+   and both lanes to a sliver and left a tall blank picture above them. The floor
+   is one ruler plus two full lanes: below that there is nothing to aim at. */
 .tl-scroll {
-  flex: 0 1 auto;
-  min-height: 0;
+  flex: 1 1 auto;
+  min-height: calc(var(--tl-ruler-h) + var(--tl-track-h) * 2 + 26px);
   overflow: auto;
   overscroll-behavior: contain;
   background: var(--tl-well);

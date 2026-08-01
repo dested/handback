@@ -8,7 +8,7 @@ import { AdminPage } from './admin'
 import { InboxPage } from './app'
 import { ConnectPage } from './connect'
 import { RouteErrorBoundary } from './error-boundary'
-import { GripePage } from './gripe'
+import { WalkthroughPage } from './walkthrough'
 import { HomePage } from './home'
 import { JoinPage } from './join'
 import { Layout } from './layout'
@@ -91,13 +91,20 @@ export const routes: RouteObject[] = [
       { path: 'privacy', Component: PrivacyPage },
       { path: 'terms', Component: TermsPage },
       { path: 'app', Component: InboxPage, loader: appLoader },
-      { path: 'gripes/:gripeId', Component: GripePage, loader: appLoader },
+      { path: 'walkthroughs/:walkthroughId', Component: WalkthroughPage, loader: appLoader },
       { path: 'connect', Component: ConnectPage, loader: appLoader },
       { path: 'recorder', Component: RecorderPage, loader: appLoader },
       { path: 'projects', Component: ProjectsPage, loader: appLoader },
       { path: 'team', Component: TeamPage, loader: appLoader },
       { path: 'admin', Component: AdminPage, loader: appLoader },
       { path: 'dashboard', loader: () => redirect('/app') },
+      // Links to a walkthrough were minted as /gripes/:id before the rename —
+      // by push.ts, by MCP briefs, and by anyone who bookmarked one.
+      {
+        path: 'gripes/:gripeId',
+        loader: ({ params }: LoaderFunctionArgs) =>
+          redirect(`/walkthroughs/${params.gripeId ?? ''}`),
+      },
     ],
   },
 ]

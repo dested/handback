@@ -7,7 +7,12 @@ import {
   useRevalidator,
   useRouteLoaderData,
 } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useEffect, useRef, useState } from 'react'
+import { useMutation, useQuery } from '@tanstack/react-query'
+import { ChevronDown } from 'lucide-react'
+import { Button } from '~/components/ui/button'
+import { Input } from '~/components/ui/input'
+import { Label } from '~/components/ui/label'
 import { Wordmark } from '~/components/logo'
 import { authClient } from '~/lib/auth-client'
 import { OrgProvider, useActiveOrg } from '~/lib/org'
@@ -15,7 +20,15 @@ import { useTRPC } from '~/lib/trpc'
 import { cn } from '~/lib/utils'
 import type { RootLoaderData } from './routes'
 
-const APP_PREFIXES = ['/app', '/gripes', '/team', '/projects', '/recorder', '/connect', '/admin']
+const APP_PREFIXES = [
+  '/app',
+  '/walkthroughs',
+  '/team',
+  '/projects',
+  '/recorder',
+  '/connect',
+  '/admin',
+]
 
 export function Layout() {
   const data = useRouteLoaderData('root') as RootLoaderData | undefined
@@ -70,7 +83,7 @@ function AppHeader({ email }: { email: string }) {
   const navigate = useNavigate()
   const revalidator = useRevalidator()
   const trpc = useTRPC()
-  const { orgs, org, setActiveOrgId } = useActiveOrg()
+  const { org } = useActiveOrg()
   const adminStatus = useQuery(trpc.admin.status.queryOptions())
 
   async function signOut() {
@@ -91,22 +104,7 @@ function AppHeader({ email }: { email: string }) {
         <Link to="/app" aria-label="Handback inbox">
           <Wordmark />
         </Link>
-        {orgs.length > 1 && org && (
-          <select
-            aria-label="Organization"
-            className="border-input bg-background text-foreground rounded-md border px-2 py-1 text-sm"
-            value={org.id}
-            onChange={(e) => setActiveOrgId(e.target.value)}>
-            {orgs.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.name}
-              </option>
-            ))}
-          </select>
-        )}
-        {orgs.length === 1 && org && (
-          <span className="text-muted-foreground text-sm font-medium">{org.name}</span>
-        )}
+        {org && <WorkspaceSwitcher />}
         <div className="ml-2 flex items-center gap-1">
           <NavLink to="/app" className={tab} end>
             Inbox
@@ -114,9 +112,11 @@ function AppHeader({ email }: { email: string }) {
           <NavLink to="/projects" className={tab}>
             Projects
           </NavLink>
-          <NavLink to="/team" className={tab}>
-            Team
-          </NavLink>
+          {!org?.personal && (
+            <NavLink to="/team" className={tab}>
+              Team
+            </NavLink>
+          )}
           <NavLink to="/recorder" className={tab}>
             Recorder
           </NavLink>
@@ -140,6 +140,172 @@ function AppHeader({ email }: { email: string }) {
         </div>
       </nav>
     </header>
+  )
+}
+
+/**
+ * The workspace menu. It renders even with one workspace, because the menu is
+ * also where a team gets created — and a lone personal workspace is exactly the
+ * account most likely to want one.
+ */
+function WorkspaceSwitcher() {
+  const trpc = useTRPC()
+  const { orgs, org, setActiveOrgId } = useActiveOrg()
+  const [open, setOpen] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const wrap = useRef<HTMLDivElement | null>(null)
+  const entitlements = useQuery(trpc.orgs.entitlements.queryOptions())
+
+  useEffect(() => {
+    if (!open) return
+    function onDown(e: MouseEvent) {
+      if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false)
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  if (!org) return null
+  const item = 'w-full rounded px-2 py-1.5 text-left text-sm'
+
+  return (
+    <div className="relative" ref={wrap}>
+      <button
+        type="button"
+        aria-label="Workspace"
+        onClick={() => setOpen((o) => !o)}
+        className="border-input bg-background text-foreground flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-sm font-medium">
+        {org.name}
+        <ChevronDown className="size-3.5" />
+      </button>
+
+      {open && (
+        <div className="bg-card border-border absolute z-50 mt-1 min-w-52 rounded-md border p-1 shadow-md">
+          {orgs.map((o) => (
+            <button
+              key={o.id}
+              type="button"
+              onClick={() => {
+                setActiveOrgId(o.id)
+                setOpen(false)
+              }}
+              className={cn(
+                item,
+                'flex items-center gap-2',
+                o.id === org.id ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'
+              )}>
+              <span className="truncate">{o.name}</span>
+              {o.personal && (
+                <span className="text-muted-foreground ml-auto font-mono text-[0.6rem] tracking-wide uppercase">
+                  Personal
+                </span>
+              )}
+            </button>
+          ))}
+          <div className="border-border my-1 border-t" />
+          {/* No affordance until the answer is in — flashing the mailto fallback
+              at an entitled user reads as "you can't" for a beat on every open. */}
+          {entitlements.isPending ? (
+            <div className={cn(item, 'text-muted-foreground')}>…</div>
+          ) : entitlements.data?.canCreateTeams ? (
+            <button
+              type="button"
+              onClick={() => {
+                setCreating(true)
+                setOpen(false)
+              }}
+              className={cn(item, 'hover:bg-accent/50')}>
+              New team…
+            </button>
+          ) : (
+            <a
+              href="mailto:sal@dested.com?subject=Handback%20teams"
+              className={cn(item, 'text-muted-foreground hover:bg-accent/50 block')}>
+              Create a team — write us
+            </a>
+          )}
+        </div>
+      )}
+
+      {creating && <NewTeamModal onClose={() => setCreating(false)} />}
+    </div>
+  )
+}
+
+function NewTeamModal({ onClose }: { onClose: () => void }) {
+  const trpc = useTRPC()
+  const { refreshOrgs, setActiveOrgId } = useActiveOrg()
+  const [name, setName] = useState('')
+
+  const create = useMutation(
+    trpc.orgs.create.mutationOptions({
+      onSuccess: (result) => {
+        refreshOrgs()
+        setActiveOrgId(result.id)
+        onClose()
+      },
+    })
+  )
+
+  const trimmed = name.trim()
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/20"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose()
+      }}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="New team"
+        className="bg-card border-border w-80 rounded-xl border p-6 shadow-md">
+        <form
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (!trimmed || create.isPending) return
+            create.mutate({ name: trimmed })
+          }}>
+          <div className="space-y-2">
+            <Label htmlFor="new-team-name">Team name</Label>
+            <Input
+              id="new-team-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Acme Design"
+              maxLength={80}
+              autoFocus
+              required
+            />
+          </div>
+          {create.isError && <p className="text-destructive text-sm">{create.error.message}</p>}
+          <div className="flex items-center gap-2">
+            <Button type="submit" disabled={create.isPending || !trimmed}>
+              {create.isPending ? 'Creating…' : 'Create'}
+            </Button>
+            <Button type="button" variant="ghost" onClick={onClose}>
+              Cancel
+            </Button>
+          </div>
+        </form>
+      </div>
+    </div>
   )
 }
 

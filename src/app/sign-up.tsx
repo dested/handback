@@ -55,7 +55,7 @@ export function SignUpPage() {
       <p className="text-muted-foreground mt-2 text-sm">
         {inviteQuery.data
           ? `Then you'll join ${inviteQuery.data.orgName}.`
-          : 'Record a gripe, hand it to your agent, sign off on the fix.'}
+          : 'Record a walkthrough, hand it to your agent, sign off on the fix.'}
       </p>
       <div className="bg-card mt-8 rounded-lg border p-6">
         <form onSubmit={onSubmit} className="space-y-4">

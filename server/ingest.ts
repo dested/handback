@@ -1,9 +1,12 @@
 // Token-authed REST ingest for the CLI / extension / MCP. Two-phase write:
 //
-//   POST /api/ingest/gripes            declare a gripe (metadata + file list)
-//                                      → gripe row + pending files + presigned PUTs
-//   POST /api/ingest/gripes/:id/finalize   confirm the uploads landed
-//                                      → files flip to uploaded, gripe becomes visible
+//   POST /api/ingest/walkthroughs            declare a walkthrough (metadata + file list)
+//                                      → walkthrough row + pending files + presigned PUTs
+//   POST /api/ingest/walkthroughs/:id/finalize   confirm the uploads landed
+//                                      → files flip to uploaded, walkthrough becomes visible
+//
+// Every walkthrough route is also registered under its old `/gripes` spelling —
+// see the DECLARE / FINALIZE / DETAIL / STATUS path lists below.
 //
 // Re-declaring the same (org, slug) replaces the previous upload wholesale:
 // old rows cascade away and the old S3 prefix is deleted. Auth is a bearer
@@ -11,9 +14,9 @@
 //
 // The read side is what an agent pulls through `cli/mcp.ts`:
 //
-//   GET  /api/ingest/gripes            the org's finalized gripes, newest first
-//   GET  /api/ingest/gripes/:id        one gripe's full brief (report.md + presigned files)
-//   POST /api/ingest/gripes/:id/status open | in_review | resolved
+//   GET  /api/ingest/walkthroughs            the org's finalized walkthroughs, newest first
+//   GET  /api/ingest/walkthroughs/:id        one walkthrough's full brief (report.md + presigned files)
+//   POST /api/ingest/walkthroughs/:id/status open | in_review | resolved
 //
 // And one stateless helper the recorder leans on so it doesn't have to run
 // Whisper on the user's laptop:
@@ -23,14 +26,14 @@
 import { Router, json, raw, type Request, type Response } from 'express'
 import { z } from 'zod'
 import {
-  GRIPE_STATUSES,
+  WALKTHROUGH_STATUSES,
   authenticateToken,
-  getGripeDetail,
-  listGripes,
-  setGripeStatus,
-  type GripeStatus,
+  getWalkthroughDetail,
+  listWalkthroughs,
+  setWalkthroughStatus,
+  type WalkthroughStatus,
   type TokenAuth,
-} from './gripes-api'
+} from './walkthroughs-api'
 import { log } from './logger'
 import { polishConfigured, polishTranscript } from './polish'
 import { prisma } from './prisma'
@@ -41,7 +44,7 @@ import {
   transcribeChunk,
   transcriptionConfigured,
 } from './transcribe'
-import { deletePrefix, gripeKey, gripePrefix, isSafePath, presignPut } from './storage'
+import { deletePrefix, walkthroughKey, walkthroughPrefix, isSafePath, presignPut } from './storage'
 
 const MAX_FILES = 4000
 const GB = 1024 * 1024 * 1024
@@ -54,13 +57,13 @@ const GB = 1024 * 1024 * 1024
 // The per-file cap has to clear a real walkthrough's webm: a 20-minute
 // screen recording runs past 512 MB at capture bitrates, and it arrives as ONE
 // file (2026-07-31: a 20-minute session hit exactly this wall in the field).
-// 2 GB per file / 4 GB per gripe keeps hour-plus recordings shippable; the org
+// 2 GB per file / 4 GB per walkthrough keeps hour-plus recordings shippable; the org
 // quota below is the actual backstop — raise it per customer when someone
 // legitimately needs it.
 const MAX_FILE_BYTES = 2 * GB
-const MAX_GRIPE_BYTES = 4 * GB
+const MAX_WALKTHROUGH_BYTES = 4 * GB
 export const ORG_QUOTA_BYTES = 20 * GB
-export const ORG_MAX_GRIPES = 500
+export const ORG_MAX_WALKTHROUGHS = 500
 
 const gb = (bytes: number | bigint) => `${(Number(bytes) / GB).toFixed(1)} GB`
 
@@ -84,7 +87,7 @@ const declareSchema = z.object({
   frameCount: z.number().int().min(0),
   errorCount: z.number().int().min(0).default(0),
   droppedCount: z.number().int().min(0).default(0),
-  /** Pin the gripe to this project; absent = auto-route by originHints. */
+  /** Pin the walkthrough to this project; absent = auto-route by originHints. */
   projectId: z.string().max(60).optional(),
   /** @deprecated Recorder ≤1.1.0 called `errorCount` this. Read when it's the only one sent. */
   eventCount: z.number().int().min(0).optional(),
@@ -101,7 +104,7 @@ const declareSchema = z.object({
     .max(MAX_FILES),
 })
 
-const statusSchema = z.enum(GRIPE_STATUSES)
+const statusSchema = z.enum(WALKTHROUGH_STATUSES)
 
 const setStatusSchema = z.object({ status: statusSchema })
 
@@ -127,13 +130,21 @@ function pathId(req: Request): string {
 
 export const ingestRouter = Router()
 
+// Recorder ≤1.2.x and older CLIs post /gripes — keep until no old installs
+// remain. Each route registers both spellings against the same handler and the
+// same limiter instance, so the alias shares one budget rather than doubling it.
+const DECLARE = ['/walkthroughs', '/gripes']
+const FINALIZE = ['/walkthroughs/:id/finalize', '/gripes/:id/finalize']
+const DETAIL = ['/walkthroughs/:id', '/gripes/:id']
+const STATUS = ['/walkthroughs/:id/status', '/gripes/:id/status']
+
 ingestRouter.use(json({ limit: '10mb' }))
 
 // Two layers, in this order. The IP limit runs before authentication so a
 // bad-token flood can't hammer the token lookup; the per-token limits below run
 // after, and meter each route separately so a burst of reads can't starve a
 // legitimate upload. Numbers are sized against real use — a recorder pushes one
-// gripe every few minutes, an agent polls the list every few seconds — and are
+// walkthrough every few minutes, an agent polls the list every few seconds — and are
 // an order of magnitude below anything that would cost real money.
 const byIp = (req: Request): string => req.ip ?? 'unknown'
 const byToken = (req: Request): string => getAuth(req).tokenId
@@ -186,7 +197,7 @@ ingestRouter.get('/context', readLimit, async (req, res) => {
   res.json({ org, projects })
 })
 
-ingestRouter.post('/gripes', declareLimit, async (req, res) => {
+ingestRouter.post(DECLARE, declareLimit, async (req, res) => {
   const auth = getAuth(req)
   const parsed = declareSchema.safeParse(req.body)
   if (!parsed.success) {
@@ -201,16 +212,20 @@ ingestRouter.post('/gripes', declareLimit, async (req, res) => {
     return
   }
 
-  const gripeBytes = body.files.reduce((sum, f) => sum + f.size, 0)
-  if (gripeBytes > MAX_GRIPE_BYTES) {
-    fail(res, 413, `This gripe is ${gb(gripeBytes)}; the limit is ${gb(MAX_GRIPE_BYTES)} per gripe`)
+  const walkthroughBytes = body.files.reduce((sum, f) => sum + f.size, 0)
+  if (walkthroughBytes > MAX_WALKTHROUGH_BYTES) {
+    fail(
+      res,
+      413,
+      `This walkthrough is ${gb(walkthroughBytes)}; the limit is ${gb(MAX_WALKTHROUGH_BYTES)} per walkthrough`
+    )
     return
   }
 
   // Route to a project. A project the sender named outranks the origin hint —
   // the hint is a guess, an explicit choice isn't. Validated before the
   // replace below: a bad projectId must reject the declare, not first destroy
-  // the gripe this slug already holds.
+  // the walkthrough this slug already holds.
   let projectId: string | null = null
   if (body.projectId) {
     const project = await prisma.project.findUnique({
@@ -231,39 +246,43 @@ ingestRouter.post('/gripes', declareLimit, async (req, res) => {
   }
 
   // Same folder pushed again → the new upload replaces the old one entirely.
-  const existing = await prisma.gripe.findUnique({
+  const existing = await prisma.walkthrough.findUnique({
     where: { orgId_slug: { orgId: auth.orgId, slug: body.slug } },
     select: { id: true, bytes: true },
   })
 
   // Quota is checked against what the org will hold *after* this write, so a
   // re-push of the same slug doesn't count its own predecessor twice.
-  const stored = await prisma.gripe.aggregate({
+  const stored = await prisma.walkthrough.aggregate({
     where: { orgId: auth.orgId },
     _sum: { bytes: true },
     _count: true,
   })
   const otherBytes = (stored._sum.bytes ?? 0n) - (existing?.bytes ?? 0n)
   const otherCount = stored._count - (existing ? 1 : 0)
-  if (otherBytes + BigInt(gripeBytes) > BigInt(ORG_QUOTA_BYTES)) {
+  if (otherBytes + BigInt(walkthroughBytes) > BigInt(ORG_QUOTA_BYTES)) {
     fail(
       res,
       413,
-      `Storage quota reached: this org holds ${gb(otherBytes)} of ${gb(ORG_QUOTA_BYTES)}. Delete some gripes, or ask us to raise it.`
+      `Storage quota reached: this org holds ${gb(otherBytes)} of ${gb(ORG_QUOTA_BYTES)}. Delete some walkthroughs, or ask us to raise it.`
     )
     return
   }
-  if (otherCount >= ORG_MAX_GRIPES) {
-    fail(res, 413, `This org is at its limit of ${ORG_MAX_GRIPES} gripes. Delete some first.`)
+  if (otherCount >= ORG_MAX_WALKTHROUGHS) {
+    fail(
+      res,
+      413,
+      `This org is at its limit of ${ORG_MAX_WALKTHROUGHS} walkthroughs. Delete some first.`
+    )
     return
   }
 
   if (existing) {
-    await deletePrefix(gripePrefix(auth.orgId, existing.id))
-    await prisma.gripe.delete({ where: { id: existing.id } })
+    await deletePrefix(walkthroughPrefix(auth.orgId, existing.id))
+    await prisma.walkthrough.delete({ where: { id: existing.id } })
   }
 
-  const gripe = await prisma.gripe.create({
+  const walkthrough = await prisma.walkthrough.create({
     data: {
       orgId: auth.orgId,
       projectId,
@@ -278,7 +297,7 @@ ingestRouter.post('/gripes', declareLimit, async (req, res) => {
       // the same thing, so honour it rather than silently storing zero.
       errorCount: body.errorCount || (body.eventCount ?? 0),
       droppedCount: body.droppedCount,
-      bytes: BigInt(gripeBytes),
+      bytes: BigInt(walkthroughBytes),
       takes: {
         create: body.takes.map((t) => ({
           index: t.index,
@@ -304,41 +323,45 @@ ingestRouter.post('/gripes', declareLimit, async (req, res) => {
   const uploads = await Promise.all(
     body.files.map(async (f) => ({
       path: f.path,
-      url: await presignPut(gripeKey(auth.orgId, gripe.id, f.path), f.contentType, f.size),
+      url: await presignPut(
+        walkthroughKey(auth.orgId, walkthrough.id, f.path),
+        f.contentType,
+        f.size
+      ),
       contentType: f.contentType,
     }))
   )
 
   log.info(
-    `[ingest] declared gripe ${body.slug} (${body.files.length} files) for org ${auth.orgId}`
+    `[ingest] declared walkthrough ${body.slug} (${body.files.length} files) for org ${auth.orgId}`
   )
-  res.json({ gripeId: gripe.id, uploads })
+  res.json({ walkthroughId: walkthrough.id, uploads })
 })
 
-ingestRouter.post('/gripes/:id/finalize', finalizeLimit, async (req, res) => {
+ingestRouter.post(FINALIZE, finalizeLimit, async (req, res) => {
   const auth = getAuth(req)
-  const gripe = await prisma.gripe.findUnique({ where: { id: pathId(req) } })
-  if (!gripe || gripe.orgId !== auth.orgId) {
-    fail(res, 404, 'Unknown gripe')
+  const walkthrough = await prisma.walkthrough.findUnique({ where: { id: pathId(req) } })
+  if (!walkthrough || walkthrough.orgId !== auth.orgId) {
+    fail(res, 404, 'Unknown walkthrough')
     return
   }
-  await prisma.gripeFile.updateMany({
-    where: { gripeId: gripe.id },
+  await prisma.walkthroughFile.updateMany({
+    where: { walkthroughId: walkthrough.id },
     data: { status: 'uploaded' },
   })
-  await prisma.gripe.update({
-    where: { id: gripe.id },
+  await prisma.walkthrough.update({
+    where: { id: walkthrough.id },
     data: { finalizedAt: new Date() },
   })
-  log.info(`[ingest] finalized gripe ${gripe.slug} (${gripe.id})`)
-  res.json({ ok: true, gripeId: gripe.id })
+  log.info(`[ingest] finalized walkthrough ${walkthrough.slug} (${walkthrough.id})`)
+  res.json({ ok: true, walkthroughId: walkthrough.id })
 })
 
-// The read side is three thin wrappers over `gripes-api.ts` — the hosted MCP
+// The read side is three thin wrappers over `walkthroughs-api.ts` — the hosted MCP
 // endpoint calls the same functions, so a change to what an agent sees lands on
 // both surfaces at once.
 
-ingestRouter.get('/gripes', readLimit, async (req, res) => {
+ingestRouter.get(DECLARE, readLimit, async (req, res) => {
   const auth = getAuth(req)
   const status = req.query.status
   const parsed = status === undefined ? undefined : statusSchema.safeParse(status)
@@ -346,30 +369,30 @@ ingestRouter.get('/gripes', readLimit, async (req, res) => {
     fail(res, 400, `status must be one of ${statusSchema.options.join(', ')}`)
     return
   }
-  res.json(await listGripes(auth.orgId, parsed?.data))
+  res.json(await listWalkthroughs(auth, parsed?.data))
 })
 
-ingestRouter.get('/gripes/:id', readLimit, async (req, res) => {
+ingestRouter.get(DETAIL, readLimit, async (req, res) => {
   const auth = getAuth(req)
-  const gripe = await getGripeDetail(auth.orgId, pathId(req))
-  if (!gripe) {
-    fail(res, 404, 'Unknown gripe')
+  const walkthrough = await getWalkthroughDetail(auth, pathId(req))
+  if (!walkthrough) {
+    fail(res, 404, 'Unknown walkthrough')
     return
   }
-  res.json(gripe)
+  res.json(walkthrough)
 })
 
-ingestRouter.post('/gripes/:id/status', statusLimit, async (req, res) => {
+ingestRouter.post(STATUS, statusLimit, async (req, res) => {
   const auth = getAuth(req)
   const parsed = setStatusSchema.safeParse(req.body)
   if (!parsed.success) {
     fail(res, 400, parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '))
     return
   }
-  const status: GripeStatus = parsed.data.status
-  const moved = await setGripeStatus(auth.orgId, pathId(req), status)
+  const status: WalkthroughStatus = parsed.data.status
+  const moved = await setWalkthroughStatus(auth, pathId(req), status)
   if (!moved) {
-    fail(res, 404, 'Unknown gripe')
+    fail(res, 404, 'Unknown walkthrough')
     return
   }
   res.json({ ok: true, status })
@@ -378,7 +401,7 @@ ingestRouter.post('/gripes/:id/status', statusLimit, async (req, res) => {
 // POST /api/ingest/transcribe — one chunk of 16 kHz mono WAV in, timed segments
 // out. The recorder splits long takes itself and offsets the results, because
 // only it knows where it cut; this endpoint is deliberately stateless and knows
-// nothing about gripes. Raw body, not JSON: base64 would inflate the audio by a
+// nothing about walkthroughs. Raw body, not JSON: base64 would inflate the audio by a
 // third for no reason. `json()` above ignores a non-JSON content type, so the
 // raw parser here is the only one that touches this body.
 const MAX_AUDIO_BYTES = 30 * 1024 * 1024

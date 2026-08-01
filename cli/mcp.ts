@@ -1,4 +1,4 @@
-// handback mcp — a stdio MCP server that lets a coding agent pull gripes.
+// handback mcp — a stdio MCP server that lets a coding agent pull walkthroughs.
 //
 //   claude mcp add handback --env HANDBACK_TOKEN=hb_... -- bun /abs/path/cli/mcp.ts
 //
@@ -9,8 +9,8 @@
 // agent talk to a process they can read.
 //
 // Three tools over the token-authed read API in server/ingest.ts: list the
-// team's gripes, pull one gripe's full brief (report.md + presigned URLs for
-// video/keyframes/transcript), and move a gripe through review.
+// team's walkthroughs, pull one walkthrough's full brief (report.md + presigned
+// URLs for video/keyframes/transcript), and move a walkthrough through review.
 //
 // stdout is the JSON-RPC channel — nothing but the protocol may be written to
 // it. Diagnostics go to stderr.
@@ -18,7 +18,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
-import { formatGripe, type FormattableGripe } from '../server/mcp-format'
+import { formatWalkthrough, type FormattableWalkthrough } from '../server/mcp-format'
 
 const DEFAULT_SERVER = 'https://handback.dev'
 
@@ -95,53 +95,56 @@ async function api<T>(
 }
 
 registerTool(
-  'list_gripes',
+  'list_walkthroughs',
   {
-    title: 'List gripes',
-    description: "List the team's gripes (recorded walkthrough bug reports), newest first.",
+    title: 'List walkthroughs',
+    description:
+      "List the team's walkthroughs — narrated screen recordings made by a human in the running app: a bug, review feedback, or a change request — newest first.",
     inputSchema: { status: statusSchema.optional() },
   },
   async ({ status }) => {
     const query = status ? `?status=${status}` : ''
-    const result = await api<unknown[]>(`/gripes${query}`)
+    const result = await api<unknown[]>(`/walkthroughs${query}`)
     if ('error' in result) return result.error
     if (result.data.length === 0) {
-      return text(status ? `No ${status} gripes.` : 'No gripes yet.')
+      return text(status ? `No ${status} walkthroughs.` : 'No walkthroughs yet.')
     }
     return text(JSON.stringify(result.data, null, 2))
   }
 )
 
 registerTool(
-  'get_gripe',
+  'get_walkthrough',
   {
-    title: 'Get gripe brief',
+    title: 'Get walkthrough brief',
     description:
-      "Fetch one gripe's full brief: metadata, the report.md authored for agents, and presigned URLs for every file (video, keyframes, transcript).",
-    inputSchema: { gripeId: z.string().describe('Gripe id from list_gripes') },
+      "Fetch one walkthrough's full brief — a narrated screen recording made by a human in the running app, whether that's a bug, review feedback, or a change request: metadata, the report.md authored for agents, and presigned URLs for every file (video, keyframes, transcript).",
+    inputSchema: { walkthroughId: z.string().describe('Walkthrough id from list_walkthroughs') },
   },
-  async ({ gripeId }) => {
-    const result = await api<FormattableGripe>(`/gripes/${encodeURIComponent(gripeId)}`)
+  async ({ walkthroughId }) => {
+    const result = await api<FormattableWalkthrough>(
+      `/walkthroughs/${encodeURIComponent(walkthroughId)}`
+    )
     if ('error' in result) return result.error
-    return text(formatGripe(result.data))
+    return text(formatWalkthrough(result.data))
   }
 )
 
 registerTool(
-  'set_gripe_status',
+  'set_walkthrough_status',
   {
-    title: 'Set gripe status',
+    title: 'Set walkthrough status',
     description:
-      'Move a gripe through review: open → in_review when a fix is up, resolved after human sign-off.',
-    inputSchema: { gripeId: z.string(), status: statusSchema },
+      'Move a walkthrough through review: open → in_review when a fix is up, resolved after human sign-off.',
+    inputSchema: { walkthroughId: z.string(), status: statusSchema },
   },
-  async ({ gripeId, status }) => {
+  async ({ walkthroughId, status }) => {
     const result = await api<{ ok: boolean; status: string }>(
-      `/gripes/${encodeURIComponent(gripeId)}/status`,
+      `/walkthroughs/${encodeURIComponent(walkthroughId)}/status`,
       { method: 'POST', body: { status } }
     )
     if ('error' in result) return result.error
-    return text(`Gripe ${gripeId} is now ${result.data.status}.`)
+    return text(`Walkthrough ${walkthroughId} is now ${result.data.status}.`)
   }
 )
 

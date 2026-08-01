@@ -1,6 +1,6 @@
-// S3 storage for gripe payloads. The DB never holds file bytes — every object
-// lives under orgs/<orgId>/gripes/<gripeId>/<path>, where <path> mirrors the
-// gripe folder the recorder wrote (report.md, rec-01/frames/03-0125.jpg, …).
+// S3 storage for walkthrough payloads. The DB never holds file bytes — every object
+// lives under orgs/<orgId>/gripes/<walkthroughId>/<path>, where <path> mirrors the
+// walkthrough folder the recorder wrote (report.md, rec-01/frames/03-0125.jpg, …).
 // The server only ever hands out short-lived presigned URLs; the bucket blocks
 // all public access.
 
@@ -26,16 +26,18 @@ const s3 = new S3Client({
 const PUT_TTL_SECONDS = 60 * 60 // uploads of a long webm on slow links need room
 const GET_TTL_SECONDS = 60 * 60
 
-export function gripePrefix(orgId: string, gripeId: string): string {
-  return `orgs/${orgId}/gripes/${gripeId}/`
+// The `gripes/` segment is frozen at the old product noun: every object already
+// uploaded lives under it, and changing the path would orphan every one of them.
+export function walkthroughPrefix(orgId: string, walkthroughId: string): string {
+  return `orgs/${orgId}/gripes/${walkthroughId}/`
 }
 
-export function gripeKey(orgId: string, gripeId: string, path: string): string {
-  return gripePrefix(orgId, gripeId) + path
+export function walkthroughKey(orgId: string, walkthroughId: string, path: string): string {
+  return walkthroughPrefix(orgId, walkthroughId) + path
 }
 
 /**
- * Gripe-relative paths come from clients; keep them boring. Rejects anything
+ * Walkthrough-relative paths come from clients; keep them boring. Rejects anything
  * that could escape the prefix or smuggle a second key.
  */
 export function isSafePath(path: string): boolean {
@@ -77,7 +79,7 @@ export async function presignGet(key: string): Promise<string> {
 }
 
 /**
- * Server-side copy of one object — the move of a gripe between workspaces
+ * Server-side copy of one object — the move of a walkthrough between workspaces
  * never pulls the bytes through the container. CopySource is a URL path, so
  * each segment is encoded; the slashes have to survive.
  */
@@ -113,7 +115,7 @@ export async function listPrefix(prefix: string): Promise<Array<{ key: string; s
   return out
 }
 
-/** Delete everything under a prefix (re-push of a gripe, gripe deletion). */
+/** Delete everything under a prefix (re-push of a walkthrough, walkthrough deletion). */
 export async function deletePrefix(prefix: string): Promise<void> {
   let token: string | undefined
   do {

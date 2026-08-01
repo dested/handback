@@ -47,13 +47,7 @@ export function Pane({
  * literally what the recorder encodes — this is a photograph of a JPEG, so it is
  * the one object on the page allowed to be dark.
  */
-export function ContactSheet({
-  shots = SHOTS,
-  className,
-}: {
-  shots?: Shot[]
-  className?: string
-}) {
+export function ContactSheet({ shots = SHOTS, className }: { shots?: Shot[]; className?: string }) {
   return (
     <div className={cn('overflow-hidden rounded-md bg-black shadow-sm', className)}>
       {/* gap-px, not 0: the black shows between tiles so nine white pages read as
@@ -102,8 +96,8 @@ export function Filmstrip({
 
 /**
  * The raw walkthrough as a player bar rather than a big still. It is the least
- * important thing in a gripe — the one artifact aimed at a human — so it gets a
- * strip, not a stage. The ticks on the scrubber are the kept keyframes.
+ * important thing in a walkthrough — the one artifact aimed at a human — so it
+ * gets a strip, not a stage. The ticks on the scrubber are the kept keyframes.
  */
 export function PlayerStrip({
   keyframes,
@@ -206,6 +200,55 @@ export function RecordingViewport({
           {caption}
           <span className="bg-cobalt ml-0.5 inline-block h-[1em] w-[2px] translate-y-[0.15em] animate-pulse" />
         </p>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The extension's side panel, alongside the viewport it is recording. Product
+ * chrome, so paper and cobalt — the grey rule applies inside a frame, not here.
+ * Mirrors the real panel's shape: rec row, keyframes as they land, where it is
+ * going, and the one big cobalt action.
+ */
+export function RecorderPanelMock({ className }: { className?: string }) {
+  const thumbs = SHOTS.slice(5, 8)
+  return (
+    <div className={cn('bg-card flex flex-col rounded-lg border shadow-sm', className)}>
+      <div className="border-border border-b px-3 py-2">
+        <span className="text-muted-foreground font-mono text-[0.65rem]">Handback Recorder</span>
+      </div>
+      <div className="space-y-3 px-3 py-3">
+        <div className="flex items-center gap-2">
+          <span className="relative flex size-1.5">
+            <span className="bg-destructive absolute inline-flex size-full animate-ping rounded-full opacity-70" />
+            <span className="bg-destructive relative inline-flex size-1.5 rounded-full" />
+          </span>
+          <span className="font-mono text-[0.7rem] tabular-nums">0:22</span>
+          <Mic />
+        </div>
+
+        <div>
+          <div className="flex gap-1">
+            {thumbs.map((shot) => (
+              <CheckoutShot
+                key={shot.file}
+                shot={shot}
+                className="min-w-0 flex-1 rounded-[2px] border"
+              />
+            ))}
+          </div>
+          <p className="text-muted-foreground mt-1.5 font-mono text-[0.55rem]">keyframes · 22</p>
+        </div>
+
+        <p className="text-muted-foreground font-mono text-[0.65rem]">
+          to Sal&apos;s workspace · Storefront
+        </p>
+
+        {/* Button-shaped, not a button: nothing on the landing page records. */}
+        <div className="bg-cobalt w-full rounded-md py-1.5 text-center text-[0.7rem] font-medium text-white">
+          Stop recording
+        </div>
       </div>
     </div>
   )

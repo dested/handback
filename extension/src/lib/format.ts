@@ -39,6 +39,11 @@ export function hhmm(ts: number): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+/** `1 line` / `2 lines` — the live counters are read mid-sentence, so "1 lines" grates. */
+export function plural(n: number, one: string, many = `${one}s`): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
 /** 4:32 — elapsed time inside a recording. */
 export function mmss(ms: number): string {
   const total = Math.max(0, Math.round(ms / 1000));

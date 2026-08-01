@@ -4,96 +4,118 @@ import { Button } from '~/components/ui/button'
 import { useActiveOrg } from '~/lib/org'
 import { useTRPC } from '~/lib/trpc'
 import { StatusControl } from './status-control'
-import type { Gripe } from './types'
+import type { Walkthrough } from './types'
 import { useCopy } from './use-copy'
 
-/** What the agent needs to find this gripe and report back when it's done. */
-function agentBrief(gripe: Gripe): string {
+/** What the agent needs to find this walkthrough and report back when it's done. */
+function agentBrief(walkthrough: Walkthrough): string {
   return (
-    `Read the gripe "${gripe.title}" at ${window.location.origin}/gripes/${gripe.id}. ` +
-    `Pull the full brief with the handback MCP tool get_gripe("${gripe.id}") — the report.md ` +
-    `inside is authored for you, follow it. When your fix is up, set the gripe to in_review ` +
-    `with set_gripe_status.`
+    `Read the walkthrough "${walkthrough.title}" at ${window.location.origin}/walkthroughs/${walkthrough.id}. ` +
+    `Pull the full brief with the handback MCP tool get_walkthrough("${walkthrough.id}") — the report.md ` +
+    `inside is authored for you, follow it. When your fix is up, set the walkthrough to in_review ` +
+    `with set_walkthrough_status.`
   )
 }
 
 /** The review actions: triage status, which project it belongs to, hand-off, delete. */
-export function GripeControls({ gripe }: { gripe: Gripe }) {
+export function WalkthroughControls({ walkthrough }: { walkthrough: Walkthrough }) {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const { orgs, org, setActiveOrgId } = useActiveOrg()
   const { copied, copy } = useCopy()
 
-  const gripeQueryKey = trpc.gripes.get.queryKey({ gripeId: gripe.id })
+  const walkthroughQueryKey = trpc.walkthroughs.get.queryKey({ walkthroughId: walkthrough.id })
 
-  // Refetch this gripe and every inbox list (any project/status filter).
+  // Refetch this walkthrough and every inbox list (any project/status filter).
   function invalidate() {
-    queryClient.invalidateQueries({ queryKey: gripeQueryKey })
-    queryClient.invalidateQueries({ queryKey: trpc.gripes.list.queryKey() })
+    queryClient.invalidateQueries({ queryKey: walkthroughQueryKey })
+    queryClient.invalidateQueries({ queryKey: trpc.walkthroughs.list.queryKey() })
   }
 
-  const setStatus = useMutation(trpc.gripes.setStatus.mutationOptions({ onSettled: invalidate }))
+  const setStatus = useMutation(
+    trpc.walkthroughs.setStatus.mutationOptions({ onSettled: invalidate })
+  )
   const assignProject = useMutation(
-    trpc.gripes.assignProject.mutationOptions({ onSettled: invalidate })
+    trpc.walkthroughs.assignProject.mutationOptions({ onSettled: invalidate })
   )
   const remove = useMutation(
-    trpc.gripes.delete.mutationOptions({
+    trpc.walkthroughs.delete.mutationOptions({
       onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: trpc.gripes.list.queryKey() })
+        queryClient.invalidateQueries({ queryKey: trpc.walkthroughs.list.queryKey() })
         navigate('/app')
       },
     })
   )
 
   const move = useMutation(
-    trpc.gripes.moveToOrg.mutationOptions({
+    trpc.walkthroughs.moveToOrg.mutationOptions({
       onSuccess: (_result, variables) => {
-        // The URL doesn't change; following the gripe into its new workspace is
-        // what keeps gripes.get answering for the caller after the refetch.
+        // The URL doesn't change; following the walkthrough into its new workspace is
+        // what keeps walkthroughs.get answering for the caller after the refetch.
         setActiveOrgId(variables.orgId)
         invalidate()
       },
     })
   )
 
-  // Keyed off the gripe's own org, not the active one — reaching this page
+  // Keyed off the walkthrough's own org, not the active one — reaching this page
   // already proved membership, and the two can differ mid-switch. Guests only
-  // hold a slice of the workspace, so filing a gripe elsewhere isn't theirs to do.
-  const canAssign = org?.id === gripe.orgId && org?.scope === 'org'
+  // hold a slice of the workspace, so filing a walkthrough elsewhere isn't theirs to do.
+  const canAssign = org?.id === walkthrough.orgId && org?.scope === 'org'
   const projects = useQuery({
-    ...trpc.projects.list.queryOptions({ orgId: gripe.orgId }),
+    ...trpc.projects.list.queryOptions({ orgId: walkthrough.orgId }),
     enabled: canAssign,
   })
 
   // In-flight variables stand in for the server's answer, so the control moves
   // the instant it's clicked and snaps back on its own if the write fails.
-  const status = setStatus.isPending ? (setStatus.variables?.status ?? gripe.status) : gripe.status
+  const status = setStatus.isPending
+    ? (setStatus.variables?.status ?? walkthrough.status)
+    : walkthrough.status
   const projectId = assignProject.isPending
     ? (assignProject.variables?.projectId ?? '')
-    : (gripe.project?.id ?? '')
+    : (walkthrough.project?.id ?? '')
 
   // Deleting is admin-only server-side, and role only means anything when the
-  // active workspace is this gripe's workspace.
-  const canDelete = org?.id === gripe.orgId && (org?.role === 'owner' || org?.role === 'admin')
+  // active workspace is this walkthrough's workspace.
+  const canDelete =
+    org?.id === walkthrough.orgId && (org?.role === 'owner' || org?.role === 'admin')
 
-  // Only whole-workspace members on both ends may move a gripe, and the source
+  // Only whole-workspace members on both ends may move a walkthrough, and the source
   // side of that is exactly the guard project assignment already needs.
-  const destinations = orgs.filter((o) => o.scope === 'org' && o.id !== gripe.orgId)
+  const destinations = orgs.filter((o) => o.scope === 'org' && o.id !== walkthrough.orgId)
 
   function confirmDelete() {
-    if (!window.confirm(`Delete "${gripe.title}"? The recording and report go with it.`)) return
-    remove.mutate({ gripeId: gripe.id })
+    if (!window.confirm(`Delete "${walkthrough.title}"? The recording and report go with it.`))
+      return
+    remove.mutate({ walkthroughId: walkthrough.id })
   }
 
   function confirmMove(orgId: string) {
     const dest = destinations.find((o) => o.id === orgId)
     if (!dest || !org) return
     const warning =
-      `Move "${gripe.title}" to ${dest.name}? Everyone in ${org.name} loses access to it, ` +
+      `Move "${walkthrough.title}" to ${dest.name}? Everyone in ${org.name} loses access to it, ` +
       `and its project assignment is cleared.`
     if (!window.confirm(warning)) return
-    move.mutate({ gripeId: gripe.id, orgId: dest.id })
+    move.mutate({ walkthroughId: walkthrough.id, orgId: dest.id })
+  }
+
+  // A platform admin reached this walkthrough from /admin without belonging to its
+  // workspace: the read side lets them look, every mutation still 403s. Show
+  // nothing they can't actually do.
+  if (!walkthrough.viewerIsMember) {
+    return (
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="border-review/40 bg-review-wash text-review rounded-md border px-2 py-1 font-mono text-xs">
+          admin view · read only
+        </span>
+        <Button variant="outline" onClick={() => copy(agentBrief(walkthrough))}>
+          {copied ? 'Copied' : 'Copy agent brief'}
+        </Button>
+      </div>
+    )
   }
 
   return (
@@ -102,7 +124,7 @@ export function GripeControls({ gripe }: { gripe: Gripe }) {
         <StatusControl
           status={status}
           disabled={setStatus.isPending}
-          onChange={(next) => setStatus.mutate({ gripeId: gripe.id, status: next })}
+          onChange={(next) => setStatus.mutate({ walkthroughId: walkthrough.id, status: next })}
         />
 
         {canAssign && (
@@ -112,7 +134,10 @@ export function GripeControls({ gripe }: { gripe: Gripe }) {
             value={projectId}
             disabled={assignProject.isPending || projects.isLoading}
             onChange={(e) =>
-              assignProject.mutate({ gripeId: gripe.id, projectId: e.target.value || null })
+              assignProject.mutate({
+                walkthroughId: walkthrough.id,
+                projectId: e.target.value || null,
+              })
             }>
             <option value="">— No project —</option>
             {(projects.data ?? []).map((project) => (
@@ -141,7 +166,7 @@ export function GripeControls({ gripe }: { gripe: Gripe }) {
           </select>
         )}
 
-        <Button variant="outline" onClick={() => copy(agentBrief(gripe))}>
+        <Button variant="outline" onClick={() => copy(agentBrief(walkthrough))}>
           {copied ? 'Copied' : 'Copy agent brief'}
         </Button>
 

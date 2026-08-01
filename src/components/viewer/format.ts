@@ -3,7 +3,7 @@ export function mmss(ms: number): string {
   return `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`
 }
 
-/** Sizes are always megabytes here — gripes are videos, never kilobytes. */
+/** Sizes are always megabytes here — walkthroughs are videos, never kilobytes. */
 export function megabytes(bytes: number): string {
   return `${(bytes / 1048576).toFixed(1)} MB`
 }

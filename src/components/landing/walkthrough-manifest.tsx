@@ -1,25 +1,25 @@
 import type { ReactNode } from 'react'
 import { cn } from '~/lib/utils'
-import { EVENTS, GRIPE, TRANSCRIPT } from './demo-data'
+import { EVENTS, TRANSCRIPT, WALKTHROUGH } from './demo-data'
 import { CheckoutShot, SHOTS } from './demo-shot'
 import { Pane, PlayerStrip } from './mock'
 import { Section, SectionHeading, SectionLabel } from './section'
 
 /**
- * What a gripe contains, in the words a person would use, with the actual thing
+ * What a walkthrough contains, in the words a person would use, with the actual thing
  * next to each one. The old version of this section was a table of file paths —
  * accurate, and useless to anyone deciding whether to sign up. The paths are
  * still here, but as the caption on the evidence rather than the pitch.
  */
 
-export function GripeManifest() {
+export function WalkthroughManifest() {
   const marked = SHOTS[7] ?? SHOTS[0]
 
   return (
     <Section className="rule py-20 md:py-28">
       <div className="flex flex-wrap items-end justify-between gap-x-10 gap-y-4">
         <div>
-          <SectionLabel>One gripe</SectionLabel>
+          <SectionLabel>One walkthrough</SectionLabel>
           <SectionHeading>Everything you’d have had to write down.</SectionHeading>
         </div>
         <p className="text-muted-foreground max-w-sm text-sm leading-relaxed">
@@ -64,10 +64,10 @@ export function GripeManifest() {
         </Card>
 
         <Card
-          title="What broke underneath"
+          title="What happened underneath"
           file="rec-01/recording.json · events"
-          meta={`${GRIPE.errors} captured`}
-          blurb="The console and network failures that fired while you were talking. You didn’t open devtools; you didn’t know to."
+          meta={`${WALKTHROUGH.errors} captured`}
+          blurb="The console and network failures that fired while you were talking — if anything did. You didn’t open devtools; you didn’t know to."
           className="lg:col-span-7">
           <ul className="divide-border divide-y">
             {EVENTS.map((event, i) => (
@@ -93,15 +93,15 @@ export function GripeManifest() {
         <Card
           title="The recording itself"
           file="rec-01/walkthrough.webm"
-          meta={GRIPE.duration}
+          meta={WALKTHROUGH.duration}
           blurb="The one thing in the bundle that’s for you rather than the agent — for when a reviewer wants to watch it happen."
           className="lg:col-span-5">
-          <PlayerStrip keyframes={GRIPE.keyframes} title={GRIPE.title} />
+          <PlayerStrip keyframes={WALKTHROUGH.keyframes} title={WALKTHROUGH.title} />
         </Card>
       </div>
 
       <p className="text-muted-foreground mt-12 font-mono text-xs">
-        {GRIPE.slug} · pushed as one unit, replaced wholesale if you record it again
+        {WALKTHROUGH.slug} · pushed as one unit, replaced wholesale if you record it again
       </p>
     </Section>
   )

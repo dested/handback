@@ -47,7 +47,10 @@ interface Cell {
 }
 
 type Drag =
-  | { mode: 'scrub' }
+  // Dragging anywhere on the axis scrubs. `click` is what a drag that never
+  // travelled meant instead — a cell hands over the frame it was showing, empty
+  // track hands over nothing and so clears.
+  | { mode: 'scrub'; x0: number; click?: { key?: string; pos: number } }
   /** Ruler and filmstrip both resolve to a time range; `click` is what a sub-slop drag meant. */
   | { mode: 'range'; a: number; b: number; click?: { key?: string; pos: number } }
   | { mode: 'marquee'; x0: number; y0: number; x1: number; y1: number }
@@ -71,7 +74,8 @@ const WIDE_MIN_W = 900;
 const WIDE_RATIO = 2.2;
 /** A box mid-layout is 0 tall, and 0 tall divides into any width — that is not landscape. */
 const WIDE_MIN_H = 120;
-/** Frame blobs are read in batches so 150 of them don't open 150 transactions at once. */
+/** Frame blobs are read in batches so a few hundred of them don't open a few hundred
+ *  transactions at once — a long take's budget scales (recorder.ts `frameBudget`). */
 const LOAD_BATCH = 12;
 /** A quiet notice is a notice, not a state — it goes away on its own. */
 const NOTICE_MS = 8000;
@@ -429,11 +433,22 @@ export function Timeline({ session, recordings }: { session: Session; recordings
         setDragBoth({ ...current, dx, live: true });
       }
     };
-    const onUp = () => {
+    const onUp = (e: PointerEvent) => {
       const current = dragRef.current;
       setDragBoth(null);
       if (!current) return;
-      if (current.mode === 'range') {
+      if (current.mode === 'scrub') {
+        // Travelled: the playhead already followed the pointer, nothing else to do.
+        if (Math.abs(e.clientX - current.x0) >= SLOP) return;
+        const click = current.click;
+        if (!click) return;
+        setSel(click.key ? new Set([click.key]) : new Set());
+        setRange(null);
+        setPh(Math.max(0, click.pos));
+        setPinned(null);
+        setEditing(null);
+        anchorKey.current = click.key ?? null;
+      } else if (current.mode === 'range') {
         const [a, b] = [Math.min(current.a, current.b), Math.max(current.a, current.b)];
         // Under the slop it was a click: the ruler only moved the playhead, a cell
         // also hands over the frame it was showing.
@@ -538,11 +553,12 @@ export function Timeline({ session, recordings }: { session: Session; recordings
       setDragBoth({ mode: 'move', x0: e.clientX, dx: 0, live: false });
       return;
     }
-    const at = msAt(e.clientX);
+    // Plain drag off a cell scrubs — it is the visual gesture, you drag along and
+    // watch the monitor. Sweeping a stretch to delete it is shift-drag, above.
+    setPh(Math.max(0, msAt(e.clientX)));
     setDragBoth({
-      mode: 'range',
-      a: at,
-      b: at,
+      mode: 'scrub',
+      x0: e.clientX,
       click: { key: frame?.key, pos: frame ? frame.pos : cell.mid },
     });
   };
@@ -586,19 +602,31 @@ export function Timeline({ session, recordings }: { session: Session; recordings
     boxRef.current = inner.getBoundingClientRect();
     const box = boxRef.current;
     setEditing(null);
-    setDragBoth({
-      mode: 'marquee',
-      x0: e.clientX - box.left,
-      y0: e.clientY - box.top,
-      x1: e.clientX - box.left,
-      y1: e.clientY - box.top,
-    });
+    if (e.shiftKey) {
+      setDragBoth({
+        mode: 'marquee',
+        x0: e.clientX - box.left,
+        y0: e.clientY - box.top,
+        x1: e.clientX - box.left,
+        y1: e.clientY - box.top,
+      });
+      return;
+    }
+    // No key held: scrub. A click that never travelled lands on nothing, which
+    // is how you drop a selection.
+    const at = msAt(e.clientX);
+    setPh(Math.max(0, at));
+    setDragBoth({ mode: 'scrub', x0: e.clientX, click: { pos: at } });
   };
 
   const onRulerDown = (e: React.PointerEvent) => {
     const at = msAt(e.clientX);
+    if (e.shiftKey) {
+      setDragBoth({ mode: 'range', a: at, b: at });
+      return;
+    }
     setPh(Math.max(0, at));
-    setDragBoth({ mode: 'range', a: at, b: at });
+    setDragBoth({ mode: 'scrub', x0: e.clientX });
   };
 
   const commitLine = async (item: Item, text: string) => {
@@ -707,7 +735,11 @@ export function Timeline({ session, recordings }: { session: Session; recordings
     ? 'recording — the axis grows as you talk'
     : recovered
       ? 'one take was recovered after the panel closed'
-      : '';
+      : // The row is there either way; idle it earns its keep by naming the two
+        // gestures, since drag-to-scrub is not a thing you discover by accident.
+        sel.size
+        ? ''
+        : 'drag to scrub · shift-drag sweeps a stretch';
 
   const dx = drag?.mode === 'move' && drag.live ? drag.dx : 0;
   const sweep = drag?.mode === 'range' ? drag : null;
@@ -729,8 +761,17 @@ export function Timeline({ session, recordings }: { session: Session; recordings
   // only thing that decides whether CSS stacks them or sits them side by side.
   return (
     <div className={`tl${wide ? ' wide' : ''}`} ref={rootRef}>
-      <div className="tl-monitor">
-        <div className="tl-screen">{shot && <img src={shot} alt="" draggable={false} />}</div>
+      {/* With no frame to show, the monitor is a blank slab that eats the panel and
+          crushes the axis against the bottom edge. Empty, it collapses to a line
+          that says why it is empty; full, it still never takes more than half. */}
+      <div className={`tl-monitor${shot ? '' : ' bare'}`}>
+        <div className="tl-screen">
+          {shot ? (
+            <img src={shot} alt="" draggable={false} />
+          ) : (
+            <span className="tl-noshot">{live ? 'frames land here as you go' : 'no frame here'}</span>
+          )}
+        </div>
       </div>
 
       <div className="tl-axis">
@@ -809,7 +850,7 @@ export function Timeline({ session, recordings }: { session: Session; recordings
                 style={{ left: x(playhead) }}
                 onPointerDown={(e) => {
                   e.stopPropagation();
-                  setDragBoth({ mode: 'scrub' });
+                  setDragBoth({ mode: 'scrub', x0: e.clientX });
                 }}
               />
             </div>
@@ -931,15 +972,17 @@ export function Timeline({ session, recordings }: { session: Session; recordings
 
         {sel.size > 0 && (
           <div className="tl-bar">
-            <span className="tl-count">
-              {range
-                ? `${mmss(range.a)}–${mmss(range.b)} · ${sel.size} item${sel.size === 1 ? '' : 's'}`
-                : `${sel.size} selected`}
-            </span>
+            {/* The count moved onto the delete button, so this says the one thing
+                the button can't: which stretch of the axis the sweep took. */}
+            <span className="tl-count">{range ? `${mmss(range.a)}–${mmss(range.b)}` : ''}</span>
+            {/* "delete" and "clear" read as the same word next to each other. One
+                throws the items away, the other only drops the highlight — so the
+                one that destroys says what it destroys, and the one that doesn't
+                says so in a different verb. */}
             <button className="tl-del" onClick={() => void doDelete()}>
-              delete
+              delete {sel.size} {sel.size === 1 ? 'item' : 'items'}
             </button>
-            <button onClick={clearSel}>clear</button>
+            <button onClick={clearSel}>deselect</button>
           </div>
         )}
 

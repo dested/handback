@@ -11,7 +11,7 @@ import type { Take, TakeRecording } from './types'
  *
  * The take's frames/transcript/events live in `${take.dir}/recording.json` on
  * S3, not in the database — fetched here and cached under the take id (not the
- * presigned url, which is re-signed on every `gripes.get`) because the file
+ * presigned url, which is re-signed on every `walkthroughs.get`) because the file
  * itself never changes once uploaded.
  */
 export function TakeSection({ take, urlByPath }: { take: Take; urlByPath: Map<string, string> }) {

@@ -1,6 +1,6 @@
-// handback push — upload a recorded gripe folder to the Handback workspace.
+// handback push — upload a recorded walkthrough folder to the Handback workspace.
 //
-//   bun cli/push.ts <gripe-folder> [--server http://localhost:3995] [--token hb_...]
+//   bun cli/push.ts <walkthrough-folder> [--server http://localhost:3995] [--token hb_...]
 //
 // The folder is what the recorder wrote: report.md + MANIFEST.txt at the root,
 // one rec-NN/ per take (recording.json, transcript.txt, frames/, grids/,
@@ -55,7 +55,7 @@ const flag = (name: string) => {
   return i >= 0 ? args[i + 1] : undefined
 }
 
-if (!folder) fail('usage: bun cli/push.ts <gripe-folder> [--server url] [--token hb_...]')
+if (!folder) fail('usage: bun cli/push.ts <walkthrough-folder> [--server url] [--token hb_...]')
 const server = (flag('server') ?? process.env.HANDBACK_SERVER ?? 'http://localhost:3995').replace(
   /\/+$/,
   ''
@@ -66,7 +66,7 @@ if (!token) fail('no API token — pass --token or set HANDBACK_TOKEN')
 const files = walk(folder)
 if (files.length === 0) fail(`${folder} is empty`)
 if (!files.some((f) => f.path === 'report.md')) {
-  fail(`${folder} has no report.md — is this a gripe folder?`)
+  fail(`${folder} has no report.md — is this a walkthrough folder?`)
 }
 
 // Every rec-NN/recording.json describes one take plus (redundantly) the session.
@@ -123,14 +123,14 @@ console.log(
   `pushing ${declare.slug} — ${takes.length} take(s), ${files.length} files, ${(totalBytes / 1024 / 1024).toFixed(1)} MB → ${server}`
 )
 
-const declareRes = await fetch(`${server}/api/ingest/gripes`, {
+const declareRes = await fetch(`${server}/api/ingest/walkthroughs`, {
   method: 'POST',
   headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
   body: JSON.stringify(declare),
 })
 if (!declareRes.ok) fail(`declare failed (${declareRes.status}): ${await declareRes.text()}`)
-const { gripeId, uploads } = (await declareRes.json()) as {
-  gripeId: string
+const { walkthroughId, uploads } = (await declareRes.json()) as {
+  walkthroughId: string
   uploads: { path: string; url: string; contentType: string }[]
 }
 
@@ -155,10 +155,10 @@ async function worker() {
 }
 await Promise.all(Array.from({ length: UPLOAD_CONCURRENCY }, worker))
 
-const finalizeRes = await fetch(`${server}/api/ingest/gripes/${gripeId}/finalize`, {
+const finalizeRes = await fetch(`${server}/api/ingest/walkthroughs/${walkthroughId}/finalize`, {
   method: 'POST',
   headers: { authorization: `Bearer ${token}` },
 })
 if (!finalizeRes.ok) fail(`finalize failed (${finalizeRes.status}): ${await finalizeRes.text()}`)
 
-console.log(`done — ${server}/gripes/${gripeId}`)
+console.log(`done — ${server}/walkthroughs/${walkthroughId}`)

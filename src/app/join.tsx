@@ -43,9 +43,7 @@ export function JoinPage() {
   // invites.accept) — say so before they click rather than after.
   const invitedEmail = inviteQuery.data?.email ?? null
   const wrongAccount =
-    !!session &&
-    !!invitedEmail &&
-    invitedEmail.toLowerCase() !== session.user.email.toLowerCase()
+    !!session && !!invitedEmail && invitedEmail.toLowerCase() !== session.user.email.toLowerCase()
 
   const fired = useRef(false)
   useEffect(() => {
@@ -82,7 +80,7 @@ export function JoinPage() {
             {inviteQuery.data.projectName && (
               <CardDescription>
                 Guest access to the {inviteQuery.data.projectName} project — you'll see only its
-                gripes.
+                walkthroughs.
               </CardDescription>
             )}
             {inviteQuery.data.email && (
@@ -95,8 +93,8 @@ export function JoinPage() {
             {session && wrongAccount ? (
               <>
                 <p className="text-sm">
-                  This invite was sent to{' '}
-                  <span className="font-mono text-xs">{invitedEmail}</span>, but you're signed in as{' '}
+                  This invite was sent to <span className="font-mono text-xs">{invitedEmail}</span>,
+                  but you're signed in as{' '}
                   <span className="font-mono text-xs">{session.user.email}</span>.
                 </p>
                 <p className="text-muted-foreground text-sm">

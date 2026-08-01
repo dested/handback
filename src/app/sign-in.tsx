@@ -36,7 +36,7 @@ export function SignInPage() {
       <ReturnMark className="h-6" />
       <h1 className="font-display mt-6 text-3xl font-semibold tracking-tight">Welcome back</h1>
       <p className="text-muted-foreground mt-2 text-sm">
-        Sign in to pick up the gripes waiting on you.
+        Sign in to pick up the walkthroughs waiting on you.
       </p>
       <div className="bg-card mt-8 rounded-lg border p-6">
         <form onSubmit={onSubmit} className="space-y-4">

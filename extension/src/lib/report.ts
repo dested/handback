@@ -25,7 +25,7 @@ import { dateTime, hhmm, mmss, recDirName } from './format';
  * take owns a `rec-NN/` subtree, and this file is what prefixes those paths.
  *
  * Handback difference from the original: there is no local folder. The same paths are
- * uploaded as the gripe's file set and handed back by the `get_gripe` MCP tool, so the
+ * uploaded as the gripe's file set and handed back by the `get_walkthrough` MCP tool, so the
  * report opens by naming the gripe rather than a directory on somebody's disk.
  */
 
@@ -36,15 +36,15 @@ function truncate(value: string, max: number): string {
 }
 
 /** The opening always applies. The paragraph after it is added only when there is a recording. */
-const PREAMBLE_HEAD = `> **You are reading a gripe — a bug report recorded by a human using the running app.**
+const PREAMBLE_HEAD = `> **You are reading a walkthrough — recorded feedback from a human using the running app: sometimes a bug, sometimes review notes, sometimes a change they want.**
 > Everything below sits on one timeline, in the order it happened — and the human
 > pruned and reordered it before handing it over, so what is here is what they meant
 > you to read. **Read the images:**
 > they are the primary evidence, and the words are shorthand that assumes you looked.
-> Every path is relative to the gripe's own file set — the paths the \`get_gripe\` MCP
+> Every path is relative to the walkthrough's own file set — the paths the \`get_walkthrough\` MCP
 > tool hands you, and the paths inside the folder if you downloaded it. Wherever
 > this report caps or thins what it shows you it prints the count — when you see one,
-> you are looking at a subset, and the rest is in the gripe.`;
+> you are looking at a subset, and the rest is in the walkthrough.`;
 
 const PREAMBLE_PARTS = `> The **walkthrough** is a narrated screen recording, distilled. Read it in this order:
 > first the **contact sheets** — nine keyframes per image, in order, covering the
@@ -79,7 +79,7 @@ function preamble(hasParts: boolean): string {
 function gripeLines(url?: string): string[] {
   if (!url) return [];
   return [
-    `**This gripe:** \`${url}\` — pull the images, video, and per-take JSON with the handback MCP tool \`get_gripe\`; every path below is one of the files it returns.`,
+    `**This walkthrough:** \`${url}\` — pull the images, video, and per-take JSON with the handback MCP tool \`get_walkthrough\`; every path below is one of the files it returns.`,
     '',
   ];
 }
@@ -559,7 +559,7 @@ export function buildReport(session: Session, recordings: Recording[], url?: str
   const origin = takes.find((r) => r.meta.eventScope)?.meta.eventScope ?? session.origin;
 
   const out: string[] = [];
-  out.push(`# Gripe — ${session.name}`);
+  out.push(`# Walkthrough — ${session.name}`);
   out.push('');
   const counts: string[] = [];
   if (takes.length) counts.push(`\`walkthrough ${mmss(totalMs(spans))}\``);
@@ -633,7 +633,7 @@ export function buildReport(session: Session, recordings: Recording[], url?: str
   out.push('---');
   out.push('');
   out.push(
-    `<sub>Recorded with the Handback Recorder. Machine-readable copy: ${machine}. Full listing of this gripe: \`MANIFEST.txt\`.</sub>`,
+    `<sub>Recorded with the Handback Recorder. Machine-readable copy: ${machine}. Full listing of this walkthrough: \`MANIFEST.txt\`.</sub>`,
   );
   out.push('');
   return out.join('\n');
@@ -739,7 +739,7 @@ export function buildManifestTxt(
 ): string {
   const parts = [...recordings].sort((a, b) => a.index - b.index);
   const rows: [string, string][] = [
-    ['report.md', 'the whole gripe in order, on one timeline. read this one'],
+    ['report.md', 'the whole walkthrough in order, on one timeline. read this one'],
     ['MANIFEST.txt', 'this listing'],
   ];
   for (const part of parts) {
@@ -774,9 +774,9 @@ export function buildManifestTxt(
 
   const lines = [
     `source: handback recorder — ${session.name}`,
-    ...(url ? [`gripe: ${url}`] : []),
+    ...(url ? [`walkthrough: ${url}`] : []),
     `recorded: ${dateTime(session.createdAt)} | ${parts.length} part(s) | ${session.origin}`,
-    'note: every path below is relative to this gripe',
+    'note: every path below is relative to this walkthrough',
     '--- files ---',
     ...rowLines(rows),
   ];
@@ -801,7 +801,7 @@ export function buildManifestTxt(
 
 /** How much the gripe holds, said in as few words as the prompt can afford. */
 function contents(session: Session, parts: number): string {
-  if (!parts) return `a gripe called ${session.name}`;
+  if (!parts) return `a walkthrough called ${session.name}`;
   return `${parts} recording${parts === 1 ? '' : 's'} on one timeline`;
 }
 
@@ -816,7 +816,7 @@ export function agentPrompt(session: Session, url?: string, parts = session.recC
     ? 'The images are the evidence — read the contact sheets first, then the timeline, look at every screenshot, and where the words and the frames disagree, believe the frames.'
     : 'Look at every image, then fix what it describes.';
   if (url) {
-    return `The gripe is at ${url} — pull the full brief with the handback MCP tool \`get_gripe\`, then fix what it describes. I recorded it against the running app: ${what}, in the order they happened. Its \`report.md\` is authored for you. ${evidence}`;
+    return `The walkthrough is at ${url} — pull the full brief with the handback MCP tool \`get_walkthrough\`, then fix what it describes. I recorded it against the running app: ${what}, in the order they happened. Its \`report.md\` is authored for you. ${evidence}`;
   }
-  return `Pull my newest gripe with the handback MCP tools (\`list_gripes\`, then \`get_gripe\`) and fix what it describes — "${session.name}", recorded against the running app: ${what}, in the order they happened. Its \`report.md\` is authored for you. ${evidence}`;
+  return `Pull my newest walkthrough with the handback MCP tools (\`list_walkthroughs\`, then \`get_walkthrough\`) and fix what it describes — "${session.name}", recorded against the running app: ${what}, in the order they happened. Its \`report.md\` is authored for you. ${evidence}`;
 }

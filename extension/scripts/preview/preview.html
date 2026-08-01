@@ -24,13 +24,25 @@
       const NOW = Date.now();
       const SID = 'preview-session';
 
-      // Mirrors DEFAULT_SETTINGS in src/lib/types.ts, with a token present so the
-      // panel reads as connected to a workspace.
+      // Mirrors DEFAULT_SETTINGS in src/lib/types.ts, with one workspace linked so
+      // the panel reads as connected. This shape has to track types.ts: the panel
+      // calls activeLink(settings), which reaches straight into `links` — a stub
+      // still carrying the flat 1.1.x serverUrl/apiToken fields throws on render
+      // and the harness comes up blank.
       const SETTINGS = {
         drawStart: true,
         lang: '',
-        serverUrl: 'https://handback.dev',
-        apiToken: 'hb_preview_000000000000',
+        onDeviceTranscription: false,
+        links: [
+          {
+            id: 'https://handback.dev::org_preview',
+            serverUrl: 'https://handback.dev',
+            orgId: 'org_preview',
+            orgName: 'Preview Workspace',
+            apiToken: 'hb_preview_000000000000',
+          },
+        ],
+        activeLinkId: 'https://handback.dev::org_preview',
       };
 
       // ── synthesis ─────────────────────────────────────────────────────────

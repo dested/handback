@@ -6,11 +6,17 @@ import { useCopy } from './use-copy'
  * report.md verbatim. Deliberately unrendered — the point of this section is to
  * show the human exactly what the agent will read, markdown syntax and all.
  */
-export function ReportPanel({ gripeId, url }: { gripeId: string; url: string | undefined }) {
+export function ReportPanel({
+  walkthroughId,
+  url,
+}: {
+  walkthroughId: string
+  url: string | undefined
+}) {
   const { copied, copy } = useCopy()
 
   const report = useQuery({
-    queryKey: ['handback.report', gripeId],
+    queryKey: ['handback.report', walkthroughId],
     enabled: url !== undefined,
     staleTime: Infinity,
     retry: 1,
@@ -40,7 +46,7 @@ export function ReportPanel({ gripeId, url }: { gripeId: string; url: string | u
       </div>
 
       {url === undefined ? (
-        <p className="text-muted-foreground text-sm">This gripe has no report.md.</p>
+        <p className="text-muted-foreground text-sm">This walkthrough has no report.md.</p>
       ) : report.isError ? (
         <p className="text-muted-foreground text-sm">Couldn't load report.md.</p>
       ) : text === undefined ? (

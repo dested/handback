@@ -2,6 +2,123 @@
 
 > ADR-lite: what was decided, why, what was rejected. Append-only.
 
+## 2026-08-01 — Pointing outside Chrome is a PiP window (the puck), not a native helper
+**Why:** "draw all over the screen, not just the Chrome window" (gripe `3f491ef7`, 2:21 —
+"really, really important"), aimed at people narrating over Excel and other native apps. MV3
+cannot paint a pixel outside a tab, so the puck stops trying: a Document Picture-in-Picture
+window is always-on-top over any app and — the whole trick — is *captured by `getDisplayMedia`
+for free*. It's drawn as a cursor (opaque window with a minimum size → cobalt arrow, tip at the
+top-left inner pixel, body hangs off-target) whose body doubles as the out-of-Chrome dock:
+clock, live captions, mark/stop, arrow-click/`p` drops numbered **pins** that are painted onto
+keyframes. Tip telemetry rides the existing `PointerSample` pipe (second slot, fresh page
+sample wins, parked puck never stale); parking forces a mark like an ink stroke ending; dedup
+signatures mask the puck's window rect (union of both compared frames' rects) so its ticking
+clock can't burn the frame budget. Verified: `documentPictureInPicture` **is** exposed in the
+side panel (Sal, live check), so the panel opens it and scripts its DOM directly — zero new
+messages, zero worker/server changes.
+**Rejected:** encode-time-only compositing (user draws blind — dead once the puck existed); an
+Electron/Tauri transparent-overlay helper (second install, signing, Web Store story — revisit
+only if the puck proves insufficient); freehand ink outside Chrome (impossible without the
+helper; pointer + pins + narration resolves the reference); auto-opening the puck on Record
+(`requestWindow` needs its own user gesture — the Record click is spent on the share picker).
+
+## 2026-08-01 — The product noun is "walkthrough"; "gripe" is dead everywhere but two frozen edges
+**Why:** the owner, on record (walkthrough `212801d8`): "this whole term gripe is — it's bad… I
+want you to change the database name and all throughout the code base." Renamed in the DB (tables
+`walkthrough`/`walkthrough_file`, columns in place via `ALTER … RENAME`, never `db push` drops),
+tRPC (`walkthroughs.*`), MCP tools (`list_walkthroughs`/`get_walkthrough`/`set_walkthrough_status`,
+no old-name aliases), web routes (`/walkthroughs/:id`, old `/gripes/:id` 302s), UI copy, CLI, and
+the report.md the recorder emits. Two edges deliberately keep the old spelling: the **S3 key
+prefix** `orgs/<orgId>/gripes/<id>/` (every uploaded object already lives there; renaming the path
+orphans them all) and the **/api/ingest/gripes\*** REST aliases (shipped recorders ≤1.2.x post
+them). The extension's *internal* identifiers also stay `Gripe*` for now — another session had
+in-flight edits there, so only emitted strings changed.
+**Rejected:** "note"/"handoff"/"brief" (owner picked walkthrough — it's literally what the recorder
+makes and half the vocabulary already); migrating S3 keys (copy of every object for a cosmetic
+path); MCP alias tools (three clean tools beat six, and only one user exists to break).
+
+## 2026-08-01 — Every account owns a personal workspace; a team is a workspace you create on purpose
+**Why:** the recorded sign-up run died on "Name your workspace / Organization name" ("I just
+signed up, suddenly I'm thrust into this thing"). Now a better-auth `databaseHooks.user.create`
+hook auto-creates "<First>'s workspace" (`Org.personal = true`, owner membership), sign-up lands
+straight in the inbox, and `orgs.ensurePersonal` is the idempotent repair path. Personal
+workspaces take no invites (server-refused) and show no Team nav; a **team** is created explicitly
+from the header's workspace switcher, gated on the `team` entitlement, and is where
+members/invites live. API tokens left the Team page for /connect — they exist to connect things,
+and the connect page is where that story is told. Project origin-hints left the UI (the recorder's
+project picker routes uploads now); the column and auto-routing stay.
+**Rejected:** keeping one org type and hiding tabs by member-count (lies as soon as an invite
+lands); a separate Team entity nested under Org (the org IS the team; one concept, one table);
+backfilling nothing (existing single-member orgs were flipped `personal = true` so current
+accounts get the new shape).
+
+## 2026-08-01 — In the timeline, a bare drag scrubs; multi-select is modifier-only
+**Why:** every drag surface — ruler, filmstrip cell, empty track — started a range sweep or a
+marquee, so the gesture that reads as "move along and look" instead highlighted a batch and put a
+destructive bar on screen. Reported first-hand in gripe `3f491ef7`: "I don't want to multi-select,
+just let me drag… it's more just visual, you can click one, see whatever, but I just want to drag."
+Plain drag now scrubs the playhead everywhere; shift-drag sweeps a range (ruler) or marquees
+(tracks), shift-click extends, ctrl/cmd-click toggles. Sweeping a junk stretch to delete it is
+still a first-class feature — it just isn't what an unmodified drag means.
+**Rejected:** removing sweep-select entirely (it's how a bad stretch gets cut, and the editor's
+whole point is pruning before handoff); a mode toggle (a mode you must set is a mode you will
+forget, and the destructive one would be the sticky one).
+
+## 2026-08-01 — The axis is the elastic member, not the monitor
+**Why:** `.tl-monitor` was `flex: 1 100` — it absorbed every spare pixel — over a `.tl-scroll` of
+`flex: 0 1 auto`, which had no floor. On a side panel the result was a tall blank picture above a
+ruler and two lanes squeezed to a sliver ("this down here at the bottom doesn't make any sense…
+there's nothing here"). Inverted: the axis grows and holds a floor of one ruler plus two lanes, the
+monitor is capped at 50% of the stacked panel and collapses to a single line when it has no frame
+to show. The 50% is the number the report asked for out loud.
+**Rejected:** a fixed monitor height (breaks across the side rail, the popped strip and every
+breakpoint); a draggable splitter (one more thing to discover and persist, for a panel with one
+sensible ratio). Both rules are scoped `:not(.wide)` so the popped-out strip, where the monitor is
+a fixed column beside the axis, is untouched.
+
+## 2026-07-31 — Keyframe budget scales with take length, not a flat 150
+**Why:** the flat `MAX_FRAMES = 150` was wrong at both ends — a 90-second walkthrough never
+approached it, a twenty-minute one lost real detail to uniform thinning. `frameBudget(durationMs)`
+is 40 frames/min clamped to [150, 600]: the floor means no short take regresses, the ceiling keeps
+a marathon take inside the 2 GB/gripe quota (~200-400 KB a frame → ~180 MB of frames at the top).
+The dedup pass upstream is untouched — this only changes how much of what dedup already kept
+survives. The agent brief's sample moved with it (`briefFrameLimit`, 8/min clamped to [30, 120],
+was a flat 30) so a long gripe's frame list isn't truncated to a tenth of itself; every frame is
+still presigned in the files list either way, the cap is only about what the brief inlines.
+**Rejected:** removing the cap entirely (upload size becomes unbounded by anything but dedup and
+the org quota, and the Timeline's batched blob reads assume a bounded count); raising the flat
+constant to 400 (same wrong-at-both-ends shape, just shifted).
+
+## 2026-07-31 — An admin's API token spans every workspace, writes included
+**Why:** /admin can show every user's gripes, so the agent surface had to match — pulling a gripe
+you can see in the UI shouldn't 404 over MCP. `authenticateToken` now resolves `isAdmin` from the
+token's owner and `gripes-api.ts` drops the org filter for it (`orgScope`/`inScope`, two helpers so
+a future query can't forget the rule). Unlike the web bypass this includes `set_gripe_status`:
+an agent's loop is pull → fix → mark in_review, and a read-only half of it strands the agent at
+the last step. Uploads stay pinned to the token's own org — declare/finalize never take the
+bypass. Every list row and brief carries `workspace`, and the MCP tool descriptions grow a
+scope sentence, because the model needs to know its queue spans customers.
+**Rejected:** an `allWorkspaces: true` opt-in flag on `list_gripes` (keeps the everyday loop
+narrow, but Sal's own token *is* the admin token and he wants the wide view by default — the
+trade-off is that a normal Handback session now lists every workspace's gripes); read-only parity
+with the web bypass (breaks the agent loop mid-way); a separate "platform token" type (a second
+credential kind to mint, revoke and explain).
+
+## 2026-07-31 — Platform admins can read any workspace's gripes, and only read
+**Why:** /admin gained a per-user drill-down of every gripe an account can see, and a list whose
+links 403 is a list that lies. Membership stays the gate for everything that *writes*: the bypass
+lives in one function (`requireViewAccess` in `server/membership.ts`), used by exactly
+`gripes.get` and `gripes.fileUrl`. `gripes.get` reports `viewerIsMember: false` on that path, and
+the viewer swaps its controls for an "admin view · read only" chip — so support can watch a
+recording and copy an agent brief, but cannot retriage, retitle, move or delete someone else's
+gripe, and never sees a control that would 403. Presigned S3 URLs are handed out on this path;
+that is the actual privilege, and it is deliberate — a support surface that can't play the video
+isn't one.
+**Rejected:** list-without-links (the common case is "show me what this user is looking at", which
+needs the viewer); granting admins a synthetic membership row (pollutes `orgs.mine`, the org
+switcher, and every member roster); a full bypass inside `requireMembership` (would silently hand
+admins delete on every workspace — one helper for reads keeps the blast radius readable).
+
 ## 2026-07-30 — The recorder links by handshake, not by pasted token
 **Why:** installing the extension ended at a settings pane asking for a server URL and an `hb_`
 token from Team → API tokens — the recorder's whole audience is the person *least* likely to

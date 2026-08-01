@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { buttonVariants } from '~/components/ui/button'
 import { cn } from '~/lib/utils'
 import { SHOTS } from './demo-shot'
-import { RecordingViewport } from './mock'
+import { RecorderPanelMock, RecordingViewport } from './mock'
 import { Section } from './section'
 
 // The page's only entrance: one staggered fade-and-rise on load. Nothing else
@@ -28,15 +28,16 @@ export function Hero() {
               rise,
               'font-display mt-7 text-5xl leading-[1.04] font-semibold tracking-tight delay-100 md:text-6xl'
             )}>
-            Your agents ship. The last word is <span className="ink-underline">yours</span>.
+            Debug and review your app in <span className="ink-underline">your own words</span>.
           </h1>
           <p
             className={cn(
               rise,
               'text-muted-foreground mt-7 max-w-xl text-lg leading-relaxed delay-200'
             )}>
-            Talk through the bug in the app where it happens. Handback turns the recording into
-            something a coding agent can actually read — and nothing merges without your sign-off.
+            Talk through it in the app where it happens — a bug, a rough edge, a change of taste.
+            Handback turns the recording into something your coding agent can actually read, with no
+            extra work after you stop talking.
           </p>
           <div className={cn(rise, 'mt-9 flex flex-wrap items-center gap-x-7 gap-y-4 delay-300')}>
             <Link to="/sign-up" className={cn(buttonVariants({ size: 'lg' }), 'px-6')}>
@@ -51,11 +52,16 @@ export function Hero() {
           </div>
         </div>
 
-        <RecordingViewport
-          shot={MARKED}
-          caption="and nothing. No error, no discount, the total is still a hundred and twenty-eight."
-          className={cn(rise, 'delay-500')}
-        />
+        {/* The frame has to read as *being recorded*, so the extension's panel sits
+            beside it. min-w-0 on both: the panel's mono lines never wrap. */}
+        <div className={cn(rise, 'grid items-start gap-3 delay-500 lg:grid-cols-[1fr_11rem]')}>
+          <RecordingViewport
+            shot={MARKED}
+            caption="and nothing. No error, no discount, the total is still a hundred and twenty-eight."
+            className="min-w-0"
+          />
+          <RecorderPanelMock className="hidden min-w-0 lg:flex" />
+        </div>
       </div>
     </Section>
   )

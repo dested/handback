@@ -1,5 +1,6 @@
-// Projects for the active org. A project is mostly a name plus the web origins
-// its gripes get recorded on — that's what files an incoming gripe automatically.
+// Projects for the active org. A project is a name; incoming walkthroughs file
+// themselves to one via the recorder's project picker (origin hints still exist
+// on the server for auto-routing, but the UI no longer collects them).
 
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -42,7 +43,6 @@ function ProjectsBody({ org }: { org: OrgSummary }) {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const [name, setName] = useState('')
-  const [origins, setOrigins] = useState('')
   const [invited, setInvited] = useState<{ projectId: string; link: string } | null>(null)
   const [copied, setCopied] = useState(false)
   // One project is edited at a time; opening another closes the last.
@@ -73,7 +73,6 @@ function ProjectsBody({ org }: { org: OrgSummary }) {
     trpc.projects.create.mutationOptions({
       onSuccess: () => {
         setName('')
-        setOrigins('')
         invalidateProjects()
       },
     })
@@ -92,7 +91,7 @@ function ProjectsBody({ org }: { org: OrgSummary }) {
       <header className="space-y-1">
         <h1 className="font-display text-3xl font-semibold">Projects</h1>
         <p className="text-muted-foreground text-sm">
-          Gripes recorded on a matching origin file themselves here automatically.
+          Walkthroughs recorded on a matching origin file themselves here automatically.
         </p>
       </header>
 
@@ -111,7 +110,7 @@ function ProjectsBody({ org }: { org: OrgSummary }) {
             <div className="border-border text-muted-foreground flex items-center gap-4 border-b pb-2 text-xs font-medium tracking-wide uppercase">
               <span className="min-w-0 flex-1">Project</span>
               {(fullAccess || canInvite) && <span className="w-32 shrink-0" />}
-              <span className="w-20 shrink-0 text-right">Gripes</span>
+              <span className="w-20 shrink-0 text-right">Walkthroughs</span>
             </div>
             <div className="divide-border divide-y">
               {projectsQuery.data.map((p) => (
@@ -124,17 +123,6 @@ function ProjectsBody({ org }: { org: OrgSummary }) {
                           {p.slug}
                         </span>
                       </p>
-                      {p.originHints.length > 0 && (
-                        <div className="flex flex-wrap gap-1.5">
-                          {p.originHints.map((origin) => (
-                            <span
-                              key={origin}
-                              className="border-border text-muted-foreground rounded border px-1.5 py-0.5 font-mono text-xs">
-                              {origin}
-                            </span>
-                          ))}
-                        </div>
-                      )}
                       {invited?.projectId === p.id && (
                         <div className="space-y-1 pt-1">
                           <div className="flex items-center gap-2">
@@ -160,7 +148,7 @@ function ProjectsBody({ org }: { org: OrgSummary }) {
                           </div>
                           <p className="text-muted-foreground text-xs">
                             Anyone with this link joins as a guest of {p.name} — they'll see only
-                            this project's gripes. Expires in seven days.
+                            this project's walkthroughs. Expires in seven days.
                           </p>
                         </div>
                       )}
@@ -194,7 +182,7 @@ function ProjectsBody({ org }: { org: OrgSummary }) {
                       </div>
                     )}
                     <span className="w-20 shrink-0 text-right font-mono text-sm">
-                      {p.gripeCount}
+                      {p.walkthroughCount}
                     </span>
                   </div>
                   {editingId === p.id && (
@@ -202,9 +190,7 @@ function ProjectsBody({ org }: { org: OrgSummary }) {
                       project={p}
                       pending={update.isPending}
                       error={update.isError ? update.error.message : null}
-                      onSave={(name, originHints) =>
-                        update.mutate({ orgId: org.id, projectId: p.id, name, originHints })
-                      }
+                      onSave={(name) => update.mutate({ orgId: org.id, projectId: p.id, name })}
                       onCancel={() => setEditingId(null)}
                     />
                   )}
@@ -221,7 +207,7 @@ function ProjectsBody({ org }: { org: OrgSummary }) {
           <CardHeader>
             <CardTitle>New project</CardTitle>
             <CardDescription>
-              Origins are matched against the page a gripe was recorded on.
+              A folder for related walkthroughs — name it after the surface it covers.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -231,14 +217,7 @@ function ProjectsBody({ org }: { org: OrgSummary }) {
                 e.preventDefault()
                 const trimmed = name.trim()
                 if (!trimmed) return
-                create.mutate({
-                  orgId: org.id,
-                  name: trimmed,
-                  originHints: origins
-                    .split('\n')
-                    .map((line) => line.trim())
-                    .filter((line) => line !== ''),
-                })
+                create.mutate({ orgId: org.id, name: trimmed })
               }}>
               <div className="space-y-2">
                 <Label htmlFor="project-name">Name</Label>
@@ -250,19 +229,6 @@ function ProjectsBody({ org }: { org: OrgSummary }) {
                   autoComplete="off"
                   required
                 />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="project-origins">Origins</Label>
-                <textarea
-                  id="project-origins"
-                  rows={3}
-                  value={origins}
-                  onChange={(e) => setOrigins(e.target.value)}
-                  placeholder={'https://app.example.com\nhttps://staging.example.com'}
-                  spellCheck={false}
-                  className="border-input bg-background placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 w-full rounded-md border px-3 py-2 font-mono text-xs shadow-xs outline-none focus-visible:ring-[3px]"
-                />
-                <p className="text-muted-foreground text-xs">One URL origin per line.</p>
               </div>
               {create.isError && <p className="text-destructive text-sm">{create.error.message}</p>}
               <Button type="submit" disabled={create.isPending}>
@@ -276,7 +242,7 @@ function ProjectsBody({ org }: { org: OrgSummary }) {
   )
 }
 
-/** Inline editor for one project: its name and its origins. The slug never moves. */
+/** Inline editor for one project: its display name. The slug never moves. */
 function ProjectEditor({
   project,
   pending,
@@ -284,14 +250,13 @@ function ProjectEditor({
   onSave,
   onCancel,
 }: {
-  project: { id: string; name: string; originHints: string[] }
+  project: { id: string; name: string }
   pending: boolean
   error: string | null
-  onSave: (name: string, originHints: string[]) => void
+  onSave: (name: string) => void
   onCancel: () => void
 }) {
   const [name, setName] = useState(project.name)
-  const [origins, setOrigins] = useState(project.originHints.join('\n'))
   const trimmed = name.trim()
 
   return (
@@ -305,32 +270,12 @@ function ProjectEditor({
           autoComplete="off"
         />
       </div>
-      <div className="space-y-2">
-        <Label htmlFor={`project-origins-${project.id}`}>Origins</Label>
-        <textarea
-          id={`project-origins-${project.id}`}
-          rows={3}
-          value={origins}
-          onChange={(e) => setOrigins(e.target.value)}
-          spellCheck={false}
-          className="border-input bg-background placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 w-full rounded-md border px-3 py-2 font-mono text-xs shadow-xs outline-none focus-visible:ring-[3px]"
-        />
-        <p className="text-muted-foreground text-xs">One URL origin per line.</p>
-      </div>
       <div className="flex items-center gap-2">
         <Button
           type="button"
           size="sm"
           disabled={pending || trimmed === ''}
-          onClick={() =>
-            onSave(
-              trimmed,
-              origins
-                .split('\n')
-                .map((line) => line.trim())
-                .filter((line) => line !== '')
-            )
-          }>
+          onClick={() => onSave(trimmed)}>
           {pending ? 'Saving…' : 'Save'}
         </Button>
         <Button type="button" size="sm" variant="ghost" onClick={onCancel}>

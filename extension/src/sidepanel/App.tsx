@@ -12,7 +12,7 @@ import { DEFAULT_SERVER, DEFAULT_SETTINGS, activeLink, linkId } from '../lib/typ
 import { fetchContext, type WorkspaceContext } from '../lib/context';
 import { send } from '../lib/messages';
 import { blobs, kv } from '../lib/db';
-import { dateTime, mmss, recDirName } from '../lib/format';
+import { dateTime, mmss, plural, recDirName } from '../lib/format';
 import { partSpans, totalMs } from '../lib/timeline';
 import {
   agentPrompt,
@@ -24,6 +24,7 @@ import {
 } from '../lib/report';
 import { contentTypeFor, pushGripe, type GripeFile, type UploadProgress } from '../lib/upload';
 import { Recorder, type RecorderUpdate } from './recorder';
+import { openPuck, puckSupported, type PuckHandle } from './puck';
 import { Dictation } from '../content/speech';
 import { makeGrids, type GridFrame } from './grids';
 import { polishTranscript } from './polish';
@@ -156,6 +157,10 @@ export function App() {
   /** Whether the recorded tab can host the on-page dock — chrome:// pages can't. */
   const [pageDock, setPageDock] = useState(false);
   const [recUpdate, setRecUpdate] = useState<RecorderUpdate | null>(null);
+  /** The puck is out — the PiP pointer floating over whatever app the user is in. */
+  const [puckOut, setPuckOut] = useState(false);
+  /** The capture is shaped like a monitor, so the puck would land inside it. */
+  const [screenish, setScreenish] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [whisper, setWhisper] = useState<TranscribeProgress | null>(null);
   // The queue, mirrored into state so the panel can say `queued` / `transcribing…`.
@@ -173,6 +178,7 @@ export function App() {
   const whisperQueue = useRef<string[]>([]);
   const whisperRunning = useRef(false);
   const recorderRef = useRef<Recorder | null>(null);
+  const puckRef = useRef<PuckHandle | null>(null);
   /** micperm.html is opened once per panel life — a second Record records silent. */
   const micTabOpened = useRef(false);
   const recovering = useRef<Set<string>>(new Set());
@@ -396,6 +402,10 @@ export function App() {
       // right now — stopping and starting again is what takes are for.
       enqueueWhisper(r.id);
     } finally {
+      puckRef.current?.close();
+      puckRef.current = null;
+      setPuckOut(false);
+      setScreenish(false);
       recorderRef.current = null;
       setRecUpdate(null);
       setStopping(false);
@@ -403,6 +413,61 @@ export function App() {
       stopGuard.current = false;
     }
   };
+
+  /**
+   * The puck: the PiP arrow that goes where the ink can't — over Excel, a
+   * terminal, anything. Must be opened from a click (transient activation), which
+   * is why Record can't bring it along automatically: that gesture is spent on
+   * the share picker. It scripts back into the recorder directly; no messages.
+   */
+  const openPuckWindow = async () => {
+    const r = recorderRef.current;
+    if (!r || puckRef.current) return;
+    try {
+      puckRef.current = await openPuck({
+        onTelemetry: (t) => recorderRef.current?.setPuck(t),
+        // Parking the arrow is pointing — the out-of-Chrome twin of an ink stroke
+        // ending. Only when it actually landed in the recording, though.
+        onParked: () => {
+          if (recorderRef.current?.puckOnFrame()) recorderRef.current.mark();
+        },
+        onPin: () => {
+          const rec = recorderRef.current;
+          return rec?.puckOnFrame() ? rec.pin() : null;
+        },
+        onMark: () => recorderRef.current?.mark(),
+        onStop: () => stopRef.current(),
+        onClosed: () => {
+          puckRef.current = null;
+          recorderRef.current?.setPuck(null);
+          setPuckOut(false);
+        },
+      });
+      setPuckOut(true);
+    } catch {
+      say("couldn't open the pointer");
+    }
+  };
+
+  // The puck's readout rides the recorder's own tick — clock, captions, and
+  // whether the arrow is still inside the captured frame.
+  useEffect(() => {
+    if (!recUpdate) return;
+    const r = recorderRef.current;
+    puckRef.current?.update({
+      elapsedMs: recUpdate.elapsedMs,
+      interim: recUpdate.interim,
+      micState: recUpdate.micState,
+      onFrame: r?.puckOnFrame() ?? false,
+    });
+    // "Take the pointer with you" only makes sense when a whole monitor is being
+    // captured; the panel's own screen aspect is the best available guess.
+    const shape = r?.frameShape();
+    const screenAspect = window.screen.width / window.screen.height;
+    setScreenish(
+      Boolean(shape && Math.abs(shape.w / shape.h - screenAspect) / screenAspect < 0.02),
+    );
+  }, [recUpdate]);
 
   /**
    * The side panel can't render the getUserMedia prompt — it rejects without
@@ -829,8 +894,15 @@ export function App() {
         <span className="wordmark">handback</span>
         {/* The gripe's own line below says the duration; up here it would only repeat it. */}
         <span className="spacer" />
-        <button className="icon" title="Settings" onClick={() => setShowSettings((v) => !v)}>
-          ⚙
+        {/* A bare glyph here read as decoration — nobody guessed the workspace
+            lived behind it. It says what it is, and says when it is open. */}
+        <button
+          className={`icon labelled${showSettings ? ' on' : ''}`}
+          title="Workspace, transcription and language"
+          aria-expanded={showSettings}
+          onClick={() => setShowSettings((v) => !v)}
+        >
+          ⚙ <span>settings</span>
         </button>
         <button className="icon" title="Pop the editor out along the bottom" onClick={() => void popOut()}>
           ⧉
@@ -840,7 +912,16 @@ export function App() {
 
       {showSettings && (
         <>
+          {/* Opening this used to shove the whole panel down with no explanation —
+              it read as content streaming in rather than as a drawer. The header
+              is what makes it legible as a thing that opened, and closable. */}
           <section className="settings">
+            <div className="settings-head">
+              <span>Settings</span>
+              <button className="icon" title="Close settings" onClick={() => setShowSettings(false)}>
+                ×
+              </button>
+            </div>
             <SettingsBlock
               settings={state.settings}
               onPatch={patchSettings}
@@ -857,10 +938,14 @@ export function App() {
             <span className="dot pulse" />
             <span className="clock">{mmss(recUpdate.elapsedMs)}</span>
             <span className="stat">
-              {recUpdate.frameCount} frames kept · {recUpdate.segmentCount} lines
+              {plural(recUpdate.frameCount, 'frame')} kept · {plural(recUpdate.segmentCount, 'line')}
               {recUpdate.markCount ? ` · ${recUpdate.markCount} marked` : ''}
             </span>
           </div>
+          {/* The words being heard are the reason to look at this block at all, so
+              they get their own ruled well with room for two lines. On one nowrap
+              line they were guillotined mid-sentence, and the well kept collapsing
+              to nothing between phrases and shoving the button around. */}
           {recUpdate.micState === 'denied' ? (
             <button
               className="ticker warn"
@@ -870,11 +955,23 @@ export function App() {
               microphone blocked — no narration this take · fix it
             </button>
           ) : (
-            <div className="ticker">
+            <div className={`ticker${recUpdate.interim ? '' : ' idle'}`}>
               {recUpdate.interim || (recUpdate.micState === 'listening' ? 'listening…' : '')}
             </div>
           )}
           {pageDock && <div className="note">draw and stop from the little bar on the page</div>}
+          {puckSupported() &&
+            (puckOut ? (
+              <div className="note">the pointer is out — drag it, click the arrow to pin</div>
+            ) : (
+              <button
+                className={`puck-open${screenish ? ' pulse' : ''}`}
+                title="A draggable arrow that floats over any app and shows up in the recording"
+                onClick={() => void openPuckWindow()}
+              >
+                ⌖ take the pointer with you — point at anything, even outside Chrome
+              </button>
+            ))}
           <button className="stop-big" onClick={() => void stopRecording()} disabled={stopping}>
             {stopping ? 'saving…' : 'stop recording'}
           </button>
@@ -954,9 +1051,11 @@ export function App() {
             </div>
             {!recording && (
               <div className="takerow">
+                {/* "another take" is film-crew language for what is really just
+                    carrying on — you are adding to one gripe, not reshooting it. */}
                 <button className="rec ghost" onClick={() => void startRecording()}>
                   <span className="dot" />
-                  record another take
+                  add more
                 </button>
                 {others > 0 && (
                   <button className="link" onClick={() => setShowSessions((v) => !v)}>

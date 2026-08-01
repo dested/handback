@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { cn } from '~/lib/utils'
-import { GRIPE } from './demo-data'
-import { CheckoutShot, FIXED_SHOT, SHOTS } from './demo-shot'
+import { WALKTHROUGH } from './demo-data'
+import { CheckoutShot, SHOTS } from './demo-shot'
 import { Section, SectionHeading, SectionLabel } from './section'
 
 /**
@@ -14,26 +14,26 @@ const steps = [
   {
     n: '01',
     title: 'Record',
-    body: 'Narrate the bug in the app where it happens. Draw on the page. Record it again if you fluff it — every take lands end to end on one timeline you can trim, reorder and re-word before anyone sees it.',
+    body: 'Narrate what you’re seeing, in the app where it happens — a bug, a review note, a change you want. Draw on the page. Stop talking and it’s done.',
     mock: <TimelineMock />,
   },
   {
     n: '02',
     title: 'Route',
-    body: 'Gripes land in one inbox and file themselves to the right project by the site they were recorded on. Nobody triages a queue of untitled screen recordings.',
+    body: 'Your walkthroughs land in Handback for your team to see and review — titled, timed, and filed to the right project.',
     mock: <InboxMock />,
   },
   {
     n: '03',
     title: 'Fix',
-    body: 'Your coding agent pulls the brief over MCP — sheets, transcript, the errors that fired while you were talking — and opens the fix against it.',
+    body: 'Your coding agent pulls the brief over MCP — sheets, transcript, the errors that fired while you were talking — and starts the fix.',
     mock: <AgentMock />,
   },
   {
     n: '04',
     title: 'Sign off',
-    body: 'The reviewer puts the frame you complained about next to the same screen on the fixed build. It either changed or it didn’t.',
-    mock: <SignOffMock />,
+    body: 'You get notified when the work is handed back. Take a look, say the last word, sign off.',
+    mock: <HandedBackMock />,
   },
 ]
 
@@ -54,9 +54,6 @@ export function HowItWorks() {
             <div className="min-w-0">
               <h3 className="font-display text-2xl font-semibold tracking-tight">{step.title}</h3>
               <p className="text-muted-foreground mt-2 leading-relaxed">{step.body}</p>
-              {step.n === '04' && (
-                <span className="stamp text-approve mt-6 text-[0.7rem]">SIGNED OFF</span>
-              )}
             </div>
             <div className="min-w-0 lg:col-start-3 lg:row-start-1">{step.mock}</div>
           </li>
@@ -137,27 +134,27 @@ function TimelineMock() {
   )
 }
 
-/** The inbox: three gripes, each already filed to a project by its origin. */
+/** The inbox: three walkthroughs, each already filed to a project by its origin. */
 function InboxMock() {
   const rows = [
     {
-      title: GRIPE.title,
-      project: GRIPE.project,
-      origin: GRIPE.origin,
+      title: WALKTHROUGH.title,
+      project: WALKTHROUGH.project,
+      origin: WALKTHROUGH.origin,
       status: 'open' as const,
       when: '2m',
     },
     {
       title: 'Order confirmation email never arrives',
-      project: GRIPE.project,
-      origin: GRIPE.origin,
+      project: WALKTHROUGH.project,
+      origin: WALKTHROUGH.origin,
       status: 'in review' as const,
       when: '1h',
     },
     {
-      title: 'Admin search returns deleted customers',
+      title: 'Checkout redesign notes — spacing and copy',
       project: 'Back office',
-      origin: 'admin.northwind.test',
+      origin: 'northwind.test',
       status: 'resolved' as const,
       when: 'Tue',
     },
@@ -168,7 +165,7 @@ function InboxMock() {
     resolved: 'text-approve bg-approve-wash',
   }
   return (
-    <Example caption="/app · auto-filed by recorded origin">
+    <Example caption="/app · filed to the right project">
       <ul>
         {rows.map((row, i) => (
           <li
@@ -209,37 +206,45 @@ function AgentMock() {
       <div className="space-y-2 p-3.5 font-mono text-[0.7rem] leading-relaxed">
         <p>
           <span className="text-cobalt select-none">▸ </span>
-          list_gripes()
+          list_walkthroughs()
           <span className="text-muted-foreground"> → 3 open</span>
         </p>
         <p>
           <span className="text-cobalt select-none">▸ </span>
-          get_gripe(<span className="text-muted-foreground">"promo-code-checkout"</span>)
+          get_walkthrough(<span className="text-muted-foreground">"promo-code-checkout"</span>)
         </p>
         <p className="text-muted-foreground pl-3.5">
-          ← report.md · {GRIPE.sheets} sheets · {GRIPE.keyframes} frames · transcript ·{' '}
-          {GRIPE.errors} errors
+          ← report.md · {WALKTHROUGH.sheets} sheets · {WALKTHROUGH.keyframes} frames · transcript ·{' '}
+          {WALKTHROUGH.errors} errors
         </p>
         <p className="pt-1">
           <span className="text-cobalt select-none">▸ </span>
-          set_gripe_status(<span className="text-muted-foreground">"in_review"</span>)
+          set_walkthrough_status(<span className="text-muted-foreground">"in_review"</span>)
         </p>
       </div>
     </Example>
   )
 }
 
-/** The reviewer's comparison: the marked frame, and the same screen on the fix. */
-function SignOffMock() {
-  const before = SHOTS[7] ?? SHOTS[0]
+/** The last beat: it comes back to you, and you're the one who closes it. */
+function HandedBackMock() {
   return (
-    <div className="grid grid-cols-2 gap-3">
-      <Example caption="0:22 · what you recorded">
-        {before && <CheckoutShot shot={before} className="block w-full" />}
-      </Example>
-      <Example caption="build #418 · the same screen">
-        <CheckoutShot shot={FIXED_SHOT} className="block w-full" />
-      </Example>
-    </div>
+    <Example caption="handed back · the last word is yours">
+      <div className="space-y-2.5 px-3.5 py-3">
+        <div className="flex items-center gap-3">
+          <span className="text-review bg-review-wash shrink-0 rounded-full px-1.5 py-0.5 font-mono text-[0.55rem] tracking-[0.08em] whitespace-nowrap uppercase">
+            handed back
+          </span>
+          <p className="min-w-0 flex-1 truncate text-[0.8rem] font-medium">{WALKTHROUGH.title}</p>
+          <span className="text-muted-foreground shrink-0 font-mono text-[0.6rem]">just now</span>
+        </div>
+        <div className="border-border flex items-center gap-3 border-t pt-2.5">
+          <span className="stamp text-approve text-[0.65rem]">SIGNED OFF</span>
+          <p className="text-muted-foreground text-[0.75rem] leading-relaxed">
+            You looked, it ships. You&apos;re notified the moment it lands.
+          </p>
+        </div>
+      </div>
+    </Example>
   )
 }

@@ -2,9 +2,9 @@
 
 **Your agents ship. You stay in the loop.**
 
-Handback is the cloud workspace for _gripes_ — ninety-second narrated walkthroughs of something broken. You hit record in the browser extension, talk through the bug in the app where it happens, and the recorder captures the whole thing: screen video, keyframes, a transcript of what you said, the DOM events you triggered, and the console errors that fired while you were speaking. It bundles that into a folder with a `report.md` written for a coding agent rather than a human bug tracker.
+Handback is the cloud workspace for _walkthroughs_ — ninety-second narrated walkthroughs of something broken. You hit record in the browser extension, talk through the bug in the app where it happens, and the recorder captures the whole thing: screen video, keyframes, a transcript of what you said, the DOM events you triggered, and the console errors that fired while you were speaking. It bundles that into a folder with a `report.md` written for a coding agent rather than a human bug tracker.
 
-The `handback` CLI pushes that folder here, where it lands in a shared inbox and auto-files to the right project by the origin it was recorded on. Your coding agent then pulls the brief over MCP — report, transcript, keyframes, video — opens the fix, and flips the gripe to `in_review`. A human watches the before-video against the fix and marks it `resolved`. See it, say it, the agent fixes it, you sign off. Nothing merges without a person in the loop.
+The `handback` CLI pushes that folder here, where it lands in a shared inbox and auto-files to the right project by the origin it was recorded on. Your coding agent then pulls the brief over MCP — report, transcript, keyframes, video — opens the fix, and flips the walkthrough to `in_review`. A human watches the before-video against the fix and marks it `resolved`. See it, say it, the agent fixes it, you sign off. Nothing merges without a person in the loop.
 
 ## Quickstart (dev)
 
@@ -23,7 +23,7 @@ bun run dev                  # → http://localhost:3995
 
 The server validates its environment at import (`server/env.ts`), so a missing `S3_BUCKET` or AWS credential means no boot rather than a failure at first upload.
 
-## Pushing a gripe
+## Pushing a walkthrough
 
 Point the CLI at a folder the recorder wrote (`report.md` + one `rec-NN/` per take):
 
@@ -33,7 +33,7 @@ bun cli/push.ts ./2026-07-29-1412-checkout-hangs \
   --token hb_…
 ```
 
-Both flags fall back to `HANDBACK_SERVER` and `HANDBACK_TOKEN`, so in practice you export the token once and run `bun cli/push.ts <folder>`. Push is a two-phase upload: it declares the gripe and its file list, `PUT`s every file straight to S3 through presigned URLs (six at a time), then finalizes. Re-pushing the same folder replaces the previous upload wholesale rather than duplicating it. On success it prints the workspace URL for the new gripe.
+Both flags fall back to `HANDBACK_SERVER` and `HANDBACK_TOKEN`, so in practice you export the token once and run `bun cli/push.ts <folder>`. Push is a two-phase upload: it declares the walkthrough and its file list, `PUT`s every file straight to S3 through presigned URLs (six at a time), then finalizes. Re-pushing the same folder replaces the previous upload wholesale rather than duplicating it. On success it prints the workspace URL for the new walkthrough.
 
 ## Connecting your agent
 
@@ -48,13 +48,13 @@ claude mcp add handback \
 
 `HANDBACK_SERVER` defaults to `https://handback.dev`; `HANDBACK_TOKEN` is required. Three tools:
 
-| tool               | what it does                                                                                                                |
-| ------------------ | --------------------------------------------------------------------------------------------------------------------------- |
-| `list_gripes`      | The team's gripes, newest first. Optional `status` filter.                                                                  |
-| `get_gripe`        | One gripe's full brief: metadata, the `report.md` authored for agents, and presigned URLs for video, keyframes, transcript. |
-| `set_gripe_status` | Move a gripe through review — `in_review` when a fix is up, `resolved` after human sign-off.                                |
+| tool                     | what it does                                                                                                                      |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| `list_walkthroughs`      | The team's walkthroughs, newest first. Optional `status` filter.                                                                  |
+| `get_walkthrough`        | One walkthrough's full brief: metadata, the `report.md` authored for agents, and presigned URLs for video, keyframes, transcript. |
+| `set_walkthrough_status` | Move a walkthrough through review — `in_review` when a fix is up, `resolved` after human sign-off.                                |
 
-The token pins the org, so an agent only ever sees its own team's gripes. File URLs are short-lived presigned GETs; the bucket blocks all public access.
+The token pins the org, so an agent only ever sees its own team's walkthroughs. File URLs are short-lived presigned GETs; the bucket blocks all public access.
 
 ## Architecture
 
@@ -63,41 +63,41 @@ browser extension          cli/push.ts              Handback (Express 5 + Bun)  
 ─────────────────          ───────────              ─────────────────────────      ──────────
 record + narrate  ──folder──▶  declare  ──────────▶  Postgres (metadata)
                                PUT files ─────────▶  S3 (video, frames, report)
-                               finalize  ──────────▶  gripe becomes visible
+                               finalize  ──────────▶  walkthrough becomes visible
                                                           │
                                                      web workspace  ◀── human reviews + signs off
                                                           │
                                                      cli/mcp.ts  ◀────── MCP: pull brief, set status
 ```
 
-One Express server runs in dev (Vite middleware) and prod (static + SSR bundle). Metadata lives in Postgres via Prisma; no file bytes ever touch the database. Every object sits under `orgs/<orgId>/gripes/<gripeId>/<path>` in S3 and is only ever reachable through a short-lived presigned URL.
+One Express server runs in dev (Vite middleware) and prod (static + SSR bundle). Metadata lives in Postgres via Prisma; no file bytes ever touch the database. Every object sits under `orgs/<orgId>/walkthroughs/<walkthroughId>/<path>` in S3 and is only ever reachable through a short-lived presigned URL.
 
 Two auth paths, deliberately separate: humans get a better-auth session cookie and talk to tRPC at `/api/trpc/*`; machines (the CLI, the MCP server) carry a bearer `hb_…` token to the REST router at `/api/ingest/*`.
 
-| surface        | route                                                  | who                   |
-| -------------- | ------------------------------------------------------ | --------------------- |
-| Landing        | `/`                                                    | anyone                |
-| Inbox          | `/app`                                                 | signed-in             |
-| Gripe viewer   | `/gripes/:gripeId`                                     | signed-in             |
-| Projects       | `/projects`                                            | signed-in             |
-| Team + tokens  | `/team`                                                | signed-in             |
-| Ingest (write) | `POST /api/ingest/gripes`, `…/:id/finalize`            | `hb_…` token          |
-| Ingest (read)  | `GET /api/ingest/gripes`, `…/:id`, `POST …/:id/status` | `hb_…` token          |
-| Health         | `/healthz`                                             | anyone (pings the DB) |
+| surface            | route                                                        | who                   |
+| ------------------ | ------------------------------------------------------------ | --------------------- |
+| Landing            | `/`                                                          | anyone                |
+| Inbox              | `/app`                                                       | signed-in             |
+| Walkthrough viewer | `/walkthroughs/:walkthroughId`                               | signed-in             |
+| Projects           | `/projects`                                                  | signed-in             |
+| Team + tokens      | `/team`                                                      | signed-in             |
+| Ingest (write)     | `POST /api/ingest/walkthroughs`, `…/:id/finalize`            | `hb_…` token          |
+| Ingest (read)      | `GET /api/ingest/walkthroughs`, `…/:id`, `POST …/:id/status` | `hb_…` token          |
+| Health             | `/healthz`                                                   | anyone (pings the DB) |
 
 ## Environment
 
 Validated by `server/env.ts` at import — all of these must be set for the server to start.
 
-| key                     | notes                                                   |
-| ----------------------- | ------------------------------------------------------- |
-| `DATABASE_URL`          | Postgres connection string.                             |
-| `BETTER_AUTH_SECRET`    | 32+ random chars. `openssl rand -base64 32`.            |
-| `BETTER_AUTH_URL`       | Public origin. Defaults to `http://localhost:3995`.     |
-| `AWS_REGION`            | Defaults to `us-west-2`.                                |
-| `S3_BUCKET`             | Bucket holding gripe payloads. Block all public access. |
-| `AWS_ACCESS_KEY_ID`     | Credential for that bucket.                             |
-| `AWS_SECRET_ACCESS_KEY` | Credential for that bucket.                             |
+| key                     | notes                                                         |
+| ----------------------- | ------------------------------------------------------------- |
+| `DATABASE_URL`          | Postgres connection string.                                   |
+| `BETTER_AUTH_SECRET`    | 32+ random chars. `openssl rand -base64 32`.                  |
+| `BETTER_AUTH_URL`       | Public origin. Defaults to `http://localhost:3995`.           |
+| `AWS_REGION`            | Defaults to `us-west-2`.                                      |
+| `S3_BUCKET`             | Bucket holding walkthrough payloads. Block all public access. |
+| `AWS_ACCESS_KEY_ID`     | Credential for that bucket.                                   |
+| `AWS_SECRET_ACCESS_KEY` | Credential for that bucket.                                   |
 
 The CLI and MCP server read `HANDBACK_SERVER` and `HANDBACK_TOKEN` instead — they are clients, not the server, and never touch the database directly.
 

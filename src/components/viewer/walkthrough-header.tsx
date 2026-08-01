@@ -4,46 +4,50 @@ import { Link } from 'react-router-dom'
 import { Button } from '~/components/ui/button'
 import { useTRPC } from '~/lib/trpc'
 import { dateTime, megabytes, mmss, plural } from './format'
-import type { Gripe } from './types'
+import type { Walkthrough } from './types'
 
 /** Title block: where it came from, and the shape of what was recorded. */
-export function GripeHeader({ gripe }: { gripe: Gripe }) {
+export function WalkthroughHeader({ walkthrough }: { walkthrough: Walkthrough }) {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const [editing, setEditing] = useState(false)
 
   const rename = useMutation(
-    trpc.gripes.rename.mutationOptions({
+    trpc.walkthroughs.rename.mutationOptions({
       onSettled: () => {
-        queryClient.invalidateQueries({ queryKey: trpc.gripes.get.queryKey({ gripeId: gripe.id }) })
+        queryClient.invalidateQueries({
+          queryKey: trpc.walkthroughs.get.queryKey({ walkthroughId: walkthrough.id }),
+        })
         // The inbox lists titles too.
-        queryClient.invalidateQueries({ queryKey: trpc.gripes.list.queryKey() })
+        queryClient.invalidateQueries({ queryKey: trpc.walkthroughs.list.queryKey() })
       },
     })
   )
 
   // In-flight title stands in for the server's answer, so the heading reads as
   // renamed the instant it's submitted and snaps back on its own if it fails.
-  const title = rename.isPending ? (rename.variables?.title ?? gripe.title) : gripe.title
+  const title = rename.isPending
+    ? (rename.variables?.title ?? walkthrough.title)
+    : walkthrough.title
 
   function commit(next: string) {
     const trimmed = next.trim()
     setEditing(false)
-    if (!trimmed || trimmed === gripe.title) return
-    rename.mutate({ gripeId: gripe.id, title: trimmed })
+    if (!trimmed || trimmed === walkthrough.title) return
+    rename.mutate({ walkthroughId: walkthrough.id, title: trimmed })
   }
 
   const meta = [
-    dateTime(gripe.recordedAt),
-    mmss(gripe.durationMs),
-    plural(gripe.takes.length, 'take'),
-    plural(gripe.frameCount, 'frame'),
-    plural(gripe.errorCount, 'console error'),
+    dateTime(walkthrough.recordedAt),
+    mmss(walkthrough.durationMs),
+    plural(walkthrough.takes.length, 'take'),
+    plural(walkthrough.frameCount, 'frame'),
+    plural(walkthrough.errorCount, 'console error'),
     // Only worth saying when it happened: it's the difference between "the page
     // was clean" and "the errors were on a tab we weren't recording".
-    gripe.droppedCount > 0 ? `${gripe.droppedCount} dropped from other tabs` : null,
-    megabytes(gripe.bytes),
-    gripe.uploadedByName ? `uploaded by ${gripe.uploadedByName}` : null,
+    walkthrough.droppedCount > 0 ? `${walkthrough.droppedCount} dropped from other tabs` : null,
+    megabytes(walkthrough.bytes),
+    walkthrough.uploadedByName ? `uploaded by ${walkthrough.uploadedByName}` : null,
   ].filter((part): part is string => part !== null)
 
   return (
@@ -65,7 +69,7 @@ export function GripeHeader({ gripe }: { gripe: Gripe }) {
             autoFocus
             defaultValue={title}
             aria-label="Title"
-            className="border-input bg-background font-display w-full max-w-2xl rounded-md border px-3 py-1.5 text-3xl font-semibold outline-none focus-visible:border-ring"
+            className="border-input bg-background font-display focus-visible:border-ring w-full max-w-2xl rounded-md border px-3 py-1.5 text-3xl font-semibold outline-none"
             onKeyDown={(e) => {
               if (e.key === 'Escape') setEditing(false)
             }}
@@ -92,8 +96,8 @@ export function GripeHeader({ gripe }: { gripe: Gripe }) {
       {rename.error && <p className="text-destructive text-sm">{rename.error.message}</p>}
 
       <p className="text-muted-foreground font-mono text-xs">
-        {gripe.slug}
-        {gripe.origin && ` · ${gripe.origin}`}
+        {walkthrough.slug}
+        {walkthrough.origin && ` · ${walkthrough.origin}`}
       </p>
       <p className="text-muted-foreground text-sm">{meta.join(' · ')}</p>
     </div>

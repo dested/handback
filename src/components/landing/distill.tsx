@@ -1,5 +1,5 @@
 import { ArrowDown } from 'lucide-react'
-import { GRIPE } from './demo-data'
+import { WALKTHROUGH } from './demo-data'
 import { SHOTS } from './demo-shot'
 import { ContactSheet, Filmstrip } from './mock'
 import { Section, SectionHeading, SectionLabel } from './section'
@@ -56,7 +56,8 @@ export function Distill() {
               text tangled in the perforations when it wraps on a phone. */}
           <div className="absolute inset-0 flex items-center justify-center px-4">
             <p className="bg-card text-muted-foreground rounded-sm px-3 py-1.5 text-center font-mono text-xs leading-relaxed">
-              {GRIPE.duration} of screen capture · ~2,800 frames · almost all of them identical
+              {WALKTHROUGH.duration} of screen capture · ~2,800 frames · almost all of them
+              identical
             </p>
           </div>
         </div>
@@ -66,7 +67,7 @@ export function Distill() {
 
       {/* 02 — what survived */}
       <div>
-        <Stage n="02" title={`The ${GRIPE.keyframes} frames that say something`} />
+        <Stage n="02" title={`The ${WALKTHROUGH.keyframes} frames that say something`} />
         <p className="text-muted-foreground mt-2 max-w-2xl text-sm leading-relaxed">
           Each one carries the position it was taken at, why it survived, and the pointer drawn into
           the picture — so a still is never a still with the subject missing.
@@ -96,7 +97,8 @@ export function Distill() {
           <figure>
             <ContactSheet />
             <figcaption className="text-muted-foreground mt-3 font-mono text-xs">
-              sheet 1 of {GRIPE.sheets} — 0:04–0:31 · every tile stamped with the file it came from
+              sheet 1 of {WALKTHROUGH.sheets} — 0:04–0:31 · every tile stamped with the file it came
+              from
             </figcaption>
           </figure>
           <div>
@@ -105,17 +107,18 @@ export function Distill() {
               handed over one at a time, it doesn’t.
             </p>
             <p className="text-muted-foreground mt-5 leading-relaxed">
-              So the report leads with the sheets and the flow comes after. The first coding agent to
-              read a real bundle called these the highest-value thing in it — and they cost a
+              So the report leads with the sheets and the flow comes after. The first coding agent
+              to read a real bundle called these the highest-value thing in it — and they cost a
               fraction of the tokens the same frames would have burned separately.
             </p>
             <p className="text-muted-foreground mt-5 leading-relaxed">
-              The full-size stills are still there. The report inlines one only where the narration is
-              pointing at something, and names the rest by filename so an agent can open exactly the
-              one it wants.
+              The full-size stills are still there. The report inlines one only where the narration
+              is pointing at something, and names the rest by filename so an agent can open exactly
+              the one it wants.
             </p>
             <p className="text-cobalt mt-6 font-mono text-xs">
-              {GRIPE.keyframes} keyframes → {GRIPE.sheets} sheets → {SHOTS.length} tiles per image
+              {WALKTHROUGH.keyframes} keyframes → {WALKTHROUGH.sheets} sheets → {SHOTS.length} tiles
+              per image
             </p>
           </div>
         </div>

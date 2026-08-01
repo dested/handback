@@ -1,7 +1,7 @@
 /** First-paint placeholder: header block, one take, report slab. */
 export function ViewerSkeleton() {
   return (
-    <div className="animate-pulse space-y-8" aria-busy="true" aria-label="Loading gripe">
+    <div className="animate-pulse space-y-8" aria-busy="true" aria-label="Loading walkthrough">
       <div className="space-y-3">
         <div className="bg-muted h-3 w-16 rounded" />
         <div className="bg-muted h-8 w-2/3 rounded" />

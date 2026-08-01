@@ -7,7 +7,7 @@ const USER = { name: 'Ada Lovelace', email: 'ada@example.com', password: 'passwo
 test('landing page renders for a signed-out visitor', async ({ page }) => {
   await page.goto('/')
   await expect(
-    page.getByRole('heading', { name: /Your agents ship\. The last word is yours\./ })
+    page.getByRole('heading', { name: /Debug and review your app in your own words\./ })
   ).toBeVisible()
   await expect(page.getByRole('link', { name: 'Sign in', exact: true })).toBeVisible()
   // Fonts arrive from Google Fonts; give the render a beat before the pixel diff.
@@ -28,20 +28,20 @@ test('unknown route returns a 404 with the not-found page', async ({ page }) => 
   await expect(page.getByRole('heading', { name: '404' })).toBeVisible()
 })
 
-test('sign up → create org → empty inbox → team + projects render', async ({ page }) => {
+test('sign up → personal workspace → empty inbox → tokens + projects render', async ({ page }) => {
   await page.goto('/sign-up')
   await page.getByLabel('Name').fill(USER.name)
   await page.getByLabel('Email').fill(USER.email)
   await page.getByLabel('Password').fill(USER.password)
   await page.getByRole('button', { name: 'Create account' }).click()
 
-  // Fresh users land in the inbox's first-run state and name their workspace.
+  // Sign-up auto-creates a personal workspace, so there's no naming step — the
+  // switcher in the header is already showing it.
   await page.waitForURL('**/app')
-  await page.getByLabel('Organization name').fill('Ada Industries')
-  await page.getByRole('button', { name: /create/i }).click()
+  await expect(page.getByRole('button', { name: 'Workspace' })).toHaveText(/Ada's workspace/)
 
-  // The empty inbox teaches both halves: getting a gripe in, and getting one out.
-  await expect(page.getByText('No gripes yet', { exact: false })).toBeVisible()
+  // The empty inbox teaches both halves: getting a walkthrough in, and getting one out.
+  await expect(page.getByText('No walkthroughs yet', { exact: false })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Set up the recorder' })).toBeVisible()
 
   // A workspace no agent has reached yet gets the connect prompt, and it leads
@@ -55,9 +55,10 @@ test('sign up → create org → empty inbox → team + projects render', async 
   // Nothing has called in yet, so step 03 must not claim otherwise.
   await expect(page.getByText('No token yet', { exact: false })).toBeVisible()
 
-  // Team: the member list shows the owner.
-  await page.getByRole('link', { name: 'Team', exact: true }).click()
-  await expect(page.getByText(USER.email).first()).toBeVisible()
+  // Tokens are managed on /connect now, not on Team — and a personal workspace
+  // has no Team tab at all.
+  await expect(page.getByRole('heading', { name: 'Your API tokens' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Team', exact: true })).toHaveCount(0)
 
   // Projects: the create form renders.
   await page.getByRole('link', { name: 'Projects' }).click()

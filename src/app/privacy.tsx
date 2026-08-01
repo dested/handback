@@ -29,14 +29,14 @@ export function PrivacyPage() {
                 'The organizations you create or join, your role in each, and invitations you send or accept.',
             },
             {
-              term: 'Gripes',
+              term: 'Walkthroughs',
               detail:
-                'The substance of the product. A gripe holds the screen recording video, the keyframe images cut from it, your microphone audio, the machine transcript, and the report generated from them.',
+                'The substance of the product. A walkthrough holds the screen recording video, the keyframe images cut from it, your microphone audio, the machine transcript, and the report generated from them.',
             },
             {
               term: 'Recording context',
               detail:
-                'While you record, the extension also captures the URLs and page titles you visit, console and network errors the page produces, and the marks and drawings you make. This is the evidence that makes a gripe useful to an agent — and it can include anything visible in those pages.',
+                'While you record, the extension also captures the URLs and page titles you visit, console and network errors the page produces, and the marks and drawings you make. This is the evidence that makes a walkthrough useful to an agent — and it can include anything visible in those pages.',
             },
             {
               term: 'API tokens',
@@ -68,21 +68,21 @@ export function PrivacyPage() {
           Files are stored in a private Amazon S3 bucket in the US West (Oregon) region. The bucket
           blocks all public access; nothing in it is reachable by URL. When you or an authorized
           agent needs a file, our server issues a presigned link that expires in an hour. Everything
-          else — accounts, organizations, gripe metadata — lives in a PostgreSQL database on our own
-          server in the same region. All traffic runs over HTTPS.
+          else — accounts, organizations, walkthrough metadata — lives in a PostgreSQL database on
+          our own server in the same region. All traffic runs over HTTPS.
         </p>
       </Section>
 
       <Section heading="Who can see it">
         <p>
-          Members of the organization a gripe belongs to, and anyone holding a valid API token
+          Members of the organization a walkthrough belongs to, and anyone holding a valid API token
           issued by that organization. Nobody else — the tenant boundary is enforced on every
           request, not just in the interface.
         </p>
         <Notice>
           Invitation links are the exception worth understanding: the link <em>is</em> the
-          credential. Anyone who has it can join your organization and read its gripes until it
-          expires after seven days. Send them the way you would send a password.
+          credential. Anyone who has it can join your organization and read its walkthroughs until
+          it expires after seven days. Send them the way you would send a password.
         </Notice>
         <p>
           Sal Aiello, as the operator, can technically reach stored data in the course of running
@@ -143,7 +143,7 @@ export function PrivacyPage() {
             {
               term: 'Resend',
               detail:
-                'Sends our account email — verification, password resets, and invitations. Receives the recipient address and the message itself; never receives gripe content.',
+                'Sends our account email — verification, password resets, and invitations. Receives the recipient address and the message itself; never receives walkthrough content.',
             },
           ]}
         />
@@ -155,10 +155,10 @@ export function PrivacyPage() {
 
       <Section heading="How long we keep it">
         <p>
-          Gripes are kept until someone deletes them. Deleting a gripe removes its database records
-          and its entire folder of files from S3. Re-recording under the same name replaces the old
-          gripe wholesale — the previous files are deleted, not versioned. Account records persist
-          until the account is deleted.
+          Walkthroughs are kept until someone deletes them. Deleting a walkthrough removes its
+          database records and its entire folder of files from S3. Re-recording under the same name
+          replaces the old walkthrough wholesale — the previous files are deleted, not versioned.
+          Account records persist until the account is deleted.
         </p>
         <Notice>
           Deleting your <em>account</em> is not yet a button in the product. Email{' '}

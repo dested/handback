@@ -1,5 +1,5 @@
-// Team surfaces for the active org: who's in it, who's been invited, and the
-// API tokens that let `bun cli/push.ts` and the handback MCP server talk to it.
+// Team surfaces for the active org: who's in it and who's been invited. A
+// personal workspace has neither, and says so. API tokens live on /connect.
 
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -102,7 +102,7 @@ function ErrorLine({ message }: { message: string }) {
   return <p className="text-destructive text-sm">{message}</p>
 }
 
-type Tab = 'members' | 'invites' | 'tokens'
+type Tab = 'members' | 'invites'
 
 export function TeamPage() {
   const { org, orgsLoaded } = useActiveOrg()
@@ -116,34 +116,57 @@ function TeamBody({ org }: { org: OrgSummary }) {
   const canManage = org.role === 'owner' || org.role === 'admin'
   // Guests are scoped to a project or two; the workspace-wide surfaces aren't theirs.
   const fullAccess = org.scope === 'org'
-  const [tab, setTab] = useState<Tab>(canManage ? 'members' : 'tokens')
+  const [tab, setTab] = useState<Tab>('members')
 
-  const tabs: Array<[Tab, string]> = [
-    ...(canManage
-      ? ([
+  const tabs: Array<[Tab, string]> =
+    !org.personal && canManage
+      ? [
           ['members', 'Members'],
           ['invites', 'Invites'],
-        ] as Array<[Tab, string]>)
-      : []),
-    ...(fullAccess ? ([['tokens', 'API tokens']] as Array<[Tab, string]>) : []),
-  ]
+        ]
+      : []
 
   return (
     <div className="space-y-8">
       <header className="space-y-1">
         <h1 className="font-display text-3xl font-semibold">Team</h1>
-        {canManage ? (
+        {!org.personal && canManage ? (
           <WorkspaceName org={org} />
-        ) : fullAccess ? (
-          <p className="text-muted-foreground text-sm">Your API tokens for {org.name}</p>
         ) : (
           <p className="text-muted-foreground text-sm">{org.name}</p>
         )}
       </header>
 
+      {/* A personal workspace has no roster to manage — the page's whole job is
+          explaining that, and where a team comes from. */}
+      {org.personal && (
+        <Card className="max-w-xl">
+          <CardHeader>
+            <CardTitle>This is your personal workspace — just you.</CardTitle>
+            <CardDescription>
+              Walkthroughs you record land here, and nobody else can see them. When you want
+              reviewers, create a team from the workspace switcher up top — a team is a workspace
+              with members.
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      )}
+
+      {/* A full member can see the workspace but doesn't run it. */}
+      {!org.personal && !canManage && fullAccess && (
+        <Card className="max-w-xl">
+          <CardHeader>
+            <CardTitle>The roster is the owner's side of the house.</CardTitle>
+            <CardDescription>
+              Members and invites are managed by the workspace owner and admins.
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      )}
+
       {/* A guest holds a slice of the workspace, and none of this page is in it —
           say so rather than rendering a header above nothing. */}
-      {tabs.length === 0 && (
+      {!org.personal && !fullAccess && (
         <Card className="max-w-xl">
           <CardHeader>
             <CardTitle>You're a guest on this workspace</CardTitle>
@@ -152,15 +175,14 @@ function TeamBody({ org }: { org: OrgSummary }) {
               <Link to="/projects" className="text-primary underline underline-offset-4">
                 they're listed here
               </Link>
-              . Who else is in the workspace, invites, and API tokens are the owner's side of the
+              . Who else is in the workspace and who's been invited are the owner's side of the
               house.
             </CardDescription>
           </CardHeader>
         </Card>
       )}
 
-      {/* A one-button tab strip is noise — with a single surface, just show it. */}
-      {tabs.length > 1 && (
+      {tabs.length > 0 && (
         <div className="border-border bg-card inline-flex gap-1 rounded-md border p-1">
           {tabs.map(([value, label]) => (
             <button
@@ -179,9 +201,8 @@ function TeamBody({ org }: { org: OrgSummary }) {
         </div>
       )}
 
-      {tab === 'members' && canManage && <MembersTab org={org} />}
-      {tab === 'invites' && canManage && <InvitesTab org={org} />}
-      {tab === 'tokens' && fullAccess && <TokensTab org={org} />}
+      {tabs.length > 0 && tab === 'members' && <MembersTab org={org} />}
+      {tabs.length > 0 && tab === 'invites' && <InvitesTab org={org} />}
     </div>
   )
 }
@@ -597,7 +618,7 @@ function InvitesTab({ org }: { org: OrgSummary }) {
             <CardTitle>Invite someone</CardTitle>
             <CardDescription>
               Leave the email blank for a link anyone can use. Invites expire after seven days.
-              Scope an invite to one project and they'll only see that project's gripes.
+              Scope an invite to one project and they'll only see that project's walkthroughs.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -668,129 +689,6 @@ function InvitesTab({ org }: { org: OrgSummary }) {
           </CardContent>
         </Card>
       )}
-    </div>
-  )
-}
-
-function TokensTab({ org }: { org: OrgSummary }) {
-  const trpc = useTRPC()
-  const queryClient = useQueryClient()
-  const [name, setName] = useState('')
-  const [rawToken, setRawToken] = useState<string | null>(null)
-
-  const tokensQuery = useQuery(trpc.tokens.list.queryOptions({ orgId: org.id }))
-  const invalidate = () =>
-    queryClient.invalidateQueries({ queryKey: trpc.tokens.list.queryKey({ orgId: org.id }) })
-
-  const create = useMutation(
-    trpc.tokens.create.mutationOptions({
-      onSuccess: (result) => {
-        setRawToken(result.token)
-        setName('')
-        invalidate()
-      },
-    })
-  )
-  const revoke = useMutation(trpc.tokens.revoke.mutationOptions({ onSuccess: invalidate }))
-
-  return (
-    <div className="space-y-8">
-      <p className="text-muted-foreground max-w-2xl text-sm">
-        These tokens authenticate <span className="font-mono text-xs">bun cli/push.ts</span> and the
-        handback MCP server; they are yours alone and only work against {org.name}.
-      </p>
-
-      <section className="space-y-3">
-        {tokensQuery.isPending && <Loading />}
-        {tokensQuery.isError && <ErrorLine message={tokensQuery.error.message} />}
-        {tokensQuery.data?.length === 0 && (
-          <p className="text-muted-foreground text-sm">No tokens yet.</p>
-        )}
-        {tokensQuery.data && tokensQuery.data.length > 0 && (
-          <>
-            <div className="border-border text-muted-foreground flex items-center gap-4 border-b pb-2 text-xs font-medium tracking-wide uppercase">
-              <span className="min-w-0 flex-1">Name</span>
-              <span className="w-20 shrink-0">Token</span>
-              <span className="w-28 shrink-0">Created</span>
-              <span className="w-28 shrink-0">Last used</span>
-              <span className="w-20 shrink-0" />
-            </div>
-            <div className="divide-border divide-y">
-              {tokensQuery.data.map((t) => (
-                <div key={t.id} className="flex items-center gap-4 py-3">
-                  <p className="min-w-0 flex-1 truncate text-sm font-medium">{t.name}</p>
-                  <span className="w-20 shrink-0 font-mono text-xs">…{t.lastFour}</span>
-                  <span className="text-muted-foreground w-28 shrink-0 font-mono text-xs">
-                    {fmtDate(t.createdAt)}
-                  </span>
-                  <span className="text-muted-foreground w-28 shrink-0 font-mono text-xs">
-                    {fmtDate(t.lastUsedAt)}
-                  </span>
-                  <div className="w-20 shrink-0">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                      disabled={revoke.isPending}
-                      onClick={() => {
-                        if (!window.confirm(`Revoke "${t.name}"? Anything using it stops working.`))
-                          return
-                        revoke.mutate({ orgId: org.id, tokenId: t.id })
-                      }}>
-                      Revoke
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-        {revoke.isError && <ErrorLine message={revoke.error.message} />}
-      </section>
-
-      <Card className="max-w-xl">
-        <CardHeader>
-          <CardTitle>New token</CardTitle>
-          <CardDescription>Name it after the machine or agent that will use it.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form
-            className="space-y-4"
-            onSubmit={(e) => {
-              e.preventDefault()
-              const trimmed = name.trim()
-              if (!trimmed) return
-              create.mutate({ orgId: org.id, name: trimmed })
-            }}>
-            <div className="flex flex-wrap items-end gap-3">
-              <div className="min-w-48 flex-1 space-y-2">
-                <Label htmlFor="token-name">Name</Label>
-                <Input
-                  id="token-name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="laptop"
-                  autoComplete="off"
-                  required
-                />
-              </div>
-              <Button type="submit" disabled={create.isPending}>
-                {create.isPending ? 'Creating…' : 'Create token'}
-              </Button>
-            </div>
-            {create.isError && <ErrorLine message={create.error.message} />}
-            {rawToken && (
-              <div className="border-cobalt/40 bg-cobalt-wash space-y-2 rounded-md border p-3">
-                <p className="text-cobalt text-sm font-medium">
-                  Copy it now — it won't be shown again.
-                </p>
-                <CopyField value={rawToken} />
-              </div>
-            )}
-          </form>
-        </CardContent>
-      </Card>
     </div>
   )
 }

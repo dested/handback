@@ -4,8 +4,8 @@
 //     --header "Authorization: Bearer hb_…"
 //
 // Same three tools as the stdio server in `cli/mcp.ts`, over the same
-// implementation (`gripes-api.ts`), except nothing has to be installed: no
-// clone, no bun, no repo. That matters because the person who fixes a gripe is
+// implementation (`walkthroughs-api.ts`), except nothing has to be installed: no
+// clone, no bun, no repo. That matters because the person who fixes a walkthrough is
 // usually not the person who deployed Handback.
 //
 // **Stateless on purpose.** A fresh McpServer + transport per POST, torn down
@@ -15,25 +15,26 @@
 // re-registering three tools per request, which is object allocation.
 //
 // Auth is the same `hb_` bearer token as /api/ingest, read off the standard
-// Authorization header, so a token pins the org exactly like it does there.
+// Authorization header, so a token pins the org exactly like it does there —
+// and, exactly like there, a platform admin's token spans every workspace.
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { Router, json, type Request, type Response } from 'express'
 import { z } from 'zod'
 import {
-  GRIPE_STATUSES,
+  WALKTHROUGH_STATUSES,
   authenticateToken,
-  getGripeDetail,
-  listGripes,
-  setGripeStatus,
+  getWalkthroughDetail,
+  listWalkthroughs,
+  setWalkthroughStatus,
   type TokenAuth,
-} from './gripes-api'
+} from './walkthroughs-api'
 import { log } from './logger'
-import { formatGripe } from './mcp-format'
+import { formatWalkthrough } from './mcp-format'
 import { rateLimit } from './ratelimit'
 
-const statusSchema = z.enum(GRIPE_STATUSES)
+const statusSchema = z.enum(WALKTHROUGH_STATUSES)
 
 type ToolResult = {
   content: Array<{ type: 'text'; text: string }>
@@ -68,55 +69,73 @@ function registerTool<S extends Record<string, z.ZodTypeAny>>(
   register(name, config, handler)
 }
 
-/** One MCP server bound to one token's org, for the life of one request. */
+/**
+ * One MCP server bound to one token's org, for the life of one request — except
+ * for a platform admin's token, which spans every workspace on this Handback.
+ * The tool descriptions say which, because an agent decides how to read the
+ * results from them: `workspace` on each row is noise in the org-pinned case and
+ * the whole point in the admin one.
+ */
 function buildServer(auth: TokenAuth): McpServer {
   const mcp = new McpServer({ name: 'handback', version: '1.0.0' })
+  const scope = auth.isAdmin
+    ? ' This is a platform-admin token: it spans EVERY workspace on this Handback, not just one — read the `workspace` field on each walkthrough before acting.'
+    : ''
+  const notFound = (walkthroughId: string) =>
+    auth.isAdmin
+      ? `No walkthrough ${walkthroughId} on this Handback.`
+      : `No walkthrough ${walkthroughId} in this workspace.`
 
   registerTool(
     mcp,
-    'list_gripes',
+    'list_walkthroughs',
     {
-      title: 'List gripes',
+      title: 'List walkthroughs',
       description:
-        "List the team's gripes (recorded screen walkthroughs where someone narrates a problem), newest first.",
+        "List the team's walkthroughs — narrated screen recordings made by a human in the running app: a bug, review feedback, or a change request — newest first." +
+        scope,
       inputSchema: { status: statusSchema.optional() },
     },
     async ({ status }) => {
-      const rows = await listGripes(auth.orgId, status)
-      if (rows.length === 0) return text(status ? `No ${status} gripes.` : 'No gripes yet.')
+      const rows = await listWalkthroughs(auth, status)
+      if (rows.length === 0) {
+        return text(status ? `No ${status} walkthroughs.` : 'No walkthroughs yet.')
+      }
       return text(JSON.stringify(rows, null, 2))
     }
   )
 
   registerTool(
     mcp,
-    'get_gripe',
+    'get_walkthrough',
     {
-      title: 'Get gripe brief',
+      title: 'Get walkthrough brief',
       description:
-        "Fetch one gripe's full brief: metadata, the report.md authored for agents, and presigned URLs for every file (video, keyframes, transcript).",
-      inputSchema: { gripeId: z.string().describe('Gripe id from list_gripes') },
+        "Fetch one walkthrough's full brief — a narrated screen recording made by a human in the running app, whether that's a bug, review feedback, or a change request: metadata, the report.md authored for agents, and presigned URLs for every file (video, keyframes, transcript)." +
+        scope,
+      inputSchema: { walkthroughId: z.string().describe('Walkthrough id from list_walkthroughs') },
     },
-    async ({ gripeId }) => {
-      const gripe = await getGripeDetail(auth.orgId, gripeId)
-      if (!gripe) return toolError(`No gripe ${gripeId} in this workspace.`)
-      return text(formatGripe(gripe))
+    async ({ walkthroughId }) => {
+      const walkthrough = await getWalkthroughDetail(auth, walkthroughId)
+      if (!walkthrough) return toolError(notFound(walkthroughId))
+      return text(formatWalkthrough(walkthrough))
     }
   )
 
   registerTool(
     mcp,
-    'set_gripe_status',
+    'set_walkthrough_status',
     {
-      title: 'Set gripe status',
+      title: 'Set walkthrough status',
       description:
-        'Move a gripe through review: open → in_review when a fix is up, resolved after human sign-off.',
-      inputSchema: { gripeId: z.string(), status: statusSchema },
+        'Move a walkthrough through review: open → in_review when a fix is up, resolved after human sign-off.' +
+        scope,
+      inputSchema: { walkthroughId: z.string(), status: statusSchema },
     },
-    async ({ gripeId, status }) => {
-      const moved = await setGripeStatus(auth.orgId, gripeId, status)
-      if (!moved) return toolError(`No gripe ${gripeId} in this workspace.`)
-      return text(`Gripe ${moved.slug} (${gripeId}) is now ${status}.`)
+    async ({ walkthroughId, status }) => {
+      const moved = await setWalkthroughStatus(auth, walkthroughId, status)
+      if (!moved) return toolError(notFound(walkthroughId))
+      return text(`Walkthrough ${moved.slug} (${walkthroughId}) is now ${status}.`)
     }
   )
 
@@ -157,7 +176,7 @@ mcpRouter.use(async (req, res, next) => {
 // same shape as ingest.ts.
 const getAuth = (req: Request): TokenAuth => (req as unknown as { mcpAuth: TokenAuth }).mcpAuth
 
-// An agent working a queue makes a handful of calls per gripe; this is an order
+// An agent working a queue makes a handful of calls per walkthrough; this is an order
 // of magnitude above that.
 const mcpLimit = rateLimit('mcp', { window: 3600, max: 900 }, (req) => getAuth(req).tokenId)
 

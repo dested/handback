@@ -1,7 +1,7 @@
 import { AgentView } from '~/components/landing/agent-view'
 import { Distill } from '~/components/landing/distill'
 import { FinalCta } from '~/components/landing/final-cta'
-import { GripeManifest } from '~/components/landing/gripe-manifest'
+import { WalkthroughManifest } from '~/components/landing/walkthrough-manifest'
 import { Hero } from '~/components/landing/hero'
 import { HowItWorks } from '~/components/landing/how-it-works'
 import { Pricing } from '~/components/landing/pricing'
@@ -12,14 +12,14 @@ import { Pricing } from '~/components/landing/pricing'
 // The order is one argument, told once: here's the handback (how) → here's the part
 // that makes it possible (distill) → here's what you end up with (manifest) →
 // here's what the agent reads (agent view). Every section carries the same demo
-// gripe, so a fast scroller sees one bug, not five examples.
+// walkthrough, so a fast scroller sees one bug, not five examples.
 export function HomePage() {
   return (
     <>
       <Hero />
       <HowItWorks />
       <Distill />
-      <GripeManifest />
+      <WalkthroughManifest />
       <AgentView />
       <Pricing />
       <FinalCta />

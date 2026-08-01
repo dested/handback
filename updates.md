@@ -2,6 +2,103 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-08-01 — the website walkthrough lands: rename, personal workspaces, honest landing (walkthrough 212801d8)
+Asked: 10:40 recorded pass over handback.dev — rename "gripe", kill the org-naming screen, rethink
+workspace/team, de-bug the narrative, fix the hero, pricing quotas, drop origins, FOUC.
+Done, four Opus agents + review: **gripe → walkthrough** across DB (`ALTER … RENAME` on local +
+`handback_test`; prod pending — see below), tRPC (`walkthroughs.*`), MCP tools
+(`list/get/set_walkthrough*`), routes (`/walkthroughs/:id`, old path 302s), UI, CLI, README, and
+the recorder's emitted report.md (strings only; extension identifiers untouched — other session
+owns that workspace). S3 prefix + `/api/ingest/gripes*` aliases frozen on purpose. **Workspace
+model**: `Org.personal`, sign-up hook auto-creates "<First>'s workspace", `orgs.ensurePersonal`
+repair, teams created from the new header switcher (entitlement-gated), invites refused on
+personal orgs, Team page split into personal/member/guest cards, tokens moved to /connect,
+origin-hints out of the Projects UI. **Landing**: H1 "Debug and review your app in your own
+words.", RecorderPanelMock beside the hero frame, step 04 = notified + sign off, `claude mcp add`
+block removed, pricing per-tier hour quotas. **FOUC**: dev injects `app.css?direct` link before
+first paint. Typecheck green; e2e 4/4 (baselines re-shot); MCP tools/list + ingest aliases
+verified live. ⚠️ Prod: run the four `ALTER TABLE` renames on the prod DB, then push `main`
+back-to-back (walkthrough reads 500 in the gap); `.env` was flipped back from the prod DB to
+local Postgres deliberately.
+
+## 2026-08-01 — the puck: pointing outside Chrome, designed (gripe 3f491ef7, 2:21)
+Asked: revisit draw-anywhere ("really important") for the Excel-outside-Chrome case; make it great.
+Done: full design in `plans/2026-08-01-draw-anywhere.md`, superseding the old three-path analysis.
+Core move: a Document PiP window is always-on-top and captured by getDisplayMedia for free — so a
+cobalt **arrow-tip puck** (tip at the window's top-left pixel, body = out-of-Chrome dock with
+clock/captions/mark/stop) becomes the pointer over any app. Tip coords feed the existing
+`PointerSample`→`mapPointer`→crosshair pipe (second pointer slot, page-fresh wins); drag-end
+forces a mark like stroke-end does; **pins** (click the arrow) paint numbered dots onto keyframes
+to recover "these three cells"; dedup signatures mask the puck rect so its clock doesn't burn the
+frame budget. No new messages, no worker/server changes. Not built yet — one 30s check pending
+(is `documentPictureInPicture` exposed in the side panel), plus Sal's go.
+
+## 2026-08-01 — the panel stops fighting back (gripe 3f491ef7)
+Asked: gripe "Walkthrough" — a 2:39 narrated pass over the recorder panel, eight complaints. Built:
+drag now **scrubs** everywhere (sweep/marquee moved behind shift); `delete` + `clear` → `delete N
+items` + `deselect`; the **axis** takes the slack and holds a floor of ruler + two lanes while the
+**monitor** caps at 50% and collapses when it has no frame; the gear is labelled `⚙ settings` with
+an active state and the drawer got a header + close (it read as "content just streamed in"); the
+live block regrouped with a real two-line dictation well; `1 lines` → `1 line`; "record another
+take" → "add more". Also **un-broke the preview harness** — blank since the multi-workspace change,
+because its `SETTINGS` stub predates `settings.links` and `activeLink()` threw on render.
+Not built: draw-over-the-whole-screen (2:21) — impossible in MV3, forked in
+`plans/2026-08-01-draw-anywhere.md`, needs Sal's call.
+Touched: extension/src/sidepanel/{App.tsx,Timeline.tsx,panel.css,timeline.css},
+extension/src/lib/format.ts, extension/scripts/preview/preview.html, cliffnotes.md, decisions.md
+Verified: both typechecks + both bundles build; driven in the preview harness at 400px — plain
+drag scrubs with no selection bar, shift-click extends a range, bar reads `delete 2 items` /
+`deselect`, lanes never crushed, settings drawer labelled. Rides unpublished 1.3.0; needs
+`bun run publish:extension` to reach installs.
+
+## 2026-08-01 — one command publishes the recorder
+Asked: "how is the extension deployed to s3 — i have the build but not the deploy, add it to
+package.json". Built: `zip:extension` (pwsh `Compress-Archive` of `extension/dist/*` →
+`extension/handback-recorder.zip`, gitignored) and `publish:extension` = build → zip →
+`bun cli/publish-recorder.ts`, which uploads to `releases/recorder/<version>.zip`. Zipping stays a
+shell step because bun can't write a zip and spawning Compress-Archive *from* bun hangs — via a
+package script it doesn't (verified). Windows-only as written.
+Touched: package.json, cliffnotes.md
+Verified: `bun run zip:extension` produced a 6.1 MB zip newer than `dist/`; versions agree at 1.3.0
+across extension package.json / public manifest / dist manifest, so publish's guards pass. Upload
+itself not run — 1.3.0 is still unpublished, say the word.
+
+## 2026-07-31 — the keyframe cap scales with take length
+Asked: "is there a cap at 150 key frames? there shouldn't be" → scale it by duration, and move the
+agent brief's cap with it. Built: `frameBudget(durationMs)` in the recorder — 40 frames/min clamped
+to [150, 600], so short takes are unchanged and a 15-min take keeps 600 instead of 150; marks are
+still never thinned and survivors are still spread uniformly. Server side, `briefFrameLimit()` in
+mcp-format scales the brief's frame sample 8/min clamped to [30, 120] (was a flat 30). Extension
+bumped 1.2.0 → 1.3.0 — **needs build + zip + `bun cli/publish-recorder.ts`**, a push to main won't
+ship it.
+Touched: extension/src/sidepanel/{recorder.ts,Timeline.tsx}, extension/{package.json,public/manifest.json}, server/mcp-format.ts
+Verified: `bun run typecheck` + `cd extension && npm run typecheck` both clean.
+
+## 2026-07-31 — an admin token sees every workspace over MCP
+Asked: "if i use an admin token in the mcp server it should work too" (confirmed: always
+cross-workspace, no opt-in flag). Built: `authenticateToken` resolves `isAdmin` off the token's
+owner; `gripes-api.ts` gained `orgScope()`/`inScope()` and now takes the whole `TokenAuth` —
+`listGripes`/`getGripeDetail`/`setGripeStatus` span every workspace for an admin, including the
+status write. New **`workspace`** field on every list row and brief; MCP tool descriptions carry an
+admin-scope sentence and 404 copy reads "on this Handback". Uploads unchanged — declare/finalize
+still pin `auth.orgId`. Both surfaces (`/api/ingest`, `/mcp`) inherit it from the shared module.
+Touched: server/{gripes-api,ingest,mcp}.ts
+Verified: `bun run typecheck` clean. No live token round-trip — local `.env` points at prod.
+
+## 2026-07-31 — /admin can open any user's gripes
+Asked: "let me see all the gripes for each user" (confirmed: everything in the workspaces they
+belong to, not just their own uploads; admins may open them in the viewer). Built:
+**`admin.userGripes`** — grouped by workspace, guest scoping honoured so it's "what this user
+sees", unfinalized gripes included and flagged `unfinished`; a **view/hide** column on /admin
+expands into that list (status pill, project, origin, who uploaded, duration, size, date, link to
+the viewer). **`requireViewAccess`** (`server/membership.ts`) is the read-only platform-admin
+escape hatch, wired into `gripes.get` + `gripes.fileUrl` only; `gripes.get` returns
+`viewerIsMember`, and `GripeControls` renders an "admin view · read only" chip plus the agent-brief
+copy instead of the status/project/move/delete row. See decisions.md.
+Touched: server/{membership,router}.ts, src/app/admin.tsx, src/components/viewer/gripe-controls.tsx
+Verified: `bun run typecheck` clean; dev server boots, `/healthz` 200, `/admin` 302s signed out.
+Not click-tested signed in — local `.env` still points `DATABASE_URL` at the prod box.
+
 ## 2026-07-31 — the roster goes private, and everything gets a rename
 Asked: "I shouldn't be able to see other people in the team… keep it clean" + "rename walkthroughs
 and change workspace and projects and stuff" (confirmed scope: roster admin-only; rename all the

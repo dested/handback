@@ -7,6 +7,8 @@ type Tier = {
   name: string
   price: string
   unit?: string
+  /** How much recording the plan carries. */
+  quota: string
   blurb: string
   cta: string
   to?: string
@@ -25,7 +27,8 @@ const tiers: Tier[] = [
   {
     name: 'Free',
     price: '$0',
-    blurb: 'Record locally, bring your own agent',
+    quota: 'Up to 1 hour of walkthroughs / mo',
+    blurb: 'Your personal workspace and your own agent over MCP',
     cta: 'Start recording',
     to: '/sign-up',
   },
@@ -33,6 +36,7 @@ const tiers: Tier[] = [
     name: 'Pro',
     price: '$20',
     unit: 'per seat / mo, when billing opens',
+    quota: 'Up to 3 hours / mo',
     blurb: 'Cloud workspace, share links, MCP access',
     cta: 'Use it free in alpha',
     to: '/sign-up',
@@ -44,7 +48,8 @@ const tiers: Tier[] = [
     name: 'Business',
     price: '$40',
     unit: 'per seat / mo, when billing opens',
-    blurb: 'Projects, auto-routing, team roles',
+    quota: 'Up to 10 hours / mo',
+    blurb: 'Teams — invite reviewers, roles, projects',
     cta: 'Use it free in alpha',
     to: '/sign-up',
     badge: 'Coming soon',
@@ -53,6 +58,7 @@ const tiers: Tier[] = [
   {
     name: 'Enterprise',
     price: "Let's talk",
+    quota: 'Custom volume',
     blurb: 'SSO, retention, your own bucket',
     cta: 'Email us',
     href: 'mailto:sal@dested.com',
@@ -63,7 +69,7 @@ export function Pricing() {
   return (
     <Section id="pricing" className="rule py-20 md:py-28">
       <SectionLabel>Pricing</SectionLabel>
-      <SectionHeading>Priced per reviewer, not per gripe.</SectionHeading>
+      <SectionHeading>Priced per reviewer, not per walkthrough.</SectionHeading>
       <p className="text-muted-foreground mt-4 max-w-xl text-sm leading-relaxed">
         Handback is in alpha and nothing is billed yet — every plan below runs free while we build.
         We'll ask before a card is ever needed.
@@ -105,7 +111,8 @@ export function Pricing() {
               </p>
               {/* nbsp keeps all four price blocks on one baseline */}
               <p className="text-muted-foreground mt-1 font-mono text-xs">{tier.unit ?? ' '}</p>
-              <p className="text-muted-foreground mt-5 flex-1 text-sm leading-relaxed">
+              <p className="text-foreground/80 mt-4 font-mono text-xs">{tier.quota}</p>
+              <p className="text-muted-foreground mt-2 flex-1 text-sm leading-relaxed">
                 {tier.blurb}
               </p>
               {tier.href ? (

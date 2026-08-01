@@ -4,10 +4,11 @@
 // verification). Field names are camelCase (better-auth queries them by name);
 // columns are snake_case via `@map`.
 //
-// App models: Org → Membership/Invite/Project/ApiToken, Gripe → Take/GripeFile.
+// App models: Org → Membership/Invite/Project/ApiToken, Walkthrough → Take/WalkthroughFile.
 // File payloads (video, frames, grids, report.md, recording.json) live in S3
-// under orgs/<orgId>/gripes/<gripeId>/<path>; the DB holds listing and routing
-// metadata only.
+// under orgs/<orgId>/gripes/<walkthroughId>/<path> — the `gripes/` segment is
+// frozen at the old product noun, because every object already uploaded lives
+// there. The DB holds listing and routing metadata only.
 
 generator client {
   provider = "prisma-client-js"
@@ -34,7 +35,7 @@ model User {
   accounts    Account[]
   memberships Membership[]
   apiTokens   ApiToken[]
-  uploads     Gripe[]      @relation("uploader")
+  uploads     Walkthrough[] @relation("uploader")
 
   @@map("user")
 }
@@ -87,25 +88,27 @@ model Org {
   id        String   @id @default(uuid())
   name      String
   slug      String   @unique
+  // A personal workspace is one account's own: no members, no invites.
+  personal  Boolean  @default(false)
   createdAt DateTime @default(now()) @map("created_at")
 
-  memberships Membership[]
-  invites     Invite[]
-  projects    Project[]
-  gripes      Gripe[]
-  apiTokens   ApiToken[]
+  memberships  Membership[]
+  invites      Invite[]
+  projects     Project[]
+  walkthroughs Walkthrough[]
+  apiTokens    ApiToken[]
 
   @@map("org")
 }
 
 model Membership {
-  id        String   @id @default(uuid())
-  orgId     String   @map("org_id")
-  org       Org      @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  userId    String   @map("user_id")
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  role      String   @default("member") // owner | admin | member
-  createdAt DateTime @default(now()) @map("created_at")
+  id            String          @id @default(uuid())
+  orgId         String          @map("org_id")
+  org           Org             @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  userId        String          @map("user_id")
+  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role          String          @default("member") // owner | admin | member
+  createdAt     DateTime        @default(now()) @map("created_at")
   // "org" members see the whole workspace; "projects" members (guests) see
   // only the projects granted in projectAccess and are always role "member".
   scope         String          @default("org") // org | projects
@@ -154,20 +157,20 @@ model Project {
   org         Org      @relation(fields: [orgId], references: [id], onDelete: Cascade)
   name        String
   slug        String
-  // URL origins (https://app.example.com) used to auto-route uploaded gripes
+  // URL origins (https://app.example.com) used to auto-route uploaded walkthroughs
   // by their recorded origin.
   originHints String[] @map("origin_hints")
   createdAt   DateTime @default(now()) @map("created_at")
 
-  gripes  Gripe[]
-  access  ProjectAccess[]
-  invites Invite[]
+  walkthroughs Walkthrough[]
+  access       ProjectAccess[]
+  invites      Invite[]
 
   @@unique([orgId, slug])
   @@map("project")
 }
 
-model Gripe {
+model Walkthrough {
   id           String    @id @default(uuid())
   orgId        String    @map("org_id")
   org          Org       @relation(fields: [orgId], references: [id], onDelete: Cascade)
@@ -193,48 +196,48 @@ model Gripe {
   droppedCount Int       @default(0) @map("dropped_count")
   bytes        BigInt    @default(0)
   // Set when the uploader confirms every declared file landed in S3; the
-  // gripe list only shows finalized gripes.
+  // walkthrough list only shows finalized walkthroughs.
   finalizedAt  DateTime? @map("finalized_at")
   resolvedAt   DateTime? @map("resolved_at")
 
   takes Take[]
-  files GripeFile[]
+  files WalkthroughFile[]
 
   @@unique([orgId, slug])
-  @@map("gripe")
+  @@map("walkthrough")
 }
 
 model Take {
-  id          String    @id @default(uuid())
-  gripeId     String    @map("gripe_id")
-  gripe       Gripe     @relation(fields: [gripeId], references: [id], onDelete: Cascade)
-  index       Int // names rec-NN
-  dir         String // "rec-01"
-  interrupted Boolean   @default(false)
-  startedAt   DateTime? @map("started_at")
-  durationMs  Int       @default(0) @map("duration_ms")
-  frameCount  Int       @default(0) @map("frame_count")
-  transcriber String?
-  videoPath   String?   @map("video_path") // gripe-relative, e.g. rec-01/walkthrough.webm
+  id            String      @id @default(uuid())
+  walkthroughId String      @map("walkthrough_id")
+  walkthrough   Walkthrough @relation(fields: [walkthroughId], references: [id], onDelete: Cascade)
+  index         Int // names rec-NN
+  dir           String // "rec-01"
+  interrupted   Boolean     @default(false)
+  startedAt     DateTime?   @map("started_at")
+  durationMs    Int         @default(0) @map("duration_ms")
+  frameCount    Int         @default(0) @map("frame_count")
+  transcriber   String?
+  videoPath     String?     @map("video_path") // walkthrough-relative, e.g. rec-01/walkthrough.webm
 
-  @@unique([gripeId, index])
+  @@unique([walkthroughId, index])
   @@map("take")
 }
 
-// One row per uploaded object. `path` is gripe-relative (report.md,
-// rec-01/frames/03-0125.jpg); the S3 key is orgs/<orgId>/gripes/<gripeId>/<path>.
-model GripeFile {
-  id          String   @id @default(uuid())
-  gripeId     String   @map("gripe_id")
-  gripe       Gripe    @relation(fields: [gripeId], references: [id], onDelete: Cascade)
-  path        String
-  size        Int      @default(0)
-  contentType String   @map("content_type")
-  status      String   @default("pending") // pending | uploaded
-  createdAt   DateTime @default(now()) @map("created_at")
+// One row per uploaded object. `path` is walkthrough-relative (report.md,
+// rec-01/frames/03-0125.jpg); the S3 key is orgs/<orgId>/gripes/<walkthroughId>/<path>.
+model WalkthroughFile {
+  id            String      @id @default(uuid())
+  walkthroughId String      @map("walkthrough_id")
+  walkthrough   Walkthrough @relation(fields: [walkthroughId], references: [id], onDelete: Cascade)
+  path          String
+  size          Int         @default(0)
+  contentType   String      @map("content_type")
+  status        String      @default("pending") // pending | uploaded
+  createdAt     DateTime    @default(now()) @map("created_at")
 
-  @@unique([gripeId, path])
-  @@map("gripe_file")
+  @@unique([walkthroughId, path])
+  @@map("walkthrough_file")
 }
 
 // Bearer tokens for the CLI / extension / MCP (`hb_...`). Only the sha256

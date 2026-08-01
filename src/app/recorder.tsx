@@ -321,8 +321,8 @@ function Recorder({ org }: { org: OrgSummary }) {
               <li className="flex gap-2">
                 <span className="text-cobalt">·</span>
                 <span>
-                  Hit <strong>Send to Handback</strong> when you're done — the gripe lands in the
-                  inbox here, ready for an agent.
+                  Hit <strong>Send to Handback</strong> when you're done — the walkthrough lands in
+                  the inbox here, ready for an agent.
                 </span>
               </li>
             </ul>
@@ -652,10 +652,10 @@ function CliAside({ origin }: { origin: string }) {
     <section className="border-border border-t pt-6">
       <h2 className="font-display text-xl font-semibold">Prefer the command line?</h2>
       <p className="text-muted-foreground mt-2 text-sm">
-        A gripe folder pushes straight up with the CLI:
+        A walkthrough folder pushes straight up with the CLI:
       </p>
       <pre className="border-border bg-muted/60 mt-3 overflow-x-auto rounded-md border p-3 font-mono text-xs">
-        HANDBACK_TOKEN=hb_… bun cli/push.ts &lt;gripe-folder&gt; --server {origin}
+        HANDBACK_TOKEN=hb_… bun cli/push.ts &lt;walkthrough-folder&gt; --server {origin}
       </pre>
     </section>
   )

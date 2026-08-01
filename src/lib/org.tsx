@@ -13,6 +13,7 @@ export type OrgSummary = {
   slug: string
   role: string
   scope: string
+  personal: boolean
   teamEnabled: boolean
 }
 

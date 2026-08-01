@@ -67,6 +67,20 @@
   color: var(--ink);
   background: var(--card);
 }
+/* A glyph alone was read as decoration. The word is what makes it a door. */
+.icon.labelled {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.icon.labelled span {
+  font-size: var(--fs-0);
+}
+.icon.on {
+  border-color: var(--cobalt);
+  color: var(--cobalt);
+  background: var(--card);
+}
 
 .link {
   background: none;
@@ -210,10 +224,13 @@
 
 /* ── While it runs ──────────────────────────────────────────────────────── */
 
+/* Three lines of unrelated type stacked 6px apart read as one mush. The meter, the
+ * words and the hint are separate thoughts, so they are separately spaced, and the
+ * words get a ruled well of their own — that is the part anyone is watching. */
 .live {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 10px;
   padding: 12px;
   background: var(--card);
   border-bottom: 1px solid var(--border);
@@ -255,24 +272,42 @@
 .stop-big:hover:not(:disabled) {
   filter: brightness(1.06);
 }
-/* The dictation ticker holds its line so the panel doesn't jump word by word. */
+/* The dictation ticker holds its box so the panel doesn't jump word by word. Two
+ * lines' worth, always — a sentence gets to land instead of being cut off at the
+ * right edge, and the block is the same height whether or not anyone is talking. */
 .ticker {
-  min-height: 1.4em;
+  height: 3.2em;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--paper);
   font-size: var(--fs-1);
-  color: var(--muted);
+  line-height: 1.45;
+  color: var(--ink);
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* Newest words matter most, so a long interim scrolls off the top, not the end. */
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+/* Nothing being said right now: the well stays, the words go quiet. */
+.ticker.idle {
+  color: var(--muted);
+  font-style: italic;
 }
 /* A blocked mic is the one live-state line you can click — it reads as a fix, not a label. */
 button.ticker.warn {
   display: block;
   width: 100%;
+  /* Not the dictation well — this is one clickable sentence, so it drops the
+     well's box and its two-line height rather than floating inside them. */
+  height: auto;
   padding: 0;
   border: 0;
   background: none;
   text-align: left;
   font: inherit;
+  font-style: normal;
   color: var(--danger);
   cursor: pointer;
 }
@@ -282,6 +317,36 @@ button.ticker.warn:hover {
 .note {
   font-size: var(--fs-0);
   color: var(--muted);
+}
+/* The puck's door. It earns a pulse only when the capture is a whole monitor —
+ * that's when "point at anything" is literally true. */
+.puck-open {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--paper);
+  color: var(--cobalt);
+  font-size: var(--fs-1);
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.puck-open:hover {
+  border-color: var(--cobalt);
+}
+.puck-open.pulse {
+  border-color: var(--cobalt);
+  animation: puckglow 1.6s ease-in-out infinite;
+}
+@keyframes puckglow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(47, 86, 216, 0.28);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(47, 86, 216, 0.08);
+  }
 }
 
 /* ── The gripe ──────────────────────────────────────────────────────────── */
@@ -392,6 +457,20 @@ button.ticker.warn:hover {
 /* Paper, not card: the fields inside are white, and they have to read as inputs. */
 .settings {
   padding: 10px 12px;
+  background: var(--paper);
+}
+/* Opening the drawer pushes everything below it down the panel. Without a heading
+ * that reads as an arrival, the push looks like the page grew on its own. */
+.settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: var(--fs-0);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 /* The link state leads the block, so it reads as a fact with two verbs, not a field. */
 .linked {

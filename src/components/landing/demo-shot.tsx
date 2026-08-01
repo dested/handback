@@ -1,5 +1,5 @@
 /**
- * One keyframe from the demo gripe, drawn as SVG.
+ * One keyframe from the demo walkthrough, drawn as SVG.
  *
  * Everything on the landing page that shows "a frame from a recording" renders
  * this: the hero, the filmstrip, the contact sheet, the report's inlined still.
@@ -26,7 +26,7 @@ const PRESSED = '#111114'
 export type Shot = {
   /** Filename the recorder would have written — `NN-mmss.jpg`, take-relative. */
   file: string
-  /** Position on the gripe's single timeline. */
+  /** Position on the walkthrough's single timeline. */
   at: string
   /** Why the frame survived: what the recorder logs in `recording.json`. */
   reason: 'moved' | 'clicked' | 'typed' | 'marked'

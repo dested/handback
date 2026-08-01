@@ -1,8 +1,12 @@
 # Handback — CliffNotes
 
 > Living map of the project. Read this before any coding session.
-> Last updated: 2026-07-30. Visual language → `ui.md` · why → `decisions.md` ·
+> Last updated: 2026-08-01. Visual language → `ui.md` · why → `decisions.md` ·
 > log → `updates.md`.
+>
+> **Naming:** the product noun is **walkthrough** (renamed from "gripe" 2026-08-01, owner's
+> directive on record). Older log entries below say "gripe" historically — same object. The word
+> survives in exactly two frozen places: the S3 key prefix and the `/api/ingest/gripes*` aliases.
 >
 > **Before opening sign-up to anyone you can't text: read
 > [`plans/2026-07-30-go-live.md`](plans/2026-07-30-go-live.md)** — the audit of what's still
@@ -11,9 +15,10 @@
 
 ## What this is
 
-The cloud half of the gripe workflow: a workspace where recorded **gripes** — narrated screen
-walkthroughs produced by the Gripe extension (`G:\code\gripe`) — are uploaded, reviewed by humans,
-routed to projects, and pulled by coding agents. A gripe folder (report.md + MANIFEST.txt +
+The cloud half of the recording workflow: a workspace where recorded **walkthroughs** — narrated
+screen recordings (a bug, review notes, a change request) produced by the bundled recorder
+extension — are uploaded, reviewed by humans, routed to projects, and pulled by coding agents. A
+walkthrough folder (report.md + MANIFEST.txt +
 `rec-NN/` takes holding walkthrough.webm, keyframes, transcript, recording.json) is pushed via CLI
 into S3 + Postgres; the web app is the review surface; an MCP server lets any Claude Code session
 pull the queue. Pitch: **see it → say it → agent fixes it → a human signs off.**
@@ -31,9 +36,10 @@ the Gripe extension.
 - **E2E:** `E2E_DATABASE_URL=postgres://postgres:<pw>@localhost:5432/handback_test bun run test:e2e`
   (isolated DB + port 3100; screenshots committed; `test:e2e:update` to re-baseline)
 - **Seed a dev login:** `bun cli/dev-bootstrap.ts [email] [password] [org]` → prints an `hb_` token
-- **Push a gripe:** `bun cli/push.ts <gripe-folder> --server http://localhost:3995 --token hb_…`
-- **Publish a recorder build:** build + zip `extension/dist`, then `bun cli/publish-recorder.ts`
-  → `releases/recorder/`; `/recorder` serves the newest within 60s
+- **Push a walkthrough:** `bun cli/push.ts <folder> --server http://localhost:3995 --token hb_…`
+- **Publish a recorder build:** `bun run publish:extension` (build → zip → upload) →
+  `releases/recorder/`; `/recorder` serves the newest within 60s. Steps also run standalone:
+  `build:extension` / `zip:extension` / `bun cli/publish-recorder.ts`
 - **Extension:** `bun run build:extension` (root) or `cd extension && npm run build` →
   load-unpacked `extension/dist`;
   `npm run preview` → http://localhost:8777/gallery.html (layout harness, no Chrome needed)
@@ -64,18 +70,25 @@ server/
                         GROQ_API_KEY / ANTHROPIC_API_KEY / RESEND_API_KEY + EMAIL_FROM (all
                         optional — each unset one disables its feature, nothing crashes),
                         ADMIN_EMAILS (comma-separated bootstrap platform admins)
-  auth.ts               better-auth: email+password, autoSignIn, reset/verify email, rate limits
+  auth.ts               better-auth: email+password, autoSignIn, reset/verify email, rate limits;
+                        databaseHooks.user.create → createPersonalOrg (auto personal workspace)
+  orgs.ts               createPersonalOrg — idempotent "<First>'s workspace" (personal=true);
+                        called by the sign-up hook AND orgs.ensurePersonal
   trpc.ts               context (session from headers) + public/protectedProcedure
-  membership.ts         requireMembership(user, org, atLeast) → Access{role, projectIds} + slugify
+  membership.ts         requireMembership(user, org, atLeast) → Access{role, projectIds} + slugify;
+                        requireViewAccess = the read-only platform-admin bypass
   features.ts           entitlements: isPlatformAdmin (User.isAdmin OR ADMIN_EMAILS env),
                         orgHasFeature('team') checked at the org's OWNER, requireAdmin
-  router.ts             THE tRPC API: orgs, invites, tokens, projects, gripes
+  router.ts             THE tRPC API: orgs (incl. entitlements/ensurePersonal), invites, tokens,
+                        projects, walkthroughs
   ingest.ts             Token-authed REST (Bearer hb_…): two-phase upload, size caps + per-org
-                        quota, /transcribe and /polish; read side delegates to gripes-api
-  gripes-api.ts         THE agent-facing surface: token auth + list/get/setStatus. Shared by
-                        ingest.ts AND both MCP servers so they can't drift
+                        quota, /transcribe and /polish; read side delegates to walkthroughs-api.
+                        Every route registered under /walkthroughs* AND legacy /gripes* aliases
+  walkthroughs-api.ts   THE agent-facing surface: token auth + list/get/setStatus. Shared by
+                        ingest.ts AND both MCP servers so they can't drift. A platform admin's
+                        token spans every workspace (`TokenAuth.isAdmin` → `orgScope`/`inScope`)
   mcp.ts                Hosted MCP at /mcp — StreamableHTTP, stateless, hb_ bearer auth
-  mcp-format.ts         Pure formatter for a gripe brief; shared with cli/mcp.ts
+  mcp-format.ts         Pure formatter for a walkthrough brief; shared with cli/mcp.ts
   storage.ts            S3: presignPut/Get, getObjectText, deletePrefix, key layout, isSafePath
   transcribe.ts         speech-to-text via Groq whisper-large-v3-turbo; segments in ms
   polish.ts             transcript cleanup via claude-haiku-4-5 — text only, timings untouched
@@ -83,30 +96,36 @@ server/
   ratelimit.ts          in-memory fixed-window limiter (one ECS task, so one process sees all)
   prisma.ts / logger.ts PrismaClient singleton · ANSI request logger
 cli/
-  push.ts               `handback push` — walks a gripe folder, declare → PUT xN → finalize
+  push.ts               `handback push` — walks a walkthrough folder, declare → PUT xN → finalize
   mcp.ts                stdio MCP server — the LOCAL fallback; prod uses server/mcp.ts at /mcp
   dev-bootstrap.ts      idempotent dev seed: user (admin + team) + org + fresh API token (prints it)
   make-admin.ts         promote an account to platform admin by email (dev; prod uses ADMIN_EMAILS)
-prisma/schema.prisma    better-auth models + Org/Membership/Invite/Project/Gripe/Take/GripeFile/ApiToken
+prisma/schema.prisma    better-auth models + Org(personal)/Membership/Invite/Project/Walkthrough/
+                        Take/WalkthroughFile/ApiToken
 src/
   app/
     routes.tsx          All routes + loaders (appLoader guards session, prefetches orgs.mine)
-    layout.tsx          Shell: marketing chrome vs app chrome (org switcher, Inbox/Projects/
-                        Team/Connect)
+    layout.tsx          Shell: marketing chrome vs app chrome. WorkspaceSwitcher dropdown (all
+                        orgs, Personal tag, "New team…" modal gated on orgs.entitlements); the
+                        Team nav hides on a personal workspace
     home.tsx            Landing page (assembles src/components/landing/*)
     sign-in/up.tsx      Auth cards (better-auth client flows)
-    app.tsx             InboxPage: first-run org creation, filters, gripe list
-    gripe.tsx           GripePage: the viewer (assembles src/components/viewer/*)
-    projects.tsx        Projects list + create (origin hints)
-    team.tsx            Members / Invites / API tokens tabs
+    app.tsx             InboxPage: filters + walkthrough list; org-less accounts self-repair via
+                        orgs.ensurePersonal (no naming screen)
+    walkthrough.tsx     WalkthroughPage: the viewer (assembles src/components/viewer/*)
+    projects.tsx        Projects list + create (origin-hints field removed from the UI)
+    team.tsx            Members / Invites for team orgs; personal/member/guest cards otherwise.
+                        Tokens moved to /connect
     connect.tsx         /connect — THE agent onboarding: mint a token, one copy-paste
                         `claude mcp add` with the token baked in, live "connected" check,
-                        disconnect instructions. Codex is a "soon" tab.
+                        disconnect instructions, and "Your API tokens" management (moved from
+                        Team). Codex is a "soon" tab.
     recorder.tsx        /recorder — THE recorder onboarding: install (Web Store button behind
                         a STORE_URL constant, zip/load-unpacked until then), live install ping,
                         one-click Link (token minted + handed over, nothing pasted)
     join.tsx            /join/:inviteId — peek + accept
-    admin.tsx           /admin — platform admin: stats, user search, team/admin toggles
+    admin.tsx           /admin — platform admin: stats, user search, team/admin toggles, and a
+                        per-user drill-down of every walkthrough their workspaces hold
     forgot-password.tsx /forgot-password — same answer whether or not the account exists
     reset-password.tsx  /reset-password?token=… — the link better-auth emails
     privacy.tsx         /privacy — what's collected, where it lives, subprocessors
@@ -116,11 +135,13 @@ src/
     setup-step.tsx      the numbered editorial Step shared by /connect and /recorder
     legal.tsx           LegalPage/Section/Terms/Notice — shared chrome for /privacy + /terms
     ui/                 button, card, input, label (shadcn new-york style, no asChild)
-    landing/            hero, how-it-works, distill, gripe-manifest, agent-view, pricing,
+    landing/            hero, how-it-works, distill, walkthrough-manifest, agent-view, pricing,
                         final-cta · demo-shot.tsx (a keyframe as SVG) + demo-data.ts (the one
-                        demo gripe) + mock.tsx (Pane/ContactSheet/Filmstrip/PlayerStrip)
+                        demo walkthrough) + mock.tsx (Pane/ContactSheet/Filmstrip/PlayerStrip/
+                        RecorderPanelMock — the hero's extension panel)
     viewer/             take-section, filmstrip, transcript-panel, events-panel, report-panel,
-                        gripe-header, gripe-controls, status-control, types, format, use-copy
+                        walkthrough-header, walkthrough-controls, status-control, types, format,
+                        use-copy
   lib/
     org.tsx             OrgProvider/useActiveOrg — active org id in localStorage
     trpc.tsx / auth-client.ts / utils.ts
@@ -140,7 +161,8 @@ extension/              Handback Recorder — the Chrome MV3 extension (own npm 
   src/sidepanel/        Panel app: recorder (getDisplayMedia + dedup), transcription
                         (transcribeCloud.ts → the workspace; transcribeWorker.ts → on-device),
                         polish.ts (the cleanup pass, after transcription), Timeline editor,
-                        grids contact sheets, App.tsx orchestration
+                        grids contact sheets, App.tsx orchestration, puck.ts (the PiP
+                        pointer-over-any-app: arrow-tip window, pins, out-of-Chrome dock)
   scripts/              make-icons, copy-ort, prune-dist, preview.mjs + preview/ (layout harness)
 ```
 
@@ -153,12 +175,12 @@ extension/              Handback Recorder — the Chrome MV3 extension (own npm 
 | `/join/:inviteId` | Invite accept | `src/app/join.tsx` |
 | `/forgot-password` · `/reset-password` | Password recovery (better-auth emails the link) | `src/app/{forgot,reset}-password.tsx` |
 | `/privacy` · `/terms` | Legal pages (linked from the marketing footer) | `src/app/{privacy,terms}.tsx` |
-| `/app` | Inbox (gripe list, first-run org creation) | `src/app/app.tsx` |
-| `/gripes/:gripeId` | The viewer | `src/app/gripe.tsx` |
-| `/projects` · `/team` | Projects · Members/Invites/Tokens | `src/app/{projects,team}.tsx` |
+| `/app` | Inbox (walkthrough list; auto-provisions a personal workspace) | `src/app/app.tsx` |
+| `/walkthroughs/:walkthroughId` | The viewer (`/gripes/:id` 302s here) | `src/app/walkthrough.tsx` |
+| `/projects` · `/team` | Projects · Members/Invites (teams only) | `src/app/{projects,team}.tsx` |
 | `/connect` | Connect a coding agent (token + `claude mcp add` + disconnect) | `src/app/connect.tsx` |
 | `/recorder` | Install + one-click-link the extension (detects install, mints token, handshake) | `src/app/recorder.tsx` |
-| `/admin` | Platform admin (admins only; nav link hidden otherwise) | `src/app/admin.tsx` |
+| `/admin` | Platform admin — stats, users, entitlements, per-user walkthrough drill-down (admins only; nav link hidden otherwise) | `src/app/admin.tsx` |
 | `/dashboard` | redirect → /app (legacy) | `routes.tsx` |
 | `/healthz` | DB probe | `server.ts` |
 | `/api/auth/*` · `/api/trpc/*` | better-auth · tRPC | `server.ts` |
@@ -171,31 +193,37 @@ extension/              Handback Recorder — the Chrome MV3 extension (own npm 
 | Endpoint | Does |
 | --- | --- |
 | `GET /context` | Who the token speaks for: `{ org: {id,name,slug}, projects: [{id,name,slug,originHints}] }`. The recorder panel's workspace name + project picker |
-| `POST /gripes` | Declare: metadata + file list → gripe/take/file rows + presigned PUT per file. Optional `projectId` pins the project (validated against the token's org *before* the replace below; else originHints route it). Re-declaring an existing (org, slug) deletes the old gripe + S3 prefix first |
-| `POST /gripes/:id/finalize` | Marks files uploaded + sets `finalizedAt` (list only shows finalized) |
-| `GET /gripes` | List for agents (MCP `list_gripes`) |
-| `GET /gripes/:id` | Detail + `reportMd` text + presigned GET for every file (MCP `get_gripe`) |
-| `POST /gripes/:id/status` | open / in_review / resolved (MCP `set_gripe_status`) |
+| `POST /walkthroughs` | Declare: metadata + file list → walkthrough/take/file rows + presigned PUT per file. Optional `projectId` pins the project (validated against the token's org *before* the replace below; else originHints route it). Re-declaring an existing (org, slug) deletes the old walkthrough + S3 prefix first |
+| `POST /walkthroughs/:id/finalize` | Marks files uploaded + sets `finalizedAt` (list only shows finalized) |
+| `GET /walkthroughs` | List for agents (MCP `list_walkthroughs`). Every workspace's, when the token's owner is a platform admin |
+| `GET /walkthroughs/:id` | Detail + `reportMd` text + presigned GET for every file (MCP `get_walkthrough`) |
+| `POST /walkthroughs/:id/status` | open / in_review / resolved (MCP `set_walkthrough_status`) |
+
+All five walkthrough routes also answer under the legacy `/gripes*` spellings — same handlers,
+same rate-limit keys — because shipped recorders ≤1.2.x still post them. Don't remove the aliases
+until no old install remains.
 | `POST /transcribe` | 16 kHz mono WAV body in, `{segments:[{t,d?,text}]}` out. Stateless — the recorder chunks and offsets. 503 when `GROQ_API_KEY` is unset |
 | `POST /polish` | `{lines:[{text}], context:{origin,title,errors}}` in, the same number of lines back with product nouns spelled right. Text only — no timings cross this boundary. 503 when `ANTHROPIC_API_KEY` is unset |
 
 Every route is rate-limited: one per-IP limit ahead of authentication, then a per-token limit per
-route (`server/ratelimit.ts`). Declare also enforces 512 MB/file, 2 GB/gripe, 20 GB + 500 gripes per
-org, and the presigned PUT signs `ContentLength` so S3 rejects an upload that doesn't match.
+route (`server/ratelimit.ts`). Declare also enforces 512 MB/file, 2 GB/walkthrough, 20 GB + 500
+walkthroughs per org, and the presigned PUT signs `ContentLength` so S3 rejects an upload that
+doesn't match.
 
 ## Data model (Postgres via Prisma)
 
-better-auth's User/Session/Account/Verification, plus: **Org** ← Membership(role
-owner/admin/member, unique org+user; **scope** org|projects — "projects" = a **guest** who sees
-only granted projects and is clamped to member) ← ProjectAccess(membership+project grant, unique
-pair) · Invite (id IS the join-link token, 7-day expiry; optional **projectId** = guest invite,
-role forced to member; an org-wide invite upgrades an existing guest) · Project
-(originHints[] auto-routes uploads by recorded origin) · **Gripe** (unique org+slug; slug = the
-recorder's folder name; status open/in_review/resolved; finalizedAt gates visibility;
-**errorCount**/**droppedCount** — see the events gotcha) ← Take
-(rec-NN) + GripeFile (path unique per gripe; S3 key = `orgs/<orgId>/gripes/<gripeId>/<path>`) ·
-ApiToken (sha256 hash only; `hb_` prefix since the rename — old `ilp_` tokens are dead;
-lastUsedAt stamped on ingest auth).
+better-auth's User/Session/Account/Verification, plus: **Org** (**personal** flag — auto-created
+"<First>'s workspace" at sign-up, takes no invites; personal:false = a team, created from the
+switcher behind the `team` entitlement) ← Membership(role owner/admin/member, unique org+user;
+**scope** org|projects — "projects" = a **guest** who sees only granted projects and is clamped to
+member) ← ProjectAccess(membership+project grant, unique pair) · Invite (id IS the join-link
+token, 7-day expiry; optional **projectId** = guest invite, role forced to member; an org-wide
+invite upgrades an existing guest; refused on personal orgs) · Project (originHints[] auto-routes
+uploads by recorded origin — column kept, UI field removed) · **Walkthrough** (unique org+slug;
+slug = the recorder's folder name; status open/in_review/resolved; finalizedAt gates visibility;
+**errorCount**/**droppedCount** — see the events gotcha) ← Take (rec-NN) + WalkthroughFile (path
+unique per walkthrough; S3 key = `orgs/<orgId>/gripes/<walkthroughId>/<path>` — prefix frozen
+pre-rename) · ApiToken (sha256 hash only; `hb_` prefix; lastUsedAt stamped on ingest auth).
 
 ## Storage (S3)
 
@@ -240,12 +268,17 @@ service.
 | build / start | `bun run build` / `bun run start` |
 | predeploy | `bunx prisma db push` (no `--accept-data-loss`, on purpose) |
 
-> **⚠️ PROD IS MID-MIGRATION (2026-07-31) — push `main` to finish it.** The `errorCount` rename was
-> applied straight to the prod DB (`error_count` renamed, `dropped_count` added), but the running
-> container is still the *old* image, which selects `gripe.event_count`. **Every gripe read on
-> handback.dev errors right now** ("The column `gripe.event_count` does not exist") — `/healthz`
-> still 200s, so a probe won't catch it. Deploying the current `main` fixes it; nothing else is
-> needed (predeploy `db push` finds no drift). Local `handback` + `handback_test` already renamed.
+> **⚠️ PROD MIGRATION PENDING (2026-08-01) — the walkthrough rename is NOT on prod yet.** Local
+> `handback` + `handback_test` are renamed; prod still has `gripe`/`gripe_file`. Ship it as one
+> back-to-back move (walkthrough reads 500 in the gap, so don't linger): (1) on the prod DB run
+> `ALTER TABLE "gripe" RENAME TO "walkthrough"; ALTER TABLE "gripe_file" RENAME TO
+> "walkthrough_file"; ALTER TABLE "take" RENAME COLUMN "gripe_id" TO "walkthrough_id";
+> ALTER TABLE "walkthrough_file" RENAME COLUMN "gripe_id" TO "walkthrough_id";` plus the backfill
+> `UPDATE org SET personal = true WHERE id IN (SELECT org_id FROM membership GROUP BY org_id
+> HAVING count(*) = 1);` (the `personal` column itself arrives via predeploy `db push`); (2) push
+> `main`. The 2026-07-31 `errorCount` half-migration is resolved — that `main` was pushed.
+> Note: prod Postgres currently answers on `52.24.94.83:5432` (Sal opened it; dev `.env` briefly
+> pointed at it and was flipped back to local on purpose — never run dev against prod).
 
 **Reaching the prod DB** (there is no public port — it's `172.17.0.1:5432` on the Docker bridge):
 the EC2 box is SSM-managed, so `aws ssm send-command --instance-ids i-082378e80e708f4f2
@@ -265,6 +298,21 @@ reaches the container on a plain push.
 
 - **ui.md is law**: light only, no dark mode, no orange. Status colors fixed (open=cobalt,
   in_review=violet, resolved=green).
+- **The rename has two frozen edges.** S3 keys stay `orgs/<orgId>/gripes/<id>/…`
+  (`server/storage.ts` — renaming the prefix orphans every uploaded object) and
+  `/api/ingest/gripes*` aliases stay registered (Recorder ≤1.2.x posts them). MCP tools have NO
+  old-name aliases — old report.md files that say `get_gripe` predate the rename. The extension's
+  internal identifiers are still `Gripe*` on purpose (only its emitted strings changed); rename
+  them in a quiet moment, not while panel work is in flight.
+- **Personal workspaces are a server-enforced shape, not a UI style.** `invites.create` refuses
+  `org.personal`; `orgs.create` requires the `team` entitlement (platform admins pass); sign-up
+  auto-creates via `databaseHooks.user.create` (failure is swallowed — `orgs.ensurePersonal` is
+  the repair path the inbox fires for org-less accounts). Existing single-member orgs were
+  backfilled `personal = true` locally; the same UPDATE ships with the prod migration above.
+- **Dev FOUC fix lives in server.ts, not index.html.** Dev injects
+  `<link rel="stylesheet" href="/src/styles/app.css?direct">` after `transformIndexHtml`
+  (`?direct` = compiled CSS, not a JS module). Prod builds emit a hashed CSS link and don't need
+  it — don't move the link into index.html or prod double-loads the sheet.
 - **The landing page's screenshots are live DOM, not images.** One demo gripe (`demo-data.ts` —
   a promo code that applies to nothing) runs through every section; a keyframe is
   `CheckoutShot` in `demo-shot.tsx`, an SVG so it survives both a 3×3 contact-sheet tile and the
@@ -286,6 +334,14 @@ reaches the container on a plain push.
   as an interaction counter to every agent that saw it; **ingest still accepts a bare `eventCount`**
   from Recorder ≤1.1.0 and stores it as `errorCount`, so don't delete that fallback until the
   Web Store build is past 1.1.0 everywhere.
+- **The keyframe cap is length-scaled, and it lives in two places.** `frameBudget(durationMs)`
+  (`extension/src/sidepanel/recorder.ts`) is 40 frames/min clamped to **[150, 600]** per *take* —
+  applied once in `finish()`, after dedup, as a uniform thin; `reason === 'mark'` frames are never
+  thinned, and survivors are renumbered ascending (`t` survives, so transcript citations stay
+  valid). It was a flat 150 until 2026-07-31. Server-side, `briefFrameLimit()`
+  (`server/mcp-format.ts`) caps how many frame URLs the agent's brief *inlines* — 8/min clamped to
+  [30, 120] — which is a display cap only: `gripes.get` presigns every frame regardless. Raising
+  either has real cost: a frame is ~200–400 KB, against 2 GB/gripe and 20 GB/org.
 - **Renaming a column is a SQL job, not a `db push` job.** Predeploy runs `bunx prisma db push`
   **without** `--accept-data-loss` on purpose, so any drop stalls the deploy. Rename in place first
   (`ALTER TABLE "gripe" RENAME COLUMN "old" TO "new"`), then push — it sees no drift. Remember
@@ -336,6 +392,22 @@ reaches the container on a plain push.
   (orgId + `projectId: null` + slug suffixed if taken), then the old prefix is deleted
   best-effort. A crash mid-copy loses nothing; after the flip, worst case is orphaned source
   objects. Destination quota reuses ingest's exported `ORG_QUOTA_BYTES`/`ORG_MAX_GRIPES`.
+- **A platform admin's `hb_` token is a platform-wide token** (2026-07-31). `authenticateToken`
+  resolves `isAdmin` off the token's owner, and `gripes-api.ts` drops the org filter for it:
+  `list_gripes` returns **every workspace's** gripes, `get_gripe` and `set_gripe_status` accept any
+  id anywhere. Unlike the web bypass this *does* include the write (deliberate — an agent that can
+  pull a gripe has to be able to mark it in_review). Every list item and brief now carries
+  **`workspace`**; the MCP tool descriptions gain an admin-scope sentence so the agent knows to
+  read it. **Uploads are never cross-org** — declare/finalize still pin `auth.orgId`, so an admin's
+  recorder can't drop a gripe into someone else's workspace. The practical trap: your own everyday
+  token is an admin token, so your agent's queue is the whole platform.
+- **Platform admins bypass membership on reads only** (2026-07-31): `requireViewAccess`
+  (server/membership.ts) falls back to a synthetic owner Access for a platform admin who isn't a
+  member, and is wired into exactly `gripes.get` and `gripes.fileUrl` — so /admin's per-user gripe
+  list can open the viewer (with presigned S3 URLs) for any workspace. Every mutation still goes
+  through `requireMembership`. `gripes.get` returns **`viewerIsMember: false`** on that path and
+  `GripeControls` collapses to a read-only chip; don't render a control that ignores it, and don't
+  move the bypass into `requireMembership` — that would hand admins delete on every workspace.
 - **Guest scoping is enforced in `requireMembership`** (server/membership.ts): it returns
   `Access { role, projectIds }` (`null` = whole workspace). Any NEW tRPC procedure returning
   org data must respect `access.projectIds` (`canSeeGripe` / `requireOrgScope`) or guests leak.
@@ -356,7 +428,23 @@ reaches the container on a plain push.
   script; only Alt+Shift+M/D are real `commands`.
 - **Preview harness seeds real IndexedDB** ('handback-recorder') and stubs `chrome.*` — it shares the
   origin's DB, so a preview tab and the real panel fight if both run on the same profile. Port 8777
-  (`PORT` env to move it; the old gripe repo's harness also used 8777).
+  (`PORT` env to move it; the old gripe repo's harness also used 8777). **Its `SETTINGS` stub must
+  track `DEFAULT_SETTINGS` in `lib/types.ts`** — the panel calls `activeLink(settings)`, which
+  reaches into `settings.links`, so a stub still carrying the flat 1.1.x `serverUrl`/`apiToken`
+  fields throws on first render and the harness comes up **blank with no clue why**. That is exactly
+  how it sat broken from the multi-workspace change until 2026-08-01.
+- **In the panel, drag scrubs — it does not select** (2026-08-01). Ruler, filmstrip cell and empty
+  track all start a `scrub`; a drag under `SLOP` falls back to that surface's click (a cell hands
+  over its frame, empty track clears). Multi-select lives entirely behind modifiers: **shift**-drag
+  sweeps a range on the ruler / marquees on the tracks, shift-click extends, ctrl/cmd-click toggles.
+  Don't put a bare drag back on selection — sweeping was the default once and read as the editor
+  fighting you.
+- **The axis takes the slack; the monitor gives it up.** `.tl-scroll` is `flex: 1 1 auto` with a
+  floor of one ruler + two lanes, and `.tl-monitor` is capped at 50% of the stacked panel and
+  collapses outright (`.bare`) when there is no frame to show. It used to be the reverse — a monitor
+  that grew unbounded over a `flex: 0 1 auto` axis — which crushed the ruler and both lanes to a
+  sliver under a tall blank picture. Both rules are scoped `:not(.wide)`; popped out, the monitor is
+  a fixed column beside the axis and neither applies.
 - **`Dockerfile`, `drydock.yaml` and `.github/workflows/drydock.yml` are Drydock's** — it overwrites
   all three on every wire/re-wire. Change the deploy in the portal, not in the repo.
 - **`env.ts` parses at import time**, so a missing S3/auth var is a boot crash, not a runtime error —
@@ -402,8 +490,9 @@ reaches the container on a plain push.
   load-unpacked instructions collapse behind it automatically.
 - **A push to `main` does NOT ship the extension.** Deploy only moves the web app/server; the
   recorder reaches users through `releases/recorder/` in the bucket. So before (or right after) any
-  push that touched `extension/`: bump the version if behavior changed, `bun run build:extension`,
-  zip `extension/dist` (shell step — see the Bun gotcha), `bun cli/publish-recorder.ts`. Skipping
+  push that touched `extension/`: bump the version if behavior changed, then
+  `bun run publish:extension` (build → zip → upload; the zip step shells out to `pwsh`
+  `Compress-Archive`, so it's Windows-only — see the Bun gotcha). Skipping
   this leaves every install nagged as outdated — or worse, a server expecting a handshake the
   shipped recorder doesn't speak.
 - **The bucket is the release channel.** `/recorder` links `/download/recorder`, not GitHub — the
@@ -471,6 +560,15 @@ reaches the container on a plain push.
   actually been used. Read side refactored into `server/gripes-api.ts` + `server/mcp-format.ts`,
   shared by REST and both MCP servers. Verified against a live server: initialize, tools/list,
   a real `list_gripes` call, 401 on a bad token, 405 on GET.
+- **Done (2026-08-01)** — **the website walkthrough (`212801d8`)**: gripe → **walkthrough**
+  everywhere (DB tables/columns renamed in place, tRPC `walkthroughs.*`, MCP
+  `list/get/set_walkthrough*`, `/walkthroughs/:id` + legacy redirect, CLI, README, recorder
+  report.md strings); **personal workspaces** (`Org.personal`, sign-up hook, ensurePersonal,
+  switcher dropdown + entitlement-gated "New team…", Team page split, tokens → /connect, origin
+  hints out of the UI); **landing redo** (new tagline "Debug and review your app in your own
+  words.", RecorderPanelMock in the hero, de-bugged step copy, honest sign-off step, pricing hour
+  quotas, MCP terminal block removed); **dev FOUC fix**. e2e re-baselined, 4/4. Prod DB migration
+  pending — see the ⚠️ above.
 - **Next** — **deploy, then re-test the loop**: `/mcp` and `/connect` only exist locally until the
   next push to `main`, so the command `/connect` prints for handback.dev 404s until then. Sal's
   Drydock/DNS checklist in the rename plan (zone, project, S3 via
