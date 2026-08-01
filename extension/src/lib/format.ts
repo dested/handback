@@ -50,6 +50,41 @@ export function mmss(ms: number): string {
   return `${Math.floor(total / 60)}:${pad(total % 60)}`;
 }
 
+/** 2026-07-25 — the date alone, for anything older than a week. */
+export function dateOnly(ts: number): string {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/**
+ * `4m ago` / `2h ago` / `3d ago`, and a plain date past a week. A list of
+ * walkthroughs is read for recency first — "yesterday" is the question, not the
+ * timestamp — and an exact stamp at that size is just noise.
+ */
+export function ago(ts: number, now = Date.now()): string {
+  const seconds = Math.max(0, Math.round((now - ts) / 1000));
+  if (seconds < 45) return 'just now';
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${Math.max(1, minutes)}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  if (days <= 6) return `${days}d ago`;
+  return dateOnly(ts);
+}
+
+/**
+ * `handback.dev` — a server URL as a person would name it. The panel says which
+ * workspace something went to in a dozen places and never wants the whole URL.
+ */
+export function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
+}
+
 /** 0432 — mmss without the colon, for filenames. */
 export function mmssFile(ms: number): string {
   const total = Math.max(0, Math.round(ms / 1000));

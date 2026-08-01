@@ -32,6 +32,41 @@ export interface TranscriptSegment {
   text: string;
 }
 
+/** The live dictation engine's state, as the panel and the puck both report it. */
+export type MicState = 'listening' | 'off' | 'denied' | 'error';
+
+/**
+ * What the puck — the draggable PiP pointer that follows a walkthrough outside
+ * Chrome — reports about itself, over `recording:puck`. Tip and window bounds
+ * are DIPs relative to the display the puck is on (its own `screen`), the same
+ * space the in-page samples use for `screenX/Y`.
+ */
+export interface PuckTelemetry {
+  /** The arrow tip — the one pixel that means anything. */
+  sx: number;
+  sy: number;
+  /** The puck's display, for the aspect-ratio mapping. */
+  sw: number;
+  sh: number;
+  /** The whole window's outer bounds — its clock and captions repaint every second,
+   *  so this rect is masked out of dedup or the puck itself burns the frame budget. */
+  wx: number;
+  wy: number;
+  ww: number;
+  wh: number;
+}
+
+/** The panel's answer to a `recording:puck` heartbeat — the puck's readout. */
+export interface PuckBeat {
+  /** False (or a missing response) means the take ended: the puck should close. */
+  active: boolean;
+  /** Whether the tip currently maps into the captured frame. */
+  onFrame: boolean;
+  elapsedMs: number;
+  interim: string;
+  micState: MicState;
+}
+
 /** Where the mouse was, sampled by the recorded tab while a walkthrough runs. All lengths are CSS px. */
 export interface PointerSample {
   /** Absolute ms — the panel converts it to recording-relative. */
@@ -149,6 +184,21 @@ export interface Session {
   projectId?: string;
   /** The project's name as the panel last saw it — display fallback when the list can't be fetched. */
   projectName?: string;
+}
+
+/**
+ * What one session amounts to, without shipping its takes. `state:get` carries
+ * the *active* session's recordings and nothing else — deliberately, since a
+ * take's frame list runs to hundreds of entries — so the home screen's list of
+ * everything on this machine asks for these instead.
+ */
+export interface SessionSummary {
+  /** Finished takes. A take still being recorded is not one yet. */
+  takes: number;
+  /** Every take's length added up — the same figure the panel's timeline shows. */
+  durationMs: number;
+  frames: number;
+  lines: number;
 }
 
 /** One thing sitting on the gripe's timeline, addressed the way the store finds it again. */

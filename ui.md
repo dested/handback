@@ -82,6 +82,18 @@ properties in `extension/src/sidepanel/styles.css` (no Tailwind there).
 - **Panel** (`panel.css`): paper ground, white cards, hairline rules. One big
   cobalt action per state: idle = the full-width `Record a walkthrough` hero,
   recording = full-width `stop recording`, review = `send to Handback` (46px).
+  With nothing open the hero sits over the **home screen** (`Home.tsx`): the
+  destination row (workspace + host + project count, click opens the switcher),
+  then the workspace's queue, then what's still on this machine — each an
+  editorial section with a mono uppercase head and the one action it offers on
+  the right, divided by hairlines, never boxes. Status reads twice on a queue
+  row, as a 7px dot and as the word, in the three fixed inks; filter chips are
+  pills that go from hairline to that same ink when on. Nothing below the hero
+  may be louder than it. An open walkthrough wears a **crumb row** above its
+  title — `← all walkthroughs` muted on the left, `discard` on the right — and
+  those are the only two navigation controls; discard arms into one line
+  (`discard 2 takes? yes, discard / keep`, the yes in `--destructive`) so the
+  row never grows and shoves the timeline down mid-decision.
   Above the send button sits the destination row — "to [workspace] · [project]",
   two hairline selects with a drawn chevron (`appearance: none`, never Chrome's
   stock arrow); the project select hides rather than renders dead when the list

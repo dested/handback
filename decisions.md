@@ -13,9 +13,15 @@ clock, live captions, mark/stop, arrow-click/`p` drops numbered **pins** that ar
 keyframes. Tip telemetry rides the existing `PointerSample` pipe (second slot, fresh page
 sample wins, parked puck never stale); parking forces a mark like an ink stroke ending; dedup
 signatures mask the puck's window rect (union of both compared frames' rects) so its ticking
-clock can't burn the frame budget. Verified: `documentPictureInPicture` **is** exposed in the
-side panel (Sal, live check), so the panel opens it and scripts its DOM directly — zero new
-messages, zero worker/server changes.
+clock can't burn the frame budget. **The opener is the CONTENT SCRIPT, not the panel:** the API
+object exists in the side panel but `requestWindow()` there hangs/rejects `undefined` — Chrome
+honours it only in real tabs (learned the hard way; chromium-extensions list confirms). So the
+page dock grew a `point` (`p`) button, the PiP document inherits the page's CSP and is therefore
+built with zero innerHTML and zero `<style>` tags (Trusted Types / style-src — everything is
+createElement + `.style` writes), and the puck talks over two new messages: `recording:puck`
+(150ms heartbeat, geometry up / `PuckBeat` readout down) and `recording:pin`, answered by the
+panel while the worker explicitly stays off their reply channel. Cost accepted: the puck dies if
+its host tab navigates; the dock button brings it back.
 **Rejected:** encode-time-only compositing (user draws blind — dead once the puck existed); an
 Electron/Tauri transparent-overlay helper (second install, signing, Web Store story — revisit
 only if the puck proves insufficient); freehand ink outside Chrome (impossible without the

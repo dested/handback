@@ -145,6 +145,394 @@
   color: var(--muted);
 }
 
+/* ── Home ───────────────────────────────────────────────────────────────── */
+/* With no walkthrough open the panel is not empty — it is the workspace seen from
+ * the recorder: where the next recording goes, what already went there and what
+ * state somebody put it in, and what is still sitting in this browser. Record
+ * stays the loudest thing on it; everything below is a quiet read, divided by
+ * hairlines the way the app divides its sections. */
+
+.home {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.home > .shipped {
+  margin: 12px 12px 0;
+}
+.home > section + section {
+  border-top: 1px solid var(--border);
+}
+
+/* Every block below the hero announces itself the same way: what this is on the
+ * left, the one thing you can do about it on the right. */
+.sec-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: var(--fs-0);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.sec-head > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sec-head .link {
+  font-size: var(--fs-0);
+  text-transform: none;
+  letter-spacing: 0;
+  flex: none;
+}
+
+/* The destination, said before the recording rather than only at the send button.
+ * It is also the door to a second workspace, so the whole row opens the picker. */
+.wsbar {
+  padding: 10px 12px;
+}
+.wsbar-main {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  text-align: left;
+}
+.wsbar-main:hover,
+.wsbar-main.on {
+  border-color: var(--cobalt);
+}
+.wsbar-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--cobalt);
+  flex: none;
+}
+.wsbar-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+.wsbar-name {
+  font-size: var(--fs-2);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wsbar-meta {
+  font-family: var(--font-mono);
+  font-size: var(--fs-0);
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chev {
+  color: var(--muted);
+  font-size: var(--fs-0);
+  flex: none;
+}
+.wspick {
+  margin-top: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.wspick-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  background: var(--card);
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  font-size: var(--fs-1);
+}
+.wspick-row:last-child {
+  border-bottom: 0;
+}
+.wspick-row:hover {
+  background: var(--cobalt-wash);
+}
+.wspick-row.on .wsdot {
+  background: var(--cobalt);
+  border-color: var(--cobalt);
+}
+.wspick-row.add {
+  color: var(--cobalt);
+}
+
+/* ── The workspace's queue ──────────────────────────────────────────────── */
+
+.feed,
+.local {
+  padding: 12px;
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 8px;
+}
+.chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  max-width: 100%;
+  padding: 3px 8px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: var(--fs-0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chip:hover {
+  color: var(--ink);
+  border-color: var(--muted);
+}
+.chip-n {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
+/* On is the ink; the status inks are the same three the web app uses and there is
+ * never a fourth. */
+.chip.on {
+  background: var(--cobalt-wash);
+  border-color: var(--cobalt);
+  color: var(--cobalt);
+}
+.chip.on.in_review {
+  background: var(--review-wash);
+  border-color: var(--review);
+  color: var(--review);
+}
+.chip.on.resolved {
+  background: var(--approve-wash);
+  border-color: var(--approve);
+  color: var(--approve);
+}
+
+.wtrow {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  /* Pulled into the section's own padding so the hover wash reads as a full-bleed
+     row rather than a floating box. */
+  margin: 0 -8px;
+  width: calc(100% + 16px);
+  padding: 7px 8px;
+  background: none;
+  border: 0;
+  border-radius: var(--radius);
+  text-align: left;
+}
+.wtrow:hover {
+  background: var(--cobalt-wash);
+}
+/* The status, as one dot in the row's left margin — the same three inks as the
+ * chips, so the list is scannable by colour before it is read. */
+.sdot {
+  width: 7px;
+  height: 7px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--cobalt);
+  flex: none;
+}
+.sdot.in_review {
+  background: var(--review);
+}
+.sdot.resolved {
+  background: var(--approve);
+}
+.wt-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+.wt-title {
+  font-size: var(--fs-1);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wt-meta {
+  font-family: var(--font-mono);
+  font-size: var(--fs-0);
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Console errors the page threw while it was being recorded — the one number on
+ * this row an agent will care about before opening it. */
+.wt-err {
+  flex: none;
+  align-self: center;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--cobalt-wash);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-0);
+}
+/* Three grey lines while the queue is in flight. A spinner would be a bigger
+ * promise than one list of six rows deserves. */
+.feed-skel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 0;
+}
+.feed-skel i {
+  height: 10px;
+  border-radius: 3px;
+  background: var(--border);
+  animation: breathe 1.4s ease-in-out infinite;
+}
+.feed-skel i:nth-child(2) {
+  width: 78%;
+  animation-delay: 0.15s;
+}
+.feed-skel i:nth-child(3) {
+  width: 55%;
+  animation-delay: 0.3s;
+}
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+.feed .note,
+.feed > .link {
+  margin-top: 4px;
+  line-height: 1.45;
+}
+
+/* ── Still on this machine ──────────────────────────────────────────────── */
+/* Sessions that never left, and the ones that did. Clicking one is how you get
+ * back into it — a draft is not history, it is unfinished work. */
+
+.local .count {
+  font-family: var(--font-mono);
+  font-size: var(--fs-0);
+  color: var(--muted);
+}
+.lrow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 -8px;
+  padding: 0 4px;
+  border-radius: var(--radius);
+}
+.lrow:hover {
+  background: var(--cobalt-wash);
+}
+/* The walkthrough you stepped out of. It is not history — it is where you were. */
+.lrow.on {
+  box-shadow: inset 2px 0 0 var(--cobalt);
+}
+.lrow-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+  padding: 7px 4px;
+  background: none;
+  border: 0;
+  text-align: left;
+}
+.lrow-title {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--fs-1);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lrow-meta {
+  font-family: var(--font-mono);
+  font-size: var(--fs-0);
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ltag {
+  flex: none;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--border);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-0);
+  font-weight: 400;
+}
+.ltag.draft {
+  background: var(--cobalt-wash);
+  color: var(--cobalt);
+}
+.ltag.done {
+  background: var(--approve-wash);
+  color: var(--approve);
+}
+.lrow-open {
+  flex: none;
+  padding: 4px 6px;
+  background: none;
+  border: 0;
+  color: var(--cobalt);
+  font-size: var(--fs-1);
+}
+/* `.kill` is absolute inside the older list rows; here it is just the last cell. */
+.lrow .kill {
+  position: static;
+  flex: none;
+}
+
+.home-foot {
+  margin: 0;
+  padding: 12px;
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-0);
+  color: var(--muted);
+}
+.home-foot .link {
+  font-size: var(--fs-0);
+}
+
 /* Unlinked is a state, not an error: it says what is true and where to fix it. */
 .linkbar {
   display: flex;
@@ -318,35 +706,13 @@ button.ticker.warn:hover {
   font-size: var(--fs-0);
   color: var(--muted);
 }
-/* The puck's door. It earns a pulse only when the capture is a whole monitor —
- * that's when "point at anything" is literally true. */
-.puck-open {
-  width: 100%;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--paper);
+/* The puck lives on the page dock (PiP can't open from a side panel); this is
+ * just the panel telling you it's worth reaching for, in the accent. */
+.note.puck-note {
   color: var(--cobalt);
-  font-size: var(--fs-1);
+}
+.note.puck-note b {
   font-weight: 600;
-  text-align: left;
-  cursor: pointer;
-}
-.puck-open:hover {
-  border-color: var(--cobalt);
-}
-.puck-open.pulse {
-  border-color: var(--cobalt);
-  animation: puckglow 1.6s ease-in-out infinite;
-}
-@keyframes puckglow {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 rgba(47, 86, 216, 0.28);
-  }
-  50% {
-    box-shadow: 0 0 0 4px rgba(47, 86, 216, 0.08);
-  }
 }
 
 /* ── The gripe ──────────────────────────────────────────────────────────── */
@@ -355,7 +721,42 @@ button.ticker.warn:hover {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 12px 12px 8px;
+  padding: 8px 12px 8px;
+}
+
+/* Leaving and discarding, above the title — the two things a person hunts for
+ * when they are in the wrong walkthrough, and neither of them is Send. */
+.crumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  min-height: 20px;
+}
+.back {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--muted);
+  font-size: var(--fs-0);
+}
+.back:hover {
+  color: var(--cobalt);
+}
+.crumb .link {
+  font-size: var(--fs-0);
+}
+/* Armed. The question and both answers sit on one line so the row never grows and
+ * shoves the timeline down mid-decision. */
+.confirm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-0);
+  color: var(--ink);
+}
+.link.danger {
+  color: var(--danger);
 }
 .title {
   background: none;
@@ -401,42 +802,9 @@ button.ticker.warn:hover {
   font-size: var(--fs-1);
 }
 
-/* ── Earlier gripes ─────────────────────────────────────────────────────── */
-
-.sessions {
-  border-top: 1px solid var(--border);
-}
-.srow {
-  position: relative;
-  padding: 8px 28px 8px 12px;
-  cursor: pointer;
-  border-bottom: 1px solid var(--border);
-  background: var(--card);
-}
-.srow:hover {
-  background: var(--cobalt-wash);
-}
-.srow.on {
-  box-shadow: inset 2px 0 0 var(--cobalt);
-}
-.sname {
-  font-size: var(--fs-1);
-  font-weight: 500;
-}
-.stag {
-  margin-left: 6px;
-  padding: 1px 5px;
-  border-radius: 3px;
-  background: var(--approve-wash);
-  color: var(--approve);
-  font-family: var(--font-mono);
-  font-size: var(--fs-0);
-}
-.smeta {
-  font-family: var(--font-mono);
-  font-size: var(--fs-0);
-  color: var(--muted);
-}
+/* The one list of walkthroughs is the home screen's (`.lrow`) — the panel used to
+ * carry a second, foldable one here, and two competing lists is what made this
+ * thing hard to get out of. */
 .kill {
   position: absolute;
   top: 6px;

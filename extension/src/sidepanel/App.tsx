@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   PageEvent,
   PointerSample,
+  PuckBeat,
+  PuckTelemetry,
   Recording,
   RecordingFrame,
   Session,
@@ -12,7 +14,7 @@ import { DEFAULT_SERVER, DEFAULT_SETTINGS, activeLink, linkId } from '../lib/typ
 import { fetchContext, type WorkspaceContext } from '../lib/context';
 import { send } from '../lib/messages';
 import { blobs, kv } from '../lib/db';
-import { dateTime, mmss, plural, recDirName } from '../lib/format';
+import { hostOf, mmss, plural, recDirName } from '../lib/format';
 import { partSpans, totalMs } from '../lib/timeline';
 import {
   agentPrompt,
@@ -24,12 +26,12 @@ import {
 } from '../lib/report';
 import { contentTypeFor, pushGripe, type GripeFile, type UploadProgress } from '../lib/upload';
 import { Recorder, type RecorderUpdate } from './recorder';
-import { openPuck, puckSupported, type PuckHandle } from './puck';
 import { Dictation } from '../content/speech';
 import { makeGrids, type GridFrame } from './grids';
 import { polishTranscript } from './polish';
 import { transcribeRecording, type TranscribeProgress } from './transcribe';
 import { Timeline } from './Timeline';
+import { Home } from './Home';
 import './panel.css';
 
 /**
@@ -90,15 +92,6 @@ function originOf(url: string): string {
   }
 }
 
-/** The workspace as a person would name it — `handback.dev`, not the whole URL. */
-function hostOf(url: string): string {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return url;
-  }
-}
-
 function reason(error: unknown): string {
   const text = error instanceof Error ? error.message : String(error);
   return text.replace(/\s+/g, ' ').trim().slice(0, 300) || 'something went wrong';
@@ -135,7 +128,7 @@ function explainUpload(raw: string, host: string): UploadExplanation {
     return { line, detail: says(line) };
   }
   if (status >= 500) {
-    const line = `the workspace hit an error (${status}). nothing is lost — the gripe is still here`;
+    const line = `the workspace hit an error (${status}). nothing is lost — the walkthrough is still here`;
     return { line, detail: says(line) };
   }
   if (status >= 400) {
@@ -151,14 +144,20 @@ export function App() {
   const [state, setState] = useState<PanelState>(EMPTY);
   const [flash, setFlash] = useState<string | null>(null);
   const [name, setName] = useState('');
-  const [showSessions, setShowSessions] = useState(false);
+  /**
+   * The human stepped back to the home screen with a walkthrough still open. It is
+   * view state and nothing else — the session stays active in the worker, so the
+   * next take still lands in it, and reopening the panel lands back in the work.
+   * Leaving a walkthrough must never be the same gesture as ending one.
+   */
+  const [browsing, setBrowsing] = useState(false);
+  /** Discard is armed: the second click is the one that deletes takes. */
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
   /** The gear's panel, under the header. Nothing in here is needed to use the product. */
   const [showSettings, setShowSettings] = useState(false);
   /** Whether the recorded tab can host the on-page dock — chrome:// pages can't. */
   const [pageDock, setPageDock] = useState(false);
   const [recUpdate, setRecUpdate] = useState<RecorderUpdate | null>(null);
-  /** The puck is out — the PiP pointer floating over whatever app the user is in. */
-  const [puckOut, setPuckOut] = useState(false);
   /** The capture is shaped like a monitor, so the puck would land inside it. */
   const [screenish, setScreenish] = useState(false);
   const [stopping, setStopping] = useState(false);
@@ -178,7 +177,6 @@ export function App() {
   const whisperQueue = useRef<string[]>([]);
   const whisperRunning = useRef(false);
   const recorderRef = useRef<Recorder | null>(null);
-  const puckRef = useRef<PuckHandle | null>(null);
   /** micperm.html is opened once per panel life — a second Record records silent. */
   const micTabOpened = useRef(false);
   const recovering = useRef<Set<string>>(new Set());
@@ -227,11 +225,34 @@ export function App() {
 
   useEffect(() => {
     void refresh();
-    const listener = (message: { type?: string; origin?: string }) => {
+    const listener = (
+      message: { type?: string; origin?: string },
+      _sender: chrome.runtime.MessageSender,
+      respond: (answer: unknown) => void,
+    ) => {
       if (message?.type === 'state:changed') void refresh();
       // The stop button on the page dock. The panel owns the recorder, so it acts.
       if (message?.type === 'recording:stop') stopRef.current();
       const recorder = recorderRef.current;
+      // The puck's messages expect an answer even when the take is over — a
+      // missing/inactive beat is how the puck learns to close itself.
+      if (message?.type === 'recording:puck') {
+        if (!recorder) {
+          respond(null);
+          return;
+        }
+        recorder.setPuck((message as { telemetry: PuckTelemetry }).telemetry);
+        respond({
+          active: true,
+          onFrame: recorder.puckOnFrame(),
+          ...recorder.liveStats(),
+        } satisfies PuckBeat);
+        return;
+      }
+      if (message?.type === 'recording:pin') {
+        respond({ n: recorder?.puckOnFrame() ? recorder.pin() : null });
+        return;
+      }
       if (!recorder) return;
       // Telemetry and pointer arrive from every tab; the recorder keeps only what
       // came from the one being recorded.
@@ -402,9 +423,6 @@ export function App() {
       // right now — stopping and starting again is what takes are for.
       enqueueWhisper(r.id);
     } finally {
-      puckRef.current?.close();
-      puckRef.current = null;
-      setPuckOut(false);
       setScreenish(false);
       recorderRef.current = null;
       setRecUpdate(null);
@@ -414,55 +432,14 @@ export function App() {
     }
   };
 
-  /**
-   * The puck: the PiP arrow that goes where the ink can't — over Excel, a
-   * terminal, anything. Must be opened from a click (transient activation), which
-   * is why Record can't bring it along automatically: that gesture is spent on
-   * the share picker. It scripts back into the recorder directly; no messages.
-   */
-  const openPuckWindow = async () => {
-    const r = recorderRef.current;
-    if (!r || puckRef.current) return;
-    try {
-      puckRef.current = await openPuck({
-        onTelemetry: (t) => recorderRef.current?.setPuck(t),
-        // Parking the arrow is pointing — the out-of-Chrome twin of an ink stroke
-        // ending. Only when it actually landed in the recording, though.
-        onParked: () => {
-          if (recorderRef.current?.puckOnFrame()) recorderRef.current.mark();
-        },
-        onPin: () => {
-          const rec = recorderRef.current;
-          return rec?.puckOnFrame() ? rec.pin() : null;
-        },
-        onMark: () => recorderRef.current?.mark(),
-        onStop: () => stopRef.current(),
-        onClosed: () => {
-          puckRef.current = null;
-          recorderRef.current?.setPuck(null);
-          setPuckOut(false);
-        },
-      });
-      setPuckOut(true);
-    } catch {
-      say("couldn't open the pointer");
-    }
-  };
-
-  // The puck's readout rides the recorder's own tick — clock, captions, and
-  // whether the arrow is still inside the captured frame.
+  // "Take the pointer with you" only makes sense when a whole monitor is being
+  // captured; the panel's own screen aspect is the best available guess. The puck
+  // itself is opened from the page dock — `requestWindow` is dead in side panels
+  // (Chrome limitation: extension pages in real tabs only), so the panel's role
+  // is just this hint plus answering the puck's heartbeats in the listener above.
   useEffect(() => {
     if (!recUpdate) return;
-    const r = recorderRef.current;
-    puckRef.current?.update({
-      elapsedMs: recUpdate.elapsedMs,
-      interim: recUpdate.interim,
-      micState: recUpdate.micState,
-      onFrame: r?.puckOnFrame() ?? false,
-    });
-    // "Take the pointer with you" only makes sense when a whole monitor is being
-    // captured; the panel's own screen aspect is the best available guess.
-    const shape = r?.frameShape();
+    const shape = recorderRef.current?.frameShape();
     const screenAspect = window.screen.width / window.screen.height;
     setScreenish(
       Boolean(shape && Math.abs(shape.w / shape.h - screenAspect) / screenAspect < 0.02),
@@ -495,6 +472,10 @@ export function App() {
     if (!(await ensureMic())) return;
     setShipped(null);
     setUploadError(null);
+    // A take lands in the open walkthrough, so pressing Record from the home
+    // screen is also a request to go back into it.
+    setBrowsing(false);
+    setConfirmDiscard(false);
     // The tab in front now is the app being walked through; everything else that
     // logs an error for the next five minutes is somebody else's noise.
     const tab = (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
@@ -710,11 +691,31 @@ export function App() {
     }
   };
 
+  /** Open one from the home screen — which is also the way back into the one you left. */
   const switchSession = async (id: string) => {
     await send({ type: 'session:activate', id });
-    setShowSessions(false);
+    setBrowsing(false);
+    setConfirmDiscard(false);
     setShipped(null);
     await refresh();
+  };
+
+  /**
+   * Throw this walkthrough away: the session, its takes, and their blobs. The only
+   * destructive button in the panel, so it arms first and says how much it is about
+   * to lose. Anything already uploaded stays in the workspace — this is local.
+   */
+  const discardSession = async () => {
+    if (!session || recording || uploading) return;
+    await send({ type: 'session:delete', id: session.id });
+    setConfirmDiscard(false);
+    setBrowsing(false);
+    setShipped(null);
+    const next = await refresh();
+    // The worker falls back to the newest walkthrough still open, which would drop
+    // the human straight into somebody else's work. Land on the home screen instead.
+    if (next.activeSessionId) setBrowsing(true);
+    say('discarded');
   };
 
   const renameSession = async (value: string) => {
@@ -745,8 +746,12 @@ export function App() {
   const hasContent = takes.length > 0;
   const recording = Boolean(recUpdate);
   const uploading = Boolean(progress);
-  /** Other gripes than this one — the only reason the history button exists. */
-  const others = state.sessions.filter((s) => s.id !== state.activeSessionId).length;
+  /**
+   * The editor is on screen when there is a walkthrough open and the human hasn't
+   * stepped back out of it. Recording overrides both — the live readout is the
+   * only thing worth showing while the screen is being captured.
+   */
+  const editing = Boolean(session) && !browsing;
 
   const serverHost = hostOf(serverUrl);
   const recorderUrl = `${serverUrl.replace(/\/+$/, '')}/recorder`;
@@ -766,7 +771,7 @@ export function App() {
 
   const uploadLine = progress
     ? progress.phase === 'declare'
-      ? 'opening the gripe in your workspace…'
+      ? 'opening the walkthrough in your workspace…'
       : progress.phase === 'finalize'
         ? 'finishing up…'
         : `uploading ${progress.done}/${progress.total} · ${mb(progress.bytesDone)} of ${mb(progress.bytesTotal)}`
@@ -824,7 +829,7 @@ export function App() {
     <div className="shipped">
       <div className="shipped-head">handed over</div>
       <a className="shipped-link" href={shipped.url} target="_blank" rel="noreferrer">
-        {shipped.title || 'the gripe'} →
+        {shipped.title || 'the walkthrough'} →
       </a>
       {shipped.copied ? (
         <div className="note">the brief is on your clipboard — paste it into Claude Code</div>
@@ -850,7 +855,7 @@ export function App() {
           <input
             className="title slim"
             value={name}
-            placeholder="Untitled gripe"
+            placeholder="Untitled walkthrough"
             onChange={(e) => setName(e.target.value)}
             onBlur={(e) => void renameSession(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
@@ -880,7 +885,7 @@ export function App() {
         {session ? (
           <Timeline session={session} recordings={state.recordings} />
         ) : (
-          <div className="empty">{shipped ? shippedCard : 'no open gripe — hit record'}</div>
+          <div className="empty">{shipped ? shippedCard : 'no open walkthrough — hit record'}</div>
         )}
         {flash && <div className="flash">{flash}</div>}
       </div>
@@ -960,88 +965,84 @@ export function App() {
             </div>
           )}
           {pageDock && <div className="note">draw and stop from the little bar on the page</div>}
-          {puckSupported() &&
-            (puckOut ? (
-              <div className="note">the pointer is out — drag it, click the arrow to pin</div>
-            ) : (
-              <button
-                className={`puck-open${screenish ? ' pulse' : ''}`}
-                title="A draggable arrow that floats over any app and shows up in the recording"
-                onClick={() => void openPuckWindow()}
-              >
-                ⌖ take the pointer with you — point at anything, even outside Chrome
-              </button>
-            ))}
+          {pageDock && screenish && (
+            <div className="note puck-note">
+              ⌖ recording the whole screen — hit <b>point</b> on the page bar to take a draggable
+              pointer into any app
+            </div>
+          )}
           <button className="stop-big" onClick={() => void stopRecording()} disabled={stopping}>
             {stopping ? 'saving…' : 'stop recording'}
           </button>
         </section>
-      ) : session ? null : (
-        <>
-          {!linked && (
-            <div className="linkbar">
-              <span>Not linked to a workspace yet — recordings stay on this machine.</span>
-              <button className="link" onClick={openRecorderUrl}>
-                link it →
-              </button>
-            </div>
-          )}
-          <section className="hero">
-            {shippedCard}
-            <button className="rec-hero" onClick={() => void startRecording()}>
-              <span className="dot" />
-              Record a walkthrough
-            </button>
-            <p className="hero-sub">
-              Screen + voice. Talk through what's wrong — it becomes a brief your team's agent can
-              act on.
-            </p>
-            <p className="hero-keys">alt+shift+M mark a moment · alt+shift+D draw</p>
-            {others > 0 && (
-              <button className="link" onClick={() => setShowSessions((v) => !v)}>
-                {showSessions ? 'hide earlier gripes' : `earlier gripes · ${others}`}
-              </button>
-            )}
-          </section>
-        </>
+      ) : editing ? null : (
+        <Home
+          openSessionId={browsing ? state.activeSessionId : null}
+          sessions={state.sessions}
+          settings={state.settings}
+          link={link}
+          ctx={ctx}
+          ctxFailed={ctxFailed}
+          shipped={shippedCard}
+          onRecord={() => void startRecording()}
+          onOpenSession={(id) => void switchSession(id)}
+          onDeleteSession={(id) =>
+            void (async () => {
+              await send({ type: 'session:delete', id });
+              await refresh();
+            })()
+          }
+          onPickLink={(id) => void patchSettings({ activeLinkId: id })}
+          onOpenRecorder={openRecorderUrl}
+          onOpenSettings={() => setShowSettings(true)}
+        />
       )}
 
-      {showSessions && (
-        <div className="sessions">
-          {state.sessions.map((s) => (
-            <div
-              key={s.id}
-              className={`srow ${s.id === state.activeSessionId ? 'on' : ''}`}
-              onClick={() => void switchSession(s.id)}
-            >
-              <div className="sname">
-                {s.name}
-                {s.closed && <span className="stag">{s.uploadedUrl ? 'handed over' : 'closed'}</span>}
-              </div>
-              <div className="smeta">{dateTime(s.createdAt)}</div>
-              <button
-                className="kill"
-                title="Forget this gripe here (anything already uploaded stays in the workspace)"
-                onClick={async (e) => {
-                  e.stopPropagation();
-                  await send({ type: 'session:delete', id: s.id });
-                  await refresh();
-                }}
-              >
-                ×
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {session && (
+      {editing && session && (
         <>
           <section className="gripe">
+            {/* The way out, and the way to throw it away — at the top, where you
+                look for them, and never mixed in with Send. Leaving is free; the
+                destructive one arms first and says what it costs. */}
+            <div className="crumb">
+              <button
+                className="back"
+                title="Back to your walkthroughs — this one stays open"
+                onClick={() => {
+                  setBrowsing(true);
+                  setConfirmDiscard(false);
+                }}
+              >
+                ← all walkthroughs
+              </button>
+              <span className="spacer" />
+              {confirmDiscard ? (
+                <span className="confirm">
+                  <span>
+                    discard{hasContent ? ` ${plural(takes.length, 'take')}` : ' this'}?
+                  </span>
+                  <button className="link danger" onClick={() => void discardSession()}>
+                    yes, discard
+                  </button>
+                  <button className="link" onClick={() => setConfirmDiscard(false)}>
+                    keep
+                  </button>
+                </span>
+              ) : (
+                <button
+                  className="link"
+                  disabled={recording || uploading}
+                  title="Delete this walkthrough and its takes from this machine"
+                  onClick={() => setConfirmDiscard(true)}
+                >
+                  discard
+                </button>
+              )}
+            </div>
             <input
               className="title"
               value={name}
-              placeholder="Untitled gripe"
+              placeholder="Untitled walkthrough"
               onChange={(e) => setName(e.target.value)}
               onBlur={(e) => void renameSession(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
@@ -1057,11 +1058,6 @@ export function App() {
                   <span className="dot" />
                   add more
                 </button>
-                {others > 0 && (
-                  <button className="link" onClick={() => setShowSessions((v) => !v)}>
-                    {showSessions ? 'hide earlier gripes' : `earlier gripes · ${others}`}
-                  </button>
-                )}
               </div>
             )}
           </section>
@@ -1069,7 +1065,7 @@ export function App() {
         </>
       )}
 
-      {session && (hasContent || !linked || hasStatus) && (
+      {editing && (hasContent || !linked || hasStatus) && (
         <footer className="foot">
           {statusRow}
           {linked && hasContent && (
@@ -1141,7 +1137,7 @@ export function App() {
               <button
                 className="primary send"
                 disabled={recording || uploading}
-                title="Upload this gripe to your workspace, copy the brief, and close it"
+                title="Upload this walkthrough to your workspace, copy the brief, and close it"
                 onClick={() => void finish()}
               >
                 {uploading ? 'sending…' : 'send to Handback'}
@@ -1294,7 +1290,7 @@ function SettingsBlock({
         </>
       )}
       <label className="field">
-        <span>Where your team's gripes go</span>
+        <span>Where your team's walkthroughs go</span>
         <input
           value={server}
           spellCheck={false}

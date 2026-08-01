@@ -8,6 +8,7 @@ import type {
 import type {
   RecordingMeta,
   Session,
+  SessionSummary,
   Settings,
   TimelineMove,
   TimelineRef,
@@ -270,6 +271,10 @@ chrome.commands.onCommand.addListener((command) => {
 });
 
 chrome.runtime.onMessage.addListener((message: Request, _sender, sendResponse) => {
+  // The puck's heartbeat and pin want the PANEL's answer (it owns the recorder).
+  // Unlike the fire-and-forget relays below, answering `ok` here would race the
+  // panel's real response for the one reply channel — so the worker stays out.
+  if (message.type === 'recording:puck' || message.type === 'recording:pin') return false;
   (async () => {
     switch (message.type) {
       case 'settings:get':
@@ -342,6 +347,20 @@ chrome.runtime.onMessage.addListener((message: Request, _sender, sendResponse) =
           recordings: current ? await listRecordings(current.id) : [],
           settings: await getSettings(),
         };
+      }
+      case 'sessions:summary': {
+        const sessions = await listSessions();
+        const summaries: Record<string, SessionSummary> = {};
+        for (const session of sessions) {
+          const takes = (await listRecordings(session.id)).filter((r) => r.state === 'done');
+          summaries[session.id] = {
+            takes: takes.length,
+            durationMs: takes.reduce((n, r) => n + r.meta.durationMs, 0),
+            frames: takes.reduce((n, r) => n + r.meta.frames.length, 0),
+            lines: takes.reduce((n, r) => n + r.meta.transcript.length, 0),
+          };
+        }
+        return summaries;
       }
       case 'recording:start': {
         const now = Date.now();

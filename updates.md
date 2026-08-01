@@ -2,6 +2,80 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-08-01 — the puck earns its pixels ("this looks like shit haha")
+Asked: first live run worked but the body was tall, empty, and mute about its purpose.
+Done: inner window 320×118 (was 300×170; Chrome's PiP title bar sits on top regardless). Body is
+now one card: cobalt-wash **rail** under a bigger drop-shadowed arrow (tip still the content's
+(0,0)), one status row (pulse · mono clock · **pin-count chip** · mic · compact mark/stop pills),
+and a ruled caption well that, when idle, **rotates the sales pitch** ("park the tip on it —
+parking marks the moment" / "click the arrow to drop a numbered pin" / "this card is in the
+recording. that's the point"). `app-region: drag` on the body so the whole card drags, buttons
+no-drag (best-effort — falls back to the title bar). Parking now flashes "parked — moment kept";
+pins flash "pin N dropped" and feed the chip. All still CSSOM-only styling (page CSP).
+Verified: extension typecheck green, builds (content.js 21.6 kB). Live look still Sal's call.
+
+## 2026-08-01 — the puck escapes the side panel (re-plumb of the entry below)
+Asked: puck button just said "couldn't open the pointer" (then `undefined`, then hangs).
+Found: **`documentPictureInPicture.requestWindow()` only works from extension pages in real
+tabs** — side panel / popup / offscreen all hang or reject `undefined`, even though the API
+object exists there (chromium-extensions list confirms; the "verified in side panel" check
+only proved the property, not the call). Rebuilt the opener where the gesture is real: the
+**page dock** gained `point` (`p`); `content/puck.ts` (new) builds the PiP doc CSP-proof —
+no innerHTML (Trusted Types), no `<style>` (style-src), everything createElement + `.style`
+writes, dot-pulse via interval not keyframes. Two new messages: `recording:puck` (~150ms
+heartbeat: geometry up, `PuckBeat` clock/captions/onFrame/active down; 3 unanswered beats =
+close) and `recording:pin` — panel answers both, worker explicitly returns false so it can't
+race the reply channel. Recorder: puck slot got 1.2s staleness (messaging can die silently),
+`liveStats()`, `MicState`/`PuckTelemetry`/`PuckBeat` moved to lib/types. Panel: puck button
+gone, replaced by a cobalt note pointing at the dock when the capture is screen-shaped.
+`sidepanel/puck.ts` deleted. Trade-off recorded in decisions.md: puck dies if its host tab
+navigates; dock button reopens it.
+Touched: extension/src/content/{puck.ts (new),index.ts,ui.ts}, extension/src/lib/{types,messages}.ts,
+extension/src/{background/index.ts,sidepanel/{App.tsx,recorder.ts,panel.css}}, decisions.md,
+plans/2026-08-01-draw-anywhere.md
+Verified: extension builds (content.js 14→20 kB); typecheck clean except two unused-var
+errors in the other session's in-flight Home refactor (App.tsx `dateTime`, Home.tsx
+`openSessionId`) — not touched. Still needs the live run: record entire screen → `p` on the
+dock → Excel → park/pin.
+
+## 2026-08-01 — a way out of an open walkthrough (back + discard)
+Asked: "i need a way when im in a workflow to like discard it and go back and stuff. its super hard
+to navigate. its cool that you save it but like come on."
+Done: the open walkthrough gained a crumb row above its title — **← all walkthroughs** on the left,
+**discard** on the right, neither of them anywhere near Send. Back is pure view state
+(`browsing` in App.tsx): the session stays active in the worker, so the next take still lands in
+it, reopening the panel lands back in the work, and its row on the home screen sorts first with a
+cobalt rule and an `open · resume` tag. Discard arms first (`discard 2 takes? yes, discard / keep`,
+one line so nothing shifts), deletes the session + takes + blobs, and lands on the home screen
+rather than dropping you into whatever walkthrough the worker falls back to; disabled while
+recording or uploading. Record from the home screen clears `browsing` — a take belongs to the open
+walkthrough. Removed the old foldable "earlier walkthroughs · N" list and its `.sessions`/`.srow`
+CSS: two competing lists of walkthroughs was the navigation problem. Typecheck green; round trip
+verified in the preview harness (editor → back → home → resume → editor).
+
+## 2026-08-01 — the recorder's empty screen becomes the workspace
+Asked: "the look and feel of this empty screen is pretty terrible. make this 10x better. show the
+previous walkthroughs and stuff, teams, projects, everything."
+Done: new `extension/src/sidepanel/Home.tsx` — the panel with nothing open is now the workspace
+seen from the recorder. Record stays the loudest thing on it; below it, in hairline-divided
+sections: the **destination row** (active workspace + host + project count, click = switcher over
+every linked workspace + "link another"), the **workspace's queue** pulled live from
+`GET /api/ingest/walkthroughs` (`extension/src/lib/walkthroughs.ts` — status dot in the three fixed
+inks, duration/takes/project/`ago`, console-error count, click opens the viewer; status *and*
+project chips filter it, counts included; six rows then "show all N"), **on this machine** (every
+local session with takes/duration/origin, drafts sorted first, draft/closed/handed-over tags, ↗ to
+the uploaded copy, × to forget), and a footer line to `/connect`. Supporting: `sessions:summary`
+message + background handler (its own message, not a `state:get` field — that lands on every
+broadcast and this walks all takes' metadata), `ago`/`dateOnly`/`hostOf` in `lib/format.ts`,
+~330 lines of panel.css. Every failure degrades to a line of text — an unreachable workspace still
+leaves a recorder you can record with; unlinked shows a link callout and the local list. Visible
+"gripe" strings in the panel → "walkthrough". Preview harness gained `?mode=home` (+`&unlinked=1`,
+both in the gallery bar), a stubbed `fetch` for `/api/ingest/context` and `/api/ingest/walkthroughs`
+in the server's real shapes, and a `sessions:summary` handler; verified at 360/420/460px.
+Recorder bumped 1.4.0 → **1.5.0** — needs `bun run publish:extension` to reach installs.
+Note: `tsc` reports one unused `puckLive` in `recorder.ts` from another session's in-flight puck
+heartbeat refactor, untouched here.
+
 ## 2026-08-01 — the website walkthrough lands: rename, personal workspaces, honest landing (walkthrough 212801d8)
 Asked: 10:40 recorded pass over handback.dev — rename "gripe", kill the org-naming screen, rethink
 workspace/team, de-bug the narrative, fix the hero, pricing quotas, drop origins, FOUC.
@@ -21,17 +95,24 @@ verified live. ⚠️ Prod: run the four `ALTER TABLE` renames on the prod DB, t
 back-to-back (walkthrough reads 500 in the gap); `.env` was flipped back from the prod DB to
 local Postgres deliberately.
 
-## 2026-08-01 — the puck: pointing outside Chrome, designed (gripe 3f491ef7, 2:21)
+## 2026-08-01 — the puck: pointing outside Chrome, designed AND built (gripe 3f491ef7, 2:21)
 Asked: revisit draw-anywhere ("really important") for the Excel-outside-Chrome case; make it great.
-Done: full design in `plans/2026-08-01-draw-anywhere.md`, superseding the old three-path analysis.
+Done: design in `plans/2026-08-01-draw-anywhere.md` (supersedes the three-path analysis; decision
+recorded), then built same day after Sal confirmed `documentPictureInPicture` IS in the side panel.
 Core move: a Document PiP window is always-on-top and captured by getDisplayMedia for free — so a
-cobalt **arrow-tip puck** (tip at the window's top-left pixel, body = out-of-Chrome dock with
-clock/captions/mark/stop) becomes the pointer over any app. Tip coords feed the existing
-`PointerSample`→`mapPointer`→crosshair pipe (second pointer slot, page-fresh wins); drag-end
-forces a mark like stroke-end does; **pins** (click the arrow) paint numbered dots onto keyframes
-to recover "these three cells"; dedup signatures mask the puck rect so its clock doesn't burn the
-frame budget. No new messages, no worker/server changes. Not built yet — one 30s check pending
-(is `documentPictureInPicture` exposed in the side panel), plus Sal's go.
+cobalt **arrow-tip puck** (tip at the window's top-left inner pixel, body = out-of-Chrome dock with
+clock/live captions/mark/stop) is the pointer over any app. Tip coords feed the existing
+`PointerSample`→`mapPointer`→crosshair pipe (second slot, fresh page sample wins, parked puck never
+stale); parking forces a mark like stroke-end; **pins** (arrow-click or `p`) paint numbered
+hold-then-fade dots onto keyframes ("these three cells"); dedup sigs carry the puck rect and
+`cellDiff` masks the union so its ticking clock can't burn the frame budget; off-recorded-monitor
+⇒ puck greys out with "off the recording". Zero new messages/worker/server changes; captions
+always-on per Sal.
+Touched: extension/src/sidepanel/{puck.ts (new),recorder.ts,App.tsx,panel.css},
+extension/{package.json,public/manifest.json} (1.3.1→1.4.0), plans/2026-08-01-draw-anywhere.md,
+decisions.md, cliffnotes.md
+Verified: both typechecks green, extension builds. NOT yet driven in a live take — needs a manual
+run (record entire screen → open puck → Excel → park/pin) before `bun run publish:extension`.
 
 ## 2026-08-01 — the panel stops fighting back (gripe 3f491ef7)
 Asked: gripe "Walkthrough" — a 2:39 narrated pass over the recorder panel, eight complaints. Built:

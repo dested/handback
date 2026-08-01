@@ -155,14 +155,20 @@ drydock.yaml            DRYDOCK-OWNED — the deploy manifest (portal is source 
 extension/              Handback Recorder — the Chrome MV3 extension (own npm workspace)
   public/manifest.json  MV3: sidePanel + activeTab/scripting/storage/tabs; hotkeys Alt+Shift+M/D
   src/lib/              Shared contracts: types, messages (worker protocol), timeline math,
-                        db (IndexedDB 'handback-recorder'), report.md builder, upload (to /api/ingest)
+                        db (IndexedDB 'handback-recorder'), report.md builder, upload (to /api/ingest),
+                        context (GET /api/ingest/context), walkthroughs (GET /api/ingest/walkthroughs
+                        — the workspace's queue, read back into the panel's home screen)
   src/background/       Service worker: hotkeys, dock routing, IndexedDB writes, strip docking
-  src/content/          On-page dock (d/c/m/s keys), ink drawing, telemetry; injected.js relay
-  src/sidepanel/        Panel app: recorder (getDisplayMedia + dedup), transcription
+  src/content/          On-page dock (d/c/p/m/s keys), ink drawing, telemetry; injected.js relay;
+                        puck.ts — the PiP pointer-over-any-app (opens HERE, not the panel:
+                        requestWindow only works in real tabs; CSP-proof DOM, no innerHTML/<style>)
+  src/sidepanel/        Panel app: Home.tsx (the nothing-open screen = the workspace: destination
+                        row + switcher, the workspace's queue with status/project filters, sessions
+                        still on this machine), recorder (getDisplayMedia + dedup), transcription
                         (transcribeCloud.ts → the workspace; transcribeWorker.ts → on-device),
                         polish.ts (the cleanup pass, after transcription), Timeline editor,
-                        grids contact sheets, App.tsx orchestration, puck.ts (the PiP
-                        pointer-over-any-app: arrow-tip window, pins, out-of-Chrome dock)
+                        grids contact sheets, App.tsx orchestration (incl. answering the
+                        puck's recording:puck/pin messages — see src/content/puck.ts)
   scripts/              make-icons, copy-ort, prune-dist, preview.mjs + preview/ (layout harness)
 ```
 
@@ -334,6 +340,22 @@ reaches the container on a plain push.
   as an interaction counter to every agent that saw it; **ingest still accepts a bare `eventCount`**
   from Recorder ≤1.1.0 and stores it as `errorCount`, so don't delete that fallback until the
   Web Store build is past 1.1.0 everywhere.
+- **Leaving a walkthrough is not ending one.** The panel has exactly two states now — the home
+  screen and the open walkthrough — and `browsing` (App.tsx) is which one you're looking at. It is
+  view state only: the session stays active in the worker, so a take started from the home screen
+  still lands in it and reopening the panel lands back in the work. **Discard** is the only
+  destructive control in the panel: it arms, names how many takes it will take with it, deletes
+  session + takes + blobs, and then forces `browsing` back on, because the worker's `resumeOpen`
+  fallback would otherwise drop the human into an unrelated walkthrough. Don't add a second list
+  of walkthroughs anywhere — the foldable "earlier walkthroughs" one was removed for exactly that
+  reason, and `Home.tsx`'s `.lrow` list is the one.
+- **The panel's home screen is a read of the workspace, and nothing on it is load-bearing.**
+  `Home.tsx` pulls `GET /api/ingest/walkthroughs` (and leans on the context fetch App already runs)
+  to show the queue, the projects and the workspace switcher. Every failure degrades to one line
+  of text with a retry — an unreachable or unlinked workspace must still leave a recorder you can
+  record with, and the local session list is drawn either way. Session takes/durations come from
+  the **`sessions:summary`** message, deliberately *not* a `state:get` field: `state:get` answers
+  every broadcast and this walks every take's frame metadata.
 - **The keyframe cap is length-scaled, and it lives in two places.** `frameBudget(durationMs)`
   (`extension/src/sidepanel/recorder.ts`) is 40 frames/min clamped to **[150, 600]** per *take* —
   applied once in `finish()`, after dedup, as a uniform thin; `reason === 'mark'` frames are never

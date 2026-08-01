@@ -17,10 +17,16 @@
        * deleting therefore survive a refresh instead of snapping back, which is the
        * only way the timeline can be judged here.
        *
-       * ?mode=rec | long | empty   ?pop=1 (the popped editor strip)
+       * The workspace is stubbed too: `fetch` answers /api/ingest/context and
+       * /api/ingest/walkthroughs, because the home screen is mostly a read of
+       * somebody else's server and there is nothing to judge without one.
+       *
+       * ?mode=rec | long | empty | home   ?pop=1 (the popped editor strip)
+       * ?unlinked=1 (no workspace key at all — the other half of every state)
        */
       const Q = new URLSearchParams(location.search);
-      const MODE = ['rec', 'long', 'empty'].includes(Q.get('mode')) ? Q.get('mode') : 'rec';
+      const MODE = ['rec', 'long', 'empty', 'home'].includes(Q.get('mode')) ? Q.get('mode') : 'rec';
+      const UNLINKED = Q.has('unlinked');
       const NOW = Date.now();
       const SID = 'preview-session';
 
@@ -29,20 +35,89 @@
       // calls activeLink(settings), which reaches straight into `links` — a stub
       // still carrying the flat 1.1.x serverUrl/apiToken fields throws on render
       // and the harness comes up blank.
+      const LINKS = [
+        {
+          id: 'https://handback.dev::org_preview',
+          serverUrl: 'https://handback.dev',
+          orgId: 'org_preview',
+          orgName: 'Northwind',
+          apiToken: 'hb_preview_000000000000',
+          addedAt: NOW - 86400000 * 30,
+        },
+        // A second workspace, so the switcher on the home screen has something to
+        // switch between — a recorder holds one key per workspace, not one token.
+        {
+          id: 'http://localhost:3995::org_local',
+          serverUrl: 'http://localhost:3995',
+          orgId: 'org_local',
+          orgName: "Sal's workspace",
+          apiToken: 'hb_preview_111111111111',
+          addedAt: NOW - 86400000 * 3,
+        },
+      ];
+
       const SETTINGS = {
         drawStart: true,
         lang: '',
         onDeviceTranscription: false,
-        links: [
-          {
-            id: 'https://handback.dev::org_preview',
-            serverUrl: 'https://handback.dev',
-            orgId: 'org_preview',
-            orgName: 'Preview Workspace',
-            apiToken: 'hb_preview_000000000000',
-          },
+        links: UNLINKED ? [] : LINKS,
+        activeLinkId: UNLINKED ? '' : LINKS[0].id,
+      };
+
+      // ── the workspace, as its server would answer ─────────────────────────
+      // GET /api/ingest/context and GET /api/ingest/walkthroughs, in the shapes
+      // server/walkthroughs-api.ts really sends. The home screen is a read of
+      // these two calls, so a drift here is a preview that judges nothing.
+
+      const CONTEXT = {
+        org: { id: 'org_preview', name: 'Northwind', slug: 'northwind' },
+        projects: [
+          { id: 'p_web', name: 'Web app', slug: 'web-app', originHints: ['http://localhost:3995'] },
+          { id: 'p_mkt', name: 'Marketing site', slug: 'marketing-site', originHints: [] },
+          { id: 'p_api', name: 'API', slug: 'api', originHints: [] },
         ],
-        activeLinkId: 'https://handback.dev::org_preview',
+      };
+
+      const QUEUE = [
+        ['Checkout totals are wrong', 'open', 139000, 40, 3, 1, 'Web app', 2400000],
+        ['Promo code eats the first character', 'open', 64000, 18, 1, 1, 'Web app', 19800000],
+        ['Nav collapses on iPad', 'in_review', 218000, 53, 0, 2, 'Marketing site', 93600000],
+        ['Signup email never arrives', 'open', 91000, 26, 4, 1, null, 190800000],
+        ['Rate limit returns 500 instead of 429', 'in_review', 172000, 44, 7, 1, 'API', 356400000],
+        ['Avatar upload silently drops HEIC', 'resolved', 118000, 31, 0, 1, 'Web app', 620000000],
+        ['Search ranks archived docs first', 'resolved', 205000, 49, 0, 2, 'API', 900000000],
+        ['Pricing page CTA is below the fold on 13"', 'resolved', 47000, 12, 0, 1, 'Marketing site', 1300000000],
+        ['Session expires mid-checkout', 'open', 260000, 61, 12, 3, 'Web app', 1700000000],
+      ].map(([title, status, durationMs, frameCount, errorCount, takeCount, projectName, agoMs], i) => ({
+        id: `wt_preview_${i + 1}`,
+        slug: `2026-07-${String(28 - i).padStart(2, '0')}-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40)}`,
+        workspace: 'Northwind',
+        title,
+        origin: 'http://localhost:3995',
+        status,
+        recordedAt: new Date(NOW - agoMs).toISOString(),
+        durationMs,
+        frameCount,
+        errorCount,
+        droppedCount: 0,
+        takeCount,
+        projectName,
+      }));
+
+      const asJson = (body) =>
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+
+      const realFetch = window.fetch.bind(window);
+      window.fetch = async (input, init) => {
+        const url = String(typeof input === 'string' ? input : input.url ?? input);
+        // Order matters: /walkthroughs/:id is a longer path off the same prefix,
+        // and the panel only ever asks for the list.
+        if (url.includes('/api/ingest/context')) return asJson(CONTEXT);
+        if (url.includes('/api/ingest/walkthroughs')) return asJson(QUEUE);
+        return realFetch(input, init);
       };
 
       // ── synthesis ─────────────────────────────────────────────────────────
@@ -160,11 +235,11 @@
           return { level, message, ...(detail ? { detail } : {}), ts: startedAt + offset };
         });
 
-      function take({ id, index, ago, durMs, frames, lines, seed, marks, gaps, events, reviewed, interrupted }) {
+      function take({ id, sid, index, ago, durMs, frames, lines, seed, marks, gaps, events, reviewed, interrupted }) {
         const startedAt = NOW - ago;
         const rec = {
           id,
-          sessionId: SID,
+          sessionId: sid ?? SID,
           index,
           createdAt: startedAt,
           state: 'done',
@@ -261,34 +336,86 @@
         put('preview-long-2', 'frame', 10, 121000);
       }
 
-      const RECORDINGS = MODE === 'long' ? LONG : MODE === 'empty' ? [] : REC;
+      /**
+       * home: nothing open, and the panel is the workspace instead — the queue,
+       * the projects, the workspace switcher, and three sessions still sitting in
+       * this browser (one unfinished, one handed over, one closed on the spot).
+       * The takes belong to those sessions so the local list can say what each
+       * one holds.
+       */
+      const HOME_SESSIONS = [
+        {
+          id: 'preview-draft',
+          name: 'Filters reset when you page back',
+          slug: '2026-08-01-0912-filters-reset-when-you-page-back',
+          createdAt: NOW - 5400000,
+          updatedAt: NOW - 4800000,
+          origin: 'http://localhost:3995',
+          recCount: 2,
+        },
+        {
+          id: 'preview-shipped',
+          name: 'Checkout totals are wrong',
+          slug: '2026-07-29-2305-checkout-totals-are-wrong',
+          createdAt: NOW - 2400000,
+          updatedAt: NOW - 2400000,
+          origin: 'http://localhost:3995',
+          recCount: 1,
+          closed: true,
+          uploadedUrl: 'https://handback.dev/walkthroughs/wt_preview_1',
+        },
+        {
+          id: 'preview-abandoned',
+          name: 'Untitled walkthrough',
+          slug: '2026-07-24-1102-untitled-walkthrough',
+          createdAt: NOW - 86400000 * 8,
+          updatedAt: NOW - 86400000 * 8,
+          origin: 'https://northwind.example',
+          recCount: 0,
+          closed: true,
+        },
+      ];
+
+      const HOME = [
+        take({ id: 'preview-home-1', sid: 'preview-draft', index: 1, ago: 5400000, durMs: 96000, frames: 24, lines: 17, seed: 5, marks: [3, 11] }),
+        take({ id: 'preview-home-2', sid: 'preview-draft', index: 2, ago: 4800000, durMs: 61000, frames: 16, lines: 11, seed: 9, marks: [4] }),
+        take({ id: 'preview-home-3', sid: 'preview-shipped', index: 1, ago: 2400000, durMs: 139000, frames: 40, lines: 25, seed: 11, marks: [6, 19] }),
+      ];
+
+      const RECORDINGS =
+        MODE === 'long' ? LONG : MODE === 'empty' ? [] : MODE === 'home' ? HOME : REC;
       if (MODE === 'long') moveSome(RECORDINGS);
 
       const SESSIONS =
         MODE === 'empty'
           ? []
-          : [
-              {
-                id: SID,
-                name: 'Checkout totals are wrong',
-                slug: '2026-07-29-2305-checkout-totals-are-wrong',
-                createdAt: NOW - 1800000,
-                updatedAt: NOW,
-                origin: 'http://localhost:3995',
-                recCount: RECORDINGS.length,
-              },
-              {
-                id: 'preview-closed',
-                name: 'Nav collapses on iPad',
-                slug: '2026-07-25-1102-nav-collapses-on-ipad',
-                createdAt: NOW - 86400000,
-                updatedAt: NOW - 86000000,
-                origin: 'http://localhost:3995',
-                recCount: 1,
-                closed: true,
-                uploadedUrl: 'https://handback.dev/g/nav-collapses-on-ipad',
-              },
-            ];
+          : MODE === 'home'
+            ? HOME_SESSIONS
+            : [
+                {
+                  id: SID,
+                  name: 'Checkout totals are wrong',
+                  slug: '2026-07-29-2305-checkout-totals-are-wrong',
+                  createdAt: NOW - 1800000,
+                  updatedAt: NOW,
+                  origin: 'http://localhost:3995',
+                  recCount: RECORDINGS.length,
+                },
+                {
+                  id: 'preview-closed',
+                  name: 'Nav collapses on iPad',
+                  slug: '2026-07-25-1102-nav-collapses-on-ipad',
+                  createdAt: NOW - 86400000,
+                  updatedAt: NOW - 86000000,
+                  origin: 'http://localhost:3995',
+                  recCount: 1,
+                  closed: true,
+                  uploadedUrl: 'https://handback.dev/walkthroughs/wt_preview_1',
+                },
+              ];
+
+      /** home has no open walkthrough — that is the whole point of the mode. */
+      const ACTIVE = MODE === 'home' || !SESSIONS.length ? null : SID;
 
       // ── the shapes have to be right ───────────────────────────────────────
       // A seed that drifts from src/lib/types.ts turns every judgment made here
@@ -443,6 +570,21 @@
         switch (m.type) {
           case 'state:get':
             return stateGet();
+          case 'sessions:summary': {
+            // Same arithmetic as src/background: finished takes only, and every
+            // figure added across the whole session.
+            const out = {};
+            for (const s of await idbAll('sessions')) {
+              const takes = (await idbBySession(s.id)).filter((r) => r.state === 'done');
+              out[s.id] = {
+                takes: takes.length,
+                durationMs: takes.reduce((n, r) => n + r.meta.durationMs, 0),
+                frames: takes.reduce((n, r) => n + r.meta.frames.length, 0),
+                lines: takes.reduce((n, r) => n + r.meta.transcript.length, 0),
+              };
+            }
+            return out;
+          }
           case 'settings:get':
             return settingsGet();
           case 'settings:set':
@@ -692,7 +834,7 @@
         // database goes first.
         for (const name of ['sessions', 'recordings', 'blobs', 'kv']) await idbClear(name);
         await idbPut('kv', SETTINGS, 'settings');
-        await idbPut('kv', SESSIONS.length ? SID : null, 'activeSessionId');
+        await idbPut('kv', ACTIVE, 'activeSessionId');
         for (const s of SESSIONS) await idbPut('sessions', s);
         let written = 0;
         for (const rec of RECORDINGS) {

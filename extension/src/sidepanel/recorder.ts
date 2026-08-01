@@ -1,7 +1,9 @@
 import type {
   FramePointer,
+  MicState,
   PageEvent,
   PointerSample,
+  PuckTelemetry,
   RecordingFrame,
   RecordingMeta,
   TranscriptSegment,
@@ -65,6 +67,10 @@ const POINTER_STALE_MS = 2500; // a pointer older than this says nothing about t
 // the frames afterward isn't drawing blind, it's developing the photo.
 const PIN_HOLD_MS = 8000;
 const PIN_FADE_MS = 4000;
+// The puck reports over messaging that can die without a goodbye (its host tab
+// navigates, the PiP window closes). Its poll runs at ~150ms, so a beat this old
+// means the puck is gone, not parked — parked pucks keep reporting.
+const PUCK_STALE_MS = 1200;
 const MAP_TOLERANCE = 0.02; // aspect-ratio match required before we believe a coordinate mapping
 const PROGRESS_MS = 1500; // floor between meta pushes — the worker writes IndexedDB on every one
 
@@ -77,28 +83,8 @@ export function frameBudget(durationMs: number): number {
 
 const MIME_TYPES = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
 
-export type MicState = 'listening' | 'off' | 'denied' | 'error';
-
-/**
- * What the puck — the draggable PiP pointer that follows a walkthrough outside
- * Chrome — reports about itself. Tip and window bounds are DIPs, relative to the
- * display the puck is on (its own `screen`), which is the same coordinate space
- * the in-page samples use for `screenX/Y`.
- */
-export interface PuckTelemetry {
-  /** The arrow tip — the one pixel that means anything. */
-  sx: number;
-  sy: number;
-  /** The puck's display, for the aspect-ratio mapping. */
-  sw: number;
-  sh: number;
-  /** The whole window's outer bounds — its clock and captions repaint every second,
-   *  so this rect is masked out of dedup or the puck itself burns the frame budget. */
-  wx: number;
-  wy: number;
-  ww: number;
-  wh: number;
-}
+/** MicState and PuckTelemetry moved to lib/types — the content script speaks them too. */
+export type { MicState, PuckTelemetry };
 
 /** A pinned spot: where the tip was when the human clicked the arrow. */
 interface Pin {
@@ -287,9 +273,11 @@ export class Recorder {
   /** Events from tabs that aren't the one being recorded — counted, not kept. */
   private dropped = 0;
   private pointer: PointerSample | null = null;
-  /** The puck, while one is open. Unlike the mouse it never goes stale — a parked
-   *  puck is not an idle pointer, it's a deliberate act of pointing. */
+  /** The puck's latest report. Unlike the mouse, a *reporting* puck never goes
+   *  stale — parked is a deliberate act of pointing — but a puck that stopped
+   *  reporting (tab navigated, window closed) ages out fast via `puckAt`. */
   private puck: PuckTelemetry | null = null;
+  private puckAt = 0;
   private pins: Pin[] = [];
 
   private frames: RecordingFrame[] = [];
@@ -443,9 +431,20 @@ export class Recorder {
     if (this.inScope(origin)) this.pointer = sample;
   }
 
-  /** The puck's latest self-report, or null when it closes. No scope: it isn't a tab. */
+  /** The puck's latest self-report, or null when it closes. */
   setPuck(telemetry: PuckTelemetry | null) {
     this.puck = telemetry;
+    this.puckAt = telemetry ? Date.now() : 0;
+  }
+
+  /** True while the puck's heartbeat is current — the reporting-or-gone test. */
+  private puckLive(): boolean {
+    return this.puck !== null && Date.now() - this.puckAt <= PUCK_STALE_MS;
+  }
+
+  /** The live readout the puck's heartbeat answers with — same facts `emit()` sends. */
+  liveStats(): { elapsedMs: number; interim: string; micState: MicState } {
+    return { elapsedMs: this.elapsed(), interim: this.interim, micState: this.micState };
   }
 
   /** Whether the puck's tip currently maps into the captured frame — false when it
@@ -453,7 +452,7 @@ export class Recorder {
   puckOnFrame(): boolean {
     const t = this.puck;
     const v = this.video;
-    if (!t || !v?.videoWidth || !v.videoHeight) return false;
+    if (!t || !this.puckLive() || !v?.videoWidth || !v.videoHeight) return false;
     return mapPointer(this.puckAsSample(t), v.videoWidth, v.videoHeight) !== null;
   }
 
@@ -470,7 +469,7 @@ export class Recorder {
    */
   pin(): number | null {
     const t = this.puck;
-    if (!t || !this.stream) return null;
+    if (!t || !this.puckLive() || !this.stream) return null;
     const n = this.pins.length + 1;
     this.pins.push({ n, at: this.elapsed(), sx: t.sx, sy: t.sy, sw: t.sw, sh: t.sh });
     this.forcedWhy = 'mark';
@@ -598,7 +597,7 @@ export class Recorder {
       if (mapped || p.selector) return { ...(mapped ?? {}), selector: p.selector, text: p.text };
     }
     const t = this.puck;
-    if (t) {
+    if (t && this.puckLive()) {
       const mapped = mapPointer(this.puckAsSample(t), width, height);
       if (mapped) return mapped;
     }
@@ -618,7 +617,7 @@ export class Recorder {
   private puckCellRect(): CellRect | null {
     const t = this.puck;
     const v = this.video;
-    if (!t || !v?.videoWidth || !v.videoHeight || !t.sw || !t.sh) return null;
+    if (!t || !this.puckLive() || !v?.videoWidth || !v.videoHeight || !t.sw || !t.sh) return null;
     const screenAspect = t.sw / t.sh;
     if (Math.abs(v.videoWidth / v.videoHeight - screenAspect) / screenAspect > MAP_TOLERANCE) {
       return null;

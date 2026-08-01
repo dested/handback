@@ -1,0 +1,450 @@
+import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import type { Session, SessionSummary, Settings, WorkspaceLink } from '../lib/types';
+import type { WorkspaceContext } from '../lib/context';
+import { send } from '../lib/messages';
+import { ago, hostOf, mmss, plural } from '../lib/format';
+import {
+  fetchWalkthroughs,
+  inboxUrl,
+  walkthroughUrl,
+  type WalkthroughStatus,
+  type WorkspaceWalkthrough,
+} from '../lib/walkthroughs';
+
+/**
+ * The panel with nothing open. It used to be one button and a lot of paper —
+ * which said, accurately, that this window was empty, and nothing else. This is
+ * the same button over the answer to "where does it go, and what happened to the
+ * last ten?": the workspace it uploads to and the ones it could, that workspace's
+ * queue with the status somebody put each one in, its projects, and the sessions
+ * still sitting in this browser.
+ *
+ * Everything below the Record button is a read. Nothing here can lose work, so
+ * every failure degrades to a line of text — an unreachable workspace still
+ * leaves a recorder you can record with.
+ */
+
+const STATUS_LABEL: Record<WalkthroughStatus, string> = {
+  open: 'open',
+  in_review: 'in review',
+  resolved: 'resolved',
+};
+
+/** How much of the queue fits before the list stops being a glance. */
+const FEED_SHOWN = 6;
+
+interface HomeProps {
+  sessions: Session[];
+  /**
+   * A walkthrough is open and the human stepped back here to look around. Its row
+   * is the way back in, so it says so — this screen is navigation, not an archive.
+   */
+  openSessionId: string | null;
+  settings: Settings;
+  /** Where uploads go — null when this recorder holds no workspace key at all. */
+  link: WorkspaceLink | null;
+  ctx: WorkspaceContext | null;
+  ctxFailed: boolean;
+  /** The just-handed-over card, when a session closed a moment ago. */
+  shipped: ReactNode;
+  onRecord: () => void;
+  onOpenSession: (id: string) => void;
+  onDeleteSession: (id: string) => void;
+  onPickLink: (id: string) => void;
+  onOpenRecorder: () => void;
+  onOpenSettings: () => void;
+}
+
+const openTab = (url: string) => void chrome.tabs.create({ url });
+
+export function Home({
+  sessions,
+  openSessionId,
+  settings,
+  link,
+  ctx,
+  ctxFailed,
+  shipped,
+  onRecord,
+  onOpenSession,
+  onDeleteSession,
+  onPickLink,
+  onOpenRecorder,
+  onOpenSettings,
+}: HomeProps) {
+  const [feed, setFeed] = useState<WorkspaceWalkthrough[] | null>(null);
+  const [feedFailed, setFeedFailed] = useState(false);
+  /** Bumped by the retry link — the effect below is the only thing that fetches. */
+  const [reloads, setReloads] = useState(0);
+  const [status, setStatus] = useState<WalkthroughStatus | 'all'>('all');
+  const [projectName, setProjectName] = useState<string | null>(null);
+  const [switching, setSwitching] = useState(false);
+  const [summaries, setSummaries] = useState<Record<string, SessionSummary>>({});
+  const [showAll, setShowAll] = useState(false);
+
+  const serverUrl = link?.serverUrl ?? '';
+
+  useEffect(() => {
+    if (!link) {
+      setFeed(null);
+      return;
+    }
+    const control = new AbortController();
+    setFeed(null);
+    setFeedFailed(false);
+    void fetchWalkthroughs(link, control.signal).then(
+      (rows) => setFeed(rows),
+      () => {
+        // An aborted fetch is this effect being torn down, not a failure worth
+        // telling anyone about.
+        if (!control.signal.aborted) setFeedFailed(true);
+      },
+    );
+    return () => control.abort();
+  }, [link?.id, link?.apiToken, reloads]);
+
+  // Takes and durations for every session, not just the open one — the summaries
+  // are metadata only, so this is cheap next to what `state:get` already carries.
+  const sessionKey = sessions.map((s) => s.id).join(',');
+  useEffect(() => {
+    let live = true;
+    void send<Record<string, SessionSummary>>({ type: 'sessions:summary' })
+      .then((answer) => {
+        if (live && answer) setSummaries(answer);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [sessionKey]);
+
+  const counts = useMemo(() => {
+    const by: Record<WalkthroughStatus, number> = { open: 0, in_review: 0, resolved: 0 };
+    for (const w of feed ?? []) by[w.status]++;
+    return by;
+  }, [feed]);
+
+  /** Projects the workspace named, and any the queue mentions that it didn't. */
+  const projects = useMemo(() => {
+    const names = new Set((ctx?.projects ?? []).map((p) => p.name));
+    for (const w of feed ?? []) if (w.projectName) names.add(w.projectName);
+    return [...names];
+  }, [ctx?.projects, feed]);
+
+  const filtered = useMemo(() => {
+    return (feed ?? []).filter(
+      (w) =>
+        (status === 'all' || w.status === status) &&
+        (projectName === null || w.projectName === projectName),
+    );
+  }, [feed, status, projectName]);
+
+  const shown = showAll ? filtered : filtered.slice(0, FEED_SHOWN);
+
+  /**
+   * The one you stepped out of first, then unfinished work, then the most recently
+   * touched. The worker hands these back newest-first, which buries a draft under
+   * whatever was handed over after it — and a draft is the only row here anyone
+   * still has to do something about.
+   */
+  const local = useMemo(
+    () =>
+      [...sessions].sort(
+        (a, b) =>
+          Number(b.id === openSessionId) - Number(a.id === openSessionId) ||
+          Number(Boolean(a.closed)) - Number(Boolean(b.closed)) ||
+          (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt),
+      ),
+    [sessions, openSessionId],
+  );
+  const orgName = ctx?.org.name || link?.orgName || (link ? hostOf(link.serverUrl) : '');
+
+  return (
+    <div className="home">
+      {shipped}
+
+      <section className="hero">
+        <button className="rec-hero" onClick={onRecord}>
+          <span className="dot" />
+          Record a walkthrough
+        </button>
+        <p className="hero-sub">
+          Screen + voice. Talk through what's wrong — it becomes a brief your team's agent can act
+          on.
+        </p>
+        <p className="hero-keys">alt+shift+M mark a moment · alt+shift+D draw</p>
+      </section>
+
+      {link ? (
+        <>
+          {/* Where the next recording lands, said before it is recorded rather than
+              only at the send button. Clicking it is also how a second workspace
+              gets added, so the switcher is the whole workspace story in one row. */}
+          <section className="wsbar">
+            <button
+              className={`wsbar-main${switching ? ' on' : ''}`}
+              aria-expanded={switching}
+              title="The workspace this recorder uploads to"
+              onClick={() => setSwitching((v) => !v)}
+            >
+              <span className="wsbar-dot" />
+              <span className="wsbar-text">
+                <span className="wsbar-name">{orgName}</span>
+                <span className="wsbar-meta">
+                  {hostOf(serverUrl)}
+                  {ctx ? ` · ${plural(ctx.projects.length, 'project')}` : ''}
+                </span>
+              </span>
+              <span className="chev">{switching ? '▴' : '▾'}</span>
+            </button>
+            {switching && (
+              <div className="wspick">
+                {settings.links.map((l) => (
+                  <button
+                    key={l.id}
+                    className={`wspick-row${l.id === link.id ? ' on' : ''}`}
+                    onClick={() => {
+                      onPickLink(l.id);
+                      setSwitching(false);
+                    }}
+                  >
+                    <i className="wsdot" />
+                    <span className="wsname">{l.orgName || hostOf(l.serverUrl)}</span>
+                    <span className="wshost">{hostOf(l.serverUrl)}</span>
+                  </button>
+                ))}
+                <button
+                  className="wspick-row add"
+                  onClick={() => {
+                    onOpenRecorder();
+                    setSwitching(false);
+                  }}
+                >
+                  + link another workspace…
+                </button>
+              </div>
+            )}
+          </section>
+
+          <section className="feed">
+            <div className="sec-head">
+              <span>In {orgName}</span>
+              <button className="link" onClick={() => openTab(inboxUrl(serverUrl))}>
+                open inbox →
+              </button>
+            </div>
+
+            {/* The three statuses are the workspace's whole vocabulary, so they are
+                the filter — and their counts are the only summary anyone wants. */}
+            {feed && feed.length > 0 && (
+              <div className="chips">
+                <Chip label="all" n={feed.length} on={status === 'all'} pick={() => setStatus('all')} />
+                {(['open', 'in_review', 'resolved'] as const).map((s) => (
+                  <Chip
+                    key={s}
+                    label={STATUS_LABEL[s]}
+                    tone={s}
+                    n={counts[s]}
+                    on={status === s}
+                    pick={() => setStatus(status === s ? 'all' : s)}
+                  />
+                ))}
+              </div>
+            )}
+            {projects.length > 1 && (
+              <div className="chips">
+                {projects.map((name) => (
+                  <Chip
+                    key={name}
+                    label={name}
+                    on={projectName === name}
+                    pick={() => setProjectName(projectName === name ? null : name)}
+                  />
+                ))}
+              </div>
+            )}
+
+            {feed === null && !feedFailed && (
+              <div className="feed-skel">
+                <i />
+                <i />
+                <i />
+              </div>
+            )}
+
+            {feedFailed && (
+              <p className="note">
+                couldn't reach {hostOf(serverUrl)} ·{' '}
+                <button className="link" onClick={() => setReloads((n) => n + 1)}>
+                  try again
+                </button>
+              </p>
+            )}
+
+            {feed?.length === 0 && (
+              <p className="note">
+                Nothing here yet. The first walkthrough you hand over shows up in this list — and in
+                your agent's queue.
+              </p>
+            )}
+
+            {feed !== null && feed.length > 0 && filtered.length === 0 && (
+              <p className="note">Nothing matches that filter.</p>
+            )}
+
+            {shown.map((w) => (
+              <button
+                key={w.id}
+                className="wtrow"
+                title={`Open ${w.slug} in the workspace`}
+                onClick={() => openTab(walkthroughUrl(serverUrl, w.id))}
+              >
+                <span className={`sdot ${w.status}`} />
+                <span className="wt-body">
+                  <span className="wt-title">{w.title}</span>
+                  <span className="wt-meta">
+                    {[
+                      STATUS_LABEL[w.status],
+                      mmss(w.durationMs),
+                      w.takeCount > 1 ? plural(w.takeCount, 'take') : '',
+                      w.projectName ?? (w.origin ? hostOf(w.origin) : ''),
+                      ago(w.recordedAt),
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </span>
+                </span>
+                {w.errorCount > 0 && (
+                  <span className="wt-err" title="Console errors the page threw while it was recorded">
+                    {w.errorCount} err
+                  </span>
+                )}
+              </button>
+            ))}
+
+            {filtered.length > FEED_SHOWN && (
+              <button className="link" onClick={() => setShowAll((v) => !v)}>
+                {showAll ? 'show fewer' : `show all ${filtered.length}`}
+              </button>
+            )}
+          </section>
+        </>
+      ) : (
+        <section className="feed">
+          <div className="linkcard">
+            <strong>Link a workspace</strong>
+            <p>
+              Recordings stay on this machine until this recorder holds a workspace key. One click on
+              the workspace page connects it — nothing to paste.
+            </p>
+            <button className="primary" onClick={onOpenRecorder}>
+              link workspace →
+            </button>
+            <button className="link" onClick={onOpenSettings}>
+              or paste a token by hand
+            </button>
+          </div>
+        </section>
+      )}
+
+      {sessions.length > 0 && (
+        <section className="local">
+          <div className="sec-head">
+            <span>On this machine</span>
+            <span className="count">{sessions.length}</span>
+          </div>
+          {local.map((s) => {
+            const sum = summaries[s.id];
+            const meta = [
+              sum && sum.takes ? plural(sum.takes, 'take') : 'nothing recorded',
+              sum && sum.durationMs ? mmss(sum.durationMs) : '',
+              s.origin ? hostOf(s.origin) : '',
+              ago(s.updatedAt || s.createdAt),
+            ]
+              .filter(Boolean)
+              .join(' · ');
+            const isOpen = s.id === openSessionId;
+            return (
+              <div key={s.id} className={`lrow${isOpen ? ' on' : ''}`}>
+                <button
+                  className="lrow-main"
+                  title={
+                    isOpen
+                      ? 'Back into this walkthrough'
+                      : s.closed
+                        ? 'Reopen this walkthrough here'
+                        : 'Open this walkthrough'
+                  }
+                  onClick={() => onOpenSession(s.id)}
+                >
+                  <span className="lrow-title">
+                    {s.name}
+                    {isOpen ? (
+                      <span className="ltag draft">open · resume</span>
+                    ) : s.uploadedUrl ? (
+                      <span className="ltag done">handed over</span>
+                    ) : s.closed ? (
+                      <span className="ltag">closed</span>
+                    ) : (
+                      <span className="ltag draft">draft</span>
+                    )}
+                  </span>
+                  <span className="lrow-meta">{meta}</span>
+                </button>
+                {s.uploadedUrl && (
+                  <button
+                    className="lrow-open"
+                    title="Open it in the workspace"
+                    onClick={() => openTab(s.uploadedUrl ?? '')}
+                  >
+                    ↗
+                  </button>
+                )}
+                <button
+                  className="kill"
+                  title="Forget this walkthrough here (anything already uploaded stays in the workspace)"
+                  onClick={() => onDeleteSession(s.id)}
+                >
+                  ×
+                </button>
+              </div>
+            );
+          })}
+        </section>
+      )}
+
+      {/* The one thing the panel can't answer for itself, and the reason a
+          walkthrough is worth recording at all. */}
+      {link && !ctxFailed && (
+        <p className="home-foot">
+          An agent pulls these over MCP —{' '}
+          <button className="link" onClick={() => openTab(`${serverUrl}/connect`)}>
+            connect one
+          </button>
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** A count you can filter by. Off-state is a hairline; on-state is the ink. */
+function Chip({
+  label,
+  n,
+  on,
+  tone,
+  pick,
+}: {
+  label: string;
+  n?: number;
+  on: boolean;
+  tone?: WalkthroughStatus;
+  pick: () => void;
+}) {
+  return (
+    <button className={`chip${on ? ' on' : ''}${tone ? ` ${tone}` : ''}`} onClick={pick}>
+      {label}
+      {n !== undefined && <span className="chip-n">{n}</span>}
+    </button>
+  );
+}

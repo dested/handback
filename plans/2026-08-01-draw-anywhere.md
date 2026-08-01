@@ -1,10 +1,13 @@
 # Drawing outside the Chrome window — the puck
 
 - **Date:** 2026-08-01
-- **Status:** done — built same day (extension 1.4.0): `sidepanel/puck.ts`, recorder puck
-  slot + pins + dedup masking, panel button. Sal confirmed `documentPictureInPicture` is
-  exposed in the side panel, captions always-on, `p` pins. Not yet driven end-to-end in a
-  live take.
+- **Status:** done — built same day, then re-plumbed: `requestWindow()` is dead in side
+  panels (Chrome honours it in real tabs only — the API object existing there was a lie), so
+  the puck now opens from the **page dock's `point` (`p`) button** via `content/puck.ts`,
+  CSP-proof (no innerHTML, no `<style>` — the PiP doc inherits the page's CSP), talking over
+  `recording:puck` heartbeats + `recording:pin`. Recorder keeps the puck slot, pins, and
+  dedup masking unchanged. Captions always-on, `p` pins in-puck. Not yet driven end-to-end
+  in a live take.
 - **Type:** design
 - **What:** how the recorder points at things outside Chrome — Excel, a terminal, another
   browser — asked for in gripe `3f491ef7` at 2:21–2:39 ("actually really, really important")

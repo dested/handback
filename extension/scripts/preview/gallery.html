@@ -35,13 +35,18 @@
       const mode = q.get('mode') || 'rec';
       const height = Number(q.get('h')) || Math.max(560, window.innerHeight - 70);
 
-      for (const m of ['rec', 'long', 'empty']) {
+      // `home` and `home+unlinked` are the same screen with and without a workspace
+      // key — the second is what a fresh install sees, and it has to hold up too.
+      for (const m of ['rec', 'long', 'home', 'home+unlinked', 'empty']) {
         const a = document.createElement('a');
         a.textContent = m;
         a.href = `?w=${tokens.join(',')}&mode=${m}`;
         if (m === mode) a.className = 'on';
         document.getElementById('bar').append(a);
       }
+
+      const [seed, flag] = mode.split('+');
+      const query = `mode=${seed}${flag ? `&${flag}=1` : ''}`;
 
       for (const token of tokens) {
         const [w, own] = String(token).split('x').map(Number);
@@ -57,7 +62,7 @@
           title.append(popped);
         }
         const frame = document.createElement('iframe');
-        frame.src = `/preview.html?mode=${mode}${own ? '&pop=1' : ''}&t=${Date.now()}`;
+        frame.src = `/preview.html?${query}${own ? '&pop=1' : ''}&t=${Date.now()}`;
         frame.width = w;
         frame.height = own || height;
         cell.append(title, frame);
