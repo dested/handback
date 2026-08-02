@@ -141,7 +141,8 @@ src/
                         latest accounts/uploads), users.tsx + user.tsx (search, team/admin
                         toggles, per-account detail: tokens, teams, walkthroughs by space),
                         teams.tsx + team.tsx (all teams w/ seats·storage; roster, invites,
-                        projects, seat-limit editor, delete team), walkthroughs.tsx (platform
+                        projects, seat-limit editor, add/remove members + role switch + invite
+                        revoke, delete team), walkthroughs.tsx (platform
                         feed, status filter, debug links), walkthrough-debug.tsx (full anatomy
                         of one walkthrough: the EXACT MCP brief via getWalkthroughDetail+
                         formatWalkthrough, frame-cap math, takes, all files incl. pending,

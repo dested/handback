@@ -8,6 +8,7 @@ import { Button } from '~/components/ui/button'
 import { Input } from '~/components/ui/input'
 import { Label } from '~/components/ui/label'
 import { useTRPC } from '~/lib/trpc'
+import { cn } from '~/lib/utils'
 import {
   ErrorText,
   Loading,
@@ -211,11 +212,61 @@ export function AdminTeamPage() {
                   <Td className="font-mono">{m.uploads}</Td>
                   <Td className="font-mono">{fmtBytes(m.uploadedBytes)}</Td>
                   <Td className="text-muted-foreground font-mono text-xs">{fmtDate(m.joinedAt)}</Td>
+                  <Td>
+                    <div className="flex items-center justify-end gap-3">
+                      {m.role !== 'owner' && (
+                        <>
+                          <select
+                            aria-label={`Role for ${m.name}`}
+                            className={cn(ROLE_SELECT, 'h-7 px-1.5 text-xs')}
+                            disabled={setRole.isPending}
+                            value={m.role}
+                            onChange={(e) =>
+                              setRole.mutate({
+                                teamId,
+                                userId: m.userId,
+                                role: e.target.value === 'admin' ? 'admin' : 'member',
+                              })
+                            }>
+                            <option value="member">member</option>
+                            <option value="admin">admin</option>
+                          </select>
+                          {arming === m.userId ? (
+                            <span className="flex items-center gap-2 text-xs">
+                              <span className="text-muted-foreground">remove {m.name}?</span>
+                              <button
+                                type="button"
+                                className="text-destructive text-xs font-medium"
+                                disabled={remove.isPending}
+                                onClick={() => remove.mutate({ teamId, userId: m.userId })}>
+                                yes, remove
+                              </button>
+                              <button
+                                type="button"
+                                className="text-muted-foreground text-xs"
+                                onClick={() => setArming(null)}>
+                                keep
+                              </button>
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              className="text-muted-foreground hover:text-destructive text-xs"
+                              onClick={() => setArming(m.userId)}>
+                              remove
+                            </button>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </Td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+        {setRole.isError && <ErrorText message={setRole.error.message} />}
+        {remove.isError && <ErrorText message={remove.error.message} />}
       </section>
 
       {t.invites.length > 0 && (
@@ -229,6 +280,7 @@ export function AdminTeamPage() {
                   <Th className="w-32">Role</Th>
                   <Th className="w-32">Created</Th>
                   <Th className="w-32">Expires</Th>
+                  <Th className="w-20" />
                 </tr>
               </thead>
               <tbody>
@@ -244,11 +296,21 @@ export function AdminTeamPage() {
                     <Td className="text-muted-foreground font-mono text-xs">
                       {fmtDate(i.expiresAt)}
                     </Td>
+                    <Td>
+                      <button
+                        type="button"
+                        className="text-muted-foreground hover:text-destructive text-xs"
+                        disabled={revoke.isPending}
+                        onClick={() => revoke.mutate({ inviteId: i.id })}>
+                        revoke
+                      </button>
+                    </Td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+          {revoke.isError && <ErrorText message={revoke.error.message} />}
         </section>
       )}
 

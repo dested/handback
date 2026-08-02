@@ -2,6 +2,13 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-08-02 — admin team-page member management
+Asked: "i need to be able to add and remove members and stuff" on /admin/teams/:id.
+Done: admin.addTeamMember (by email of an existing account, seats enforced) / removeTeamMember
+(owner blocked, inline-armed) / setTeamMemberRole (instant select, owner immutable) /
+revokeInvite; team page grew the add form, per-row role select + remove, invite revoke links.
+Touched: server/router.ts, src/app/admin/team.tsx
+
 ## 2026-08-02 — admin deletes, admin move, walkthrough debug page
 Asked: "delete user (keeps teams), delete team, move walkthroughs between teams, and a pretty
 debug view — I want to see the cutting and prompt stuff".
