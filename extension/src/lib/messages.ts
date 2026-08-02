@@ -1,11 +1,8 @@
 import type {
   PageEvent,
   PointerSample,
-  PuckTelemetry,
   RecordingMeta,
   Settings,
-  TimelineMove,
-  TimelineRef,
   TranscriberId,
   TranscriptSegment,
 } from './types';
@@ -17,6 +14,10 @@ export type Request =
   | { type: 'session:rename'; id: string; name: string }
   | { type: 'session:activate'; id: string }
   | { type: 'session:delete'; id: string }
+  // One take out of the open gripe: its row, its frames, its blobs. The takes
+  // that remain renumber to 1..N so the timeline stays one continuous axis —
+  // same shape as `session:delete`, one rung down.
+  | { type: 'take:delete'; id: string }
   // Handed off and finished: no more takes land here, and the panel goes blank
   // until the next recording opens a fresh one. `uploadedUrl` is set when the
   // close followed a successful push to Handback.
@@ -41,18 +42,10 @@ export type Request =
   // The panel died mid-part; reassemble the chunk blobs into the video.
   | { type: 'recording:recover'; id: string }
   | { type: 'recording:setActive'; active: boolean }
-  | { type: 'recording:frame:delete'; id: string; index: number }
   // Lines are addressed by array position, and a Whisper pass replaces the whole
   // array — `rev` is the meta.rev the caller was looking at. Mismatch = skip.
+  // An empty text deletes the line; that is the only way one goes.
   | { type: 'recording:line:update'; id: string; index: number; text: string; rev?: number }
-  | { type: 'recording:line:delete'; id: string; index: number; rev?: number }
-  // A drag on the timeline landed: every moved item's new position on the gripe's
-  // unified axis, in one write. `revs` is recId → the meta.rev that recording had
-  // when the panel drew what was dragged.
-  | { type: 'timeline:move'; moves: TimelineMove[]; revs?: Record<string, number> }
-  // The selection bar's delete — frames and lines in one go. This is how a ramble
-  // gets sanitized before it reaches the agent.
-  | { type: 'timeline:delete'; items: TimelineRef[]; revs?: Record<string, number> }
   // The on-device Whisper pass finished and supersedes the Web Speech lines.
   // `engine` is which pass produced these — the worker stamps it on the take so
   // report.md can say who wrote the words.
@@ -64,28 +57,17 @@ export type Request =
       /** The workspace's cleanup pass rewrote the wording (timings untouched). */
       polished: boolean;
     }
-  // The human read the transcript back and confirmed it.
-  | { type: 'recording:reviewed'; id: string }
   // Content script → panel, relayed while a recording is live. `origin` is the
   // sender's own, so the panel can drop everything outside the recorded tab.
   | { type: 'recording:event'; event: PageEvent; origin: string }
   | { type: 'recording:pointer'; sample: PointerSample; origin: string }
-  // A click or an SPA route change — force a keyframe the dedup would call identical.
+  // A click or an SPA route change — force a keyframe the dedup would call
+  // identical. An ink stroke finishing on the page is a click for this purpose:
+  // the drawing is on screen and dedup would score it as the same screen.
   | { type: 'recording:force'; why: 'click' | 'nav'; origin: string }
   // The on-page toolbar's stop button. The panel owns the recorder, so it acts;
   // the background just answers ok.
-  | { type: 'recording:stop' }
-  // The puck's heartbeat, ~150ms while it's open: tip + window geometry up, and
-  // the panel answers with a `PuckBeat` — clock, captions, whether the tip is in
-  // the captured frame, and whether the take is even still running. One message,
-  // both directions; no broadcast plumbing.
-  | { type: 'recording:puck'; telemetry: PuckTelemetry; origin: string }
-  // The puck's arrow was clicked: pin the tip's spot onto the keyframes. The
-  // panel answers `{ n: number | null }` — null when the tip isn't in frame.
-  | { type: 'recording:pin'; origin: string }
-  // The editor strip was popped out over `parentId`'s bottom edge; the worker
-  // re-pins it on every parent move/resize so it behaves docked.
-  | { type: 'strip:track'; stripId: number; parentId: number };
+  | { type: 'recording:stop' };
 
 /** Background → content script. */
 export type ContentCommand =
@@ -97,10 +79,7 @@ export type ContentCommand =
   | { type: 'ping' };
 
 /** Background → side panel broadcast. */
-export type Broadcast =
-  | { type: 'state:changed' }
-  // The mark hotkey fired. It's a command, so only the worker hears it.
-  | { type: 'recording:mark' };
+export type Broadcast = { type: 'state:changed' };
 
 /** What a Handback web page may send via chrome.runtime.sendMessage(EXTENSION_ID, …). */
 export type ExternalRequest =

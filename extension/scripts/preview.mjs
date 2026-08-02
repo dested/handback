@@ -5,16 +5,14 @@ import { extname, join, resolve } from 'node:path';
 /**
  * Serves the built side panel with the chrome APIs stubbed, so its layout can be
  * looked at without loading the extension into Chrome. This is the only way to see
- * the panel at a width other than whatever Chrome hands it, and the only way to see
- * the popped editor strip at its real shape.
+ * the panel at a width other than whatever Chrome hands it.
  *
  *   npm run build && npm run preview
  *   http://localhost:8777/gallery.html?w=380,560,900&mode=long
  *
- * `mode` is rec | long | empty. `w` is a comma-separated list of CSS widths, each
- * rendered in its own iframe so the panel's media queries see it. A `WxH` token
- * (1500x400) gives the frame its own height and runs it popped — that shape is the
- * dock strip.
+ * `mode` is rec | long | fresh | home | empty. `w` is a comma-separated list of CSS
+ * widths, each rendered in its own iframe so the panel's media queries see it; a
+ * `WxH` token gives that frame its own height.
  *
  * `mode=long` (10:18 across two takes, 150 frames, 120 transcript lines) is the
  * acceptance seed: anything timeline-shaped gets judged there.

@@ -2,8 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   PageEvent,
   PointerSample,
-  PuckBeat,
-  PuckTelemetry,
   Recording,
   RecordingFrame,
   Session,
@@ -13,7 +11,7 @@ import type {
 import { DEFAULT_SERVER, DEFAULT_SETTINGS, activeLink, linkId } from '../lib/types';
 import { fetchContext, type WorkspaceContext } from '../lib/context';
 import { send } from '../lib/messages';
-import { blobs, kv } from '../lib/db';
+import { blobs } from '../lib/db';
 import { hostOf, mmss, plural, recDirName } from '../lib/format';
 import { partSpans, totalMs } from '../lib/timeline';
 import {
@@ -79,9 +77,6 @@ interface Shipped {
   /** Whether the brief naming the URL made it onto the clipboard without a fresh click. */
   copied: boolean;
 }
-
-/** The popped-out editor is this same page; it just doesn't offer to pop itself out again. */
-const popped = new URLSearchParams(location.search).has('pop');
 
 /** format.ts is frozen and has no URL helper; the panel needs exactly this much. */
 function originOf(url: string): string {
@@ -158,8 +153,6 @@ export function App() {
   /** Whether the recorded tab can host the on-page dock — chrome:// pages can't. */
   const [pageDock, setPageDock] = useState(false);
   const [recUpdate, setRecUpdate] = useState<RecorderUpdate | null>(null);
-  /** The capture is shaped like a monitor, so the puck would land inside it. */
-  const [screenish, setScreenish] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [whisper, setWhisper] = useState<TranscribeProgress | null>(null);
   // The queue, mirrored into state so the panel can say `queued` / `transcribing…`.
@@ -172,8 +165,11 @@ export function App() {
   const [shipped, setShipped] = useState<Shipped | null>(null);
   /** What the active token can see — the workspace's own name and its projects. Null until fetched, or when it failed. */
   const [ctx, setCtx] = useState<WorkspaceContext | null>(null);
-  /** The context fetch failed — the project picker hides rather than sitting dead; routing falls to origin hints. */
+  /** The context fetch failed. The picker stays on screen and offers a retry — a
+   *  control that vanishes is why "I can't set the project" was true. */
   const [ctxFailed, setCtxFailed] = useState(false);
+  /** Bumped by that retry; the context effect is the only thing that fetches. */
+  const [ctxReloads, setCtxReloads] = useState(0);
   const whisperQueue = useRef<string[]>([]);
   const whisperRunning = useRef(false);
   const recorderRef = useRef<Recorder | null>(null);
@@ -225,34 +221,11 @@ export function App() {
 
   useEffect(() => {
     void refresh();
-    const listener = (
-      message: { type?: string; origin?: string },
-      _sender: chrome.runtime.MessageSender,
-      respond: (answer: unknown) => void,
-    ) => {
+    const listener = (message: { type?: string; origin?: string }) => {
       if (message?.type === 'state:changed') void refresh();
       // The stop button on the page dock. The panel owns the recorder, so it acts.
       if (message?.type === 'recording:stop') stopRef.current();
       const recorder = recorderRef.current;
-      // The puck's messages expect an answer even when the take is over — a
-      // missing/inactive beat is how the puck learns to close itself.
-      if (message?.type === 'recording:puck') {
-        if (!recorder) {
-          respond(null);
-          return;
-        }
-        recorder.setPuck((message as { telemetry: PuckTelemetry }).telemetry);
-        respond({
-          active: true,
-          onFrame: recorder.puckOnFrame(),
-          ...recorder.liveStats(),
-        } satisfies PuckBeat);
-        return;
-      }
-      if (message?.type === 'recording:pin') {
-        respond({ n: recorder?.puckOnFrame() ? recorder.pin() : null });
-        return;
-      }
       if (!recorder) return;
       // Telemetry and pointer arrive from every tab; the recorder keeps only what
       // came from the one being recorded.
@@ -262,18 +235,15 @@ export function App() {
       if (message?.type === 'recording:pointer') {
         recorder.addPointer((message as { sample: PointerSample }).sample, message.origin);
       }
-      // A click or a route change in the recorded tab — dedup gets overruled.
+      // A click, an ink stroke, or a route change in the recorded tab — dedup
+      // gets overruled.
       if (message?.type === 'recording:force') {
         recorder.force((message as { why: 'click' | 'nav' }).why, message.origin);
-      }
-      if (message?.type === 'recording:mark') {
-        recorder.mark();
-        say('marked');
       }
     };
     chrome.runtime.onMessage.addListener(listener);
     return () => chrome.runtime.onMessage.removeListener(listener);
-  }, [refresh, say]);
+  }, [refresh]);
 
   useEffect(() => {
     setName(session?.name ?? '');
@@ -316,7 +286,7 @@ export function App() {
     return () => {
       live = false;
     };
-  }, [link?.id, link?.apiToken]);
+  }, [link?.id, link?.apiToken, ctxReloads]);
 
   // ── transcription queue ───────────────────────────────────────────────
   /**
@@ -423,7 +393,6 @@ export function App() {
       // right now — stopping and starting again is what takes are for.
       enqueueWhisper(r.id);
     } finally {
-      setScreenish(false);
       recorderRef.current = null;
       setRecUpdate(null);
       setStopping(false);
@@ -431,20 +400,6 @@ export function App() {
       stopGuard.current = false;
     }
   };
-
-  // "Take the pointer with you" only makes sense when a whole monitor is being
-  // captured; the panel's own screen aspect is the best available guess. The puck
-  // itself is opened from the page dock — `requestWindow` is dead in side panels
-  // (Chrome limitation: extension pages in real tabs only), so the panel's role
-  // is just this hint plus answering the puck's heartbeats in the listener above.
-  useEffect(() => {
-    if (!recUpdate) return;
-    const shape = recorderRef.current?.frameShape();
-    const screenAspect = window.screen.width / window.screen.height;
-    setScreenish(
-      Boolean(shape && Math.abs(shape.w / shape.h - screenAspect) / screenAspect < 0.02),
-    );
-  }, [recUpdate]);
 
   /**
    * The side panel can't render the getUserMedia prompt — it rejects without
@@ -525,41 +480,6 @@ export function App() {
   useEffect(() => {
     stopRef.current = () => void stopRecording();
   });
-
-  /**
-   * The editor pops out as a strip along the bottom of the browser window the user
-   * is looking at — a timeline is a wide object, and Chrome refuses to dock the side
-   * panel anywhere but the side. The worker re-pins it on every parent move or
-   * resize (`strip:track`), so it behaves like DevTools docked to the bottom.
-   */
-  const STRIP_H = 400;
-  const popOut = async () => {
-    // One strip. A second press brings the existing one forward.
-    const dock = await kv.get<{ stripId: number }>('stripDock');
-    if (dock) {
-      const existing = await chrome.windows.get(dock.stripId).catch(() => null);
-      if (existing) {
-        await chrome.windows.update(dock.stripId, { focused: true });
-        return;
-      }
-    }
-    const win = await chrome.windows.getCurrent().catch(() => null);
-    const bounds =
-      win?.left !== undefined &&
-      win.width !== undefined &&
-      win.top !== undefined &&
-      win.height !== undefined
-        ? { left: win.left, top: win.top + win.height - STRIP_H, width: win.width, height: STRIP_H }
-        : { width: 1400, height: STRIP_H };
-    const strip = await chrome.windows.create({
-      url: chrome.runtime.getURL('sidepanel.html?pop=1'),
-      type: 'popup',
-      ...bounds,
-    });
-    if (strip?.id !== undefined && win?.id !== undefined) {
-      await send({ type: 'strip:track', stripId: strip.id, parentId: win.id });
-    }
-  };
 
   // ── handing the gripe over ────────────────────────────────────────────
   /**
@@ -754,8 +674,10 @@ export function App() {
   const editing = Boolean(session) && !browsing;
 
   const serverHost = hostOf(serverUrl);
-  const recorderUrl = `${serverUrl.replace(/\/+$/, '')}/recorder`;
-  const openRecorderUrl = () => void chrome.tabs.create({ url: recorderUrl });
+  const appUrl = (path: string) => `${serverUrl.replace(/\/+$/, '')}${path}`;
+  const openRecorderUrl = () => void chrome.tabs.create({ url: appUrl('/recorder') });
+  /** The workspace's projects page — the only place a project can actually be made. */
+  const openProjectsUrl = () => void chrome.tabs.create({ url: appUrl('/projects') });
 
   /** Where the workspace would file this gripe on its own, from the recorded origin. */
   const autoProject = ctx?.projects.find((p) => session && p.originHints.includes(session.origin));
@@ -844,54 +766,6 @@ export function App() {
     </div>
   );
 
-  // The strip is the editor: one slim bar of chrome, and every remaining pixel
-  // belongs to the timeline. Capture lives in the side panel; this is where a
-  // ramble gets read, cut, and shipped.
-  if (popped) {
-    return (
-      <div className="app pop">
-        <header className="head">
-          <Mark />
-          <input
-            className="title slim"
-            value={name}
-            placeholder="Untitled walkthrough"
-            onChange={(e) => setName(e.target.value)}
-            onBlur={(e) => void renameSession(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
-          />
-          <span className="spacer" />
-          <span className="count">{whisperLabel ?? summary}</span>
-          {recUpdate ? (
-            <button className="rec live mini" onClick={() => void stopRecording()} disabled={stopping}>
-              <span className="dot" />
-              {stopping ? 'saving…' : mmss(recUpdate.elapsedMs)}
-            </button>
-          ) : (
-            <button className="rec mini" onClick={() => void startRecording()}>
-              <span className="dot" />
-              record
-            </button>
-          )}
-          <button
-            className="primary slim"
-            disabled={!hasContent || recording || uploading}
-            onClick={() => void finish()}
-          >
-            {uploading ? 'sending…' : 'send'}
-          </button>
-        </header>
-        {(uploadLine || uploadError) && <div className="striprow">{statusRow}</div>}
-        {session ? (
-          <Timeline session={session} recordings={state.recordings} />
-        ) : (
-          <div className="empty">{shipped ? shippedCard : 'no open walkthrough — hit record'}</div>
-        )}
-        {flash && <div className="flash">{flash}</div>}
-      </div>
-    );
-  }
-
   return (
     <div className="app">
       <header className="head">
@@ -908,9 +782,6 @@ export function App() {
           onClick={() => setShowSettings((v) => !v)}
         >
           ⚙ <span>settings</span>
-        </button>
-        <button className="icon" title="Pop the editor out along the bottom" onClick={() => void popOut()}>
-          ⧉
         </button>
       </header>
       <div className="rule" />
@@ -944,7 +815,6 @@ export function App() {
             <span className="clock">{mmss(recUpdate.elapsedMs)}</span>
             <span className="stat">
               {plural(recUpdate.frameCount, 'frame')} kept · {plural(recUpdate.segmentCount, 'line')}
-              {recUpdate.markCount ? ` · ${recUpdate.markCount} marked` : ''}
             </span>
           </div>
           {/* The words being heard are the reason to look at this block at all, so
@@ -965,12 +835,6 @@ export function App() {
             </div>
           )}
           {pageDock && <div className="note">draw and stop from the little bar on the page</div>}
-          {pageDock && screenish && (
-            <div className="note puck-note">
-              ⌖ recording the whole screen — hit <b>point</b> on the page bar to take a draggable
-              pointer into any app
-            </div>
-          )}
           <button className="stop-big" onClick={() => void stopRecording()} disabled={stopping}>
             {stopping ? 'saving…' : 'stop recording'}
           </button>
@@ -1001,9 +865,10 @@ export function App() {
       {editing && session && (
         <>
           <section className="gripe">
-            {/* The way out, and the way to throw it away — at the top, where you
-                look for them, and never mixed in with Send. Leaving is free; the
-                destructive one arms first and says what it costs. */}
+            {/* Two rows, not four. The crumb row carries where you are, what this
+                walkthrough amounts to, and the way to throw it away; the title row
+                carries its name and the one thing you do to it next. Leaving is
+                free; the destructive one arms first and says what it costs. */}
             <div className="crumb">
               <button
                 className="back"
@@ -1015,6 +880,9 @@ export function App() {
               >
                 ← all walkthroughs
               </button>
+              <span className="meta">
+                {whisperLabel ?? (hasContent ? summary : 'nothing recorded yet')}
+              </span>
               <span className="spacer" />
               {confirmDiscard ? (
                 <span className="confirm">
@@ -1039,29 +907,30 @@ export function App() {
                 </button>
               )}
             </div>
-            <input
-              className="title"
-              value={name}
-              placeholder="Untitled walkthrough"
-              onChange={(e) => setName(e.target.value)}
-              onBlur={(e) => void renameSession(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
-            />
-            <div className="meta">
-              {whisperLabel ?? (hasContent ? summary : 'recording lands here')}
-            </div>
-            {!recording && (
-              <div className="takerow">
-                {/* "another take" is film-crew language for what is really just
-                    carrying on — you are adding to one gripe, not reshooting it. */}
-                <button className="rec ghost" onClick={() => void startRecording()}>
+            <div className="titlerow">
+              <input
+                className="title"
+                value={name}
+                placeholder="Untitled walkthrough"
+                onChange={(e) => setName(e.target.value)}
+                onBlur={(e) => void renameSession(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+              />
+              {/* It says what it does: another take, on this walkthrough. "add
+                  more" said neither what was added nor to what. */}
+              {!recording && (
+                <button
+                  className="rec ghost"
+                  title="Record another take into this walkthrough"
+                  onClick={() => void startRecording()}
+                >
                   <span className="dot" />
-                  add more
+                  record a take
                 </button>
-              </div>
-            )}
+              )}
+            </div>
           </section>
-          <Timeline session={session} recordings={state.recordings} />
+          <Timeline session={session} recordings={state.recordings} busy={recording || uploading} />
         </>
       )}
 
@@ -1092,46 +961,68 @@ export function App() {
                   ))}
                   <option value="__add">+ link another workspace…</option>
                 </select>
-                {/* Fetch failed, or the workspace has no projects = no picker at all: a
-                    dead control promises a choice that doesn't exist right now. The
-                    workspace still routes by origin either way. */}
-                {!ctxFailed && !(ctx && ctx.projects.length === 0) && (
+                <span className="dest-dot">·</span>
+                {/* The project control is ALWAYS here. It used to hide itself
+                    whenever the fetch failed or the workspace had no projects,
+                    which read as "this recorder can't pick a project" — so both
+                    of those are now states of the control, each with the way out
+                    of them. The workspace still routes by origin either way. */}
+                {ctxFailed ? (
                   <>
-                    <span className="dest-dot">·</span>
-                    <select
-                      className="dest-sel"
-                      value={
-                        session &&
-                        ctx &&
-                        session.projectId &&
-                        ctx.projects.some((p) => p.id === session.projectId)
-                          ? session.projectId
-                          : ''
-                      }
-                      disabled={!ctx || !session}
-                      onChange={(e) => {
-                        if (!session) return;
-                        const projectId = e.target.value;
-                        void (async () => {
-                          await send({
-                            type: 'session:project',
-                            id: session.id,
-                            projectId,
-                            projectName: ctx?.projects.find((p) => p.id === projectId)?.name ?? '',
-                          });
-                          await refresh();
-                        })();
-                      }}
-                    >
-                      {/* Loading reads as loading, not as a decision already made. */}
-                      <option value="">{ctx ? autoLabel : 'loading projects…'}</option>
-                      {(ctx?.projects ?? []).map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name}
-                        </option>
-                      ))}
+                    <select className="dest-sel" value="" disabled>
+                      <option value="">projects unavailable</option>
                     </select>
+                    <button className="link dest-fix" onClick={() => setCtxReloads((n) => n + 1)}>
+                      retry
+                    </button>
                   </>
+                ) : (
+                  <select
+                    className="dest-sel"
+                    value={
+                      session &&
+                      ctx &&
+                      session.projectId &&
+                      ctx.projects.some((p) => p.id === session.projectId)
+                        ? session.projectId
+                        : ''
+                    }
+                    disabled={!ctx || !session}
+                    onChange={(e) => {
+                      if (e.target.value === '__projects') {
+                        openProjectsUrl();
+                        return;
+                      }
+                      if (!session) return;
+                      const projectId = e.target.value;
+                      void (async () => {
+                        await send({
+                          type: 'session:project',
+                          id: session.id,
+                          projectId,
+                          projectName: ctx?.projects.find((p) => p.id === projectId)?.name ?? '',
+                        });
+                        await refresh();
+                      })();
+                    }}
+                  >
+                    {/* Loading reads as loading, not as a decision already made;
+                        an empty workspace says it has no projects rather than
+                        offering an empty list. */}
+                    <option value="">
+                      {!ctx ? 'loading projects…' : ctx.projects.length ? autoLabel : 'no project'}
+                    </option>
+                    {(ctx?.projects ?? []).map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                    {ctx && (
+                      <option value="__projects">
+                        {ctx.projects.length ? 'manage projects…' : '+ make one…'}
+                      </option>
+                    )}
+                  </select>
                 )}
               </div>
               <button
@@ -1142,7 +1033,7 @@ export function App() {
               >
                 {uploading ? 'sending…' : 'send to Handback'}
               </button>
-              <p className="send-sub">copies a brief for your agent</p>
+              {/*<p className="send-sub">copies a brief for your agent</p>*/}
             </>
           )}
           {!linked && (

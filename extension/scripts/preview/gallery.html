@@ -26,9 +26,8 @@
     <script>
       /**
        * One iframe per width token, so the panel's media queries see a real width.
-       * A token is `W` (shares the row height) or a SHAPE, `WxH` — the popped editor
-       * strip is a shape, not a width, so 1500x400 has to be expressible. A shape
-       * runs with ?pop=1, which is exactly the query the real popped window carries.
+       * A token is `W`, or `WxH` when a cell needs its own height — the panel is a
+       * rail and has exactly one shape, so width is nearly always the whole story.
        */
       const q = new URLSearchParams(location.search);
       const tokens = (q.get('w') || '380,560,900').split(',').filter(Boolean);
@@ -37,7 +36,17 @@
 
       // `home` and `home+unlinked` are the same screen with and without a workspace
       // key — the second is what a fresh install sees, and it has to hold up too.
-      for (const m of ['rec', 'long', 'home', 'home+unlinked', 'empty']) {
+      // `fresh` is a walkthrough seconds old: the empty timeline has to be one line.
+      for (const m of [
+        'rec',
+        'long',
+        'fresh',
+        'home',
+        'home+unlinked',
+        'empty',
+        'rec+ctx=none',
+        'rec+ctx=fail',
+      ]) {
         const a = document.createElement('a');
         a.textContent = m;
         a.href = `?w=${tokens.join(',')}&mode=${m}`;
@@ -45,8 +54,10 @@
         document.getElementById('bar').append(a);
       }
 
+      // `seed+flag` — a flag is either a bare switch (`unlinked`) or `key=value`
+      // (`ctx=fail`), so the panel's awkward states are addressable from the bar.
       const [seed, flag] = mode.split('+');
-      const query = `mode=${seed}${flag ? `&${flag}=1` : ''}`;
+      const query = `mode=${seed}${flag ? `&${flag.includes('=') ? flag : `${flag}=1`}` : ''}`;
 
       for (const token of tokens) {
         const [w, own] = String(token).split('x').map(Number);
@@ -56,13 +67,8 @@
         const label = document.createElement('span');
         label.textContent = own ? `${w}×${own}` : `${w}px`;
         title.append(label);
-        if (own) {
-          const popped = document.createElement('em');
-          popped.textContent = 'popped';
-          title.append(popped);
-        }
         const frame = document.createElement('iframe');
-        frame.src = `/preview.html?${query}${own ? '&pop=1' : ''}&t=${Date.now()}`;
+        frame.src = `/preview.html?${query}&t=${Date.now()}`;
         frame.width = w;
         frame.height = own || height;
         cell.append(title, frame);

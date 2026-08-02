@@ -116,13 +116,16 @@ src/
     projects.tsx        Projects list + create (origin-hints field removed from the UI)
     team.tsx            Members / Invites for team orgs; personal/member/guest cards otherwise.
                         Tokens moved to /connect
-    connect.tsx         /connect — THE agent onboarding: mint a token, one copy-paste
-                        `claude mcp add` with the token baked in, live "connected" check,
-                        disconnect instructions, and "Your API tokens" management (moved from
-                        Team). Codex is a "soon" tab.
+    connect.tsx         /connect — THE agent onboarding, one button + one paste: "Create my
+                        command" mints an auto-named token and renders the real `claude mcp add`
+                        with Copy in place (before the click the command is an inert dimmed
+                        preview). Two numbered steps; tools, "Putting it to work", disconnect
+                        instructions and "Your API tokens" (list + revoke, no create form) are
+                        unnumbered reference below. Codex is a "soon" tab.
     recorder.tsx        /recorder — THE recorder onboarding: install (Web Store button behind
                         a STORE_URL constant, zip/load-unpacked until then), live install ping,
-                        one-click Link (token minted + handed over, nothing pasted)
+                        one-click Link (token minted + handed over, nothing pasted). Two numbered
+                        steps; "Then just record" is unnumbered
     join.tsx            /join/:inviteId — peek + accept
     admin.tsx           /admin — platform admin: stats, user search, team/admin toggles, and a
                         per-user drill-down of every walkthrough their workspaces hold
@@ -132,7 +135,9 @@ src/
     terms.tsx           /terms — alpha status, recording consent, Arizona law
   components/
     logo.tsx            ReturnMark + Wordmark — THE identity (the returning stroke), never redraw
-    setup-step.tsx      the numbered editorial Step shared by /connect and /recorder
+    setup-step.tsx      the numbered editorial Step shared by /connect and /recorder, plus
+                        `autoTokenName(kind, ua, now)` — the name both pages mint under so
+                        neither has to ask for one
     legal.tsx           LegalPage/Section/Terms/Notice — shared chrome for /privacy + /terms
     ui/                 button, card, input, label (shadcn new-york style, no asChild)
     landing/            hero, how-it-works, distill, walkthrough-manifest, agent-view, pricing,
@@ -153,22 +158,20 @@ drydock.yaml            DRYDOCK-OWNED — the deploy manifest (portal is source 
 .github/workflows/
   drydock.yml           DRYDOCK-OWNED — OIDC build → ECR → predeploy → ECS deploy on push to main
 extension/              Handback Recorder — the Chrome MV3 extension (own npm workspace)
-  public/manifest.json  MV3: sidePanel + activeTab/scripting/storage/tabs; hotkeys Alt+Shift+M/D
+  public/manifest.json  MV3: sidePanel + activeTab/scripting/storage/tabs; hotkey Alt+Shift+D
   src/lib/              Shared contracts: types, messages (worker protocol), timeline math,
                         db (IndexedDB 'handback-recorder'), report.md builder, upload (to /api/ingest),
                         context (GET /api/ingest/context), walkthroughs (GET /api/ingest/walkthroughs
                         — the workspace's queue, read back into the panel's home screen)
   src/background/       Service worker: hotkeys, dock routing, IndexedDB writes, strip docking
-  src/content/          On-page dock (d/c/p/m/s keys), ink drawing, telemetry; injected.js relay;
-                        puck.ts — the PiP pointer-over-any-app (opens HERE, not the panel:
-                        requestWindow only works in real tabs; CSP-proof DOM, no innerHTML/<style>)
+  src/content/          On-page dock (d/c/s keys), ink drawing, click ripples, telemetry;
+                        injected.js relay
   src/sidepanel/        Panel app: Home.tsx (the nothing-open screen = the workspace: destination
                         row + switcher, the workspace's queue with status/project filters, sessions
                         still on this machine), recorder (getDisplayMedia + dedup), transcription
                         (transcribeCloud.ts → the workspace; transcribeWorker.ts → on-device),
-                        polish.ts (the cleanup pass, after transcription), Timeline editor,
-                        grids contact sheets, App.tsx orchestration (incl. answering the
-                        puck's recording:puck/pin messages — see src/content/puck.ts)
+                        polish.ts (the cleanup pass, after transcription), Timeline editor
+                        (a scrubber — see the gotcha), grids contact sheets, App.tsx orchestration
   scripts/              make-icons, copy-ort, prune-dist, preview.mjs + preview/ (layout harness)
 ```
 
@@ -184,7 +187,7 @@ extension/              Handback Recorder — the Chrome MV3 extension (own npm 
 | `/app` | Inbox (walkthrough list; auto-provisions a personal workspace) | `src/app/app.tsx` |
 | `/walkthroughs/:walkthroughId` | The viewer (`/gripes/:id` 302s here) | `src/app/walkthrough.tsx` |
 | `/projects` · `/team` | Projects · Members/Invites (teams only) | `src/app/{projects,team}.tsx` |
-| `/connect` | Connect a coding agent (token + `claude mcp add` + disconnect) | `src/app/connect.tsx` |
+| `/connect` | Connect a coding agent — one button mints a token and fills in `claude mcp add`; tokens/disconnect are reference below | `src/app/connect.tsx` |
 | `/recorder` | Install + one-click-link the extension (detects install, mints token, handshake) | `src/app/recorder.tsx` |
 | `/admin` | Platform admin — stats, users, entitlements, per-user walkthrough drill-down (admins only; nav link hidden otherwise) | `src/app/admin.tsx` |
 | `/dashboard` | redirect → /app (legacy) | `routes.tsx` |
@@ -358,9 +361,9 @@ reaches the container on a plain push.
   every broadcast and this walks every take's frame metadata.
 - **The keyframe cap is length-scaled, and it lives in two places.** `frameBudget(durationMs)`
   (`extension/src/sidepanel/recorder.ts`) is 40 frames/min clamped to **[150, 600]** per *take* —
-  applied once in `finish()`, after dedup, as a uniform thin; `reason === 'mark'` frames are never
-  thinned, and survivors are renumbered ascending (`t` survives, so transcript citations stay
-  valid). It was a flat 150 until 2026-07-31. Server-side, `briefFrameLimit()`
+  applied once in `finish()`, after dedup, as a **uniform** thin with nothing carved out of it
+  (the `reason === 'mark'` exemption went with the mark feature, 2026-08-01); survivors are
+  renumbered ascending (`t` survives, so transcript citations stay valid). It was a flat 150 until 2026-07-31. Server-side, `briefFrameLimit()`
   (`server/mcp-format.ts`) caps how many frame URLs the agent's brief *inlines* — 8/min clamped to
   [30, 120] — which is a display cap only: `gripes.get` presigns every frame regardless. Raising
   either has real cost: a frame is ~200–400 KB, against 2 GB/gripe and 20 GB/org.
@@ -403,7 +406,11 @@ reaches the container on a plain push.
 - **`gripes.list` only shows finalized gripes**; a declare without finalize is invisible in the UI
   by design.
 - **Raw API tokens are shown once** — only the sha256 lands in the DB. The dev-bootstrap script
-  prints a fresh one each run.
+  prints a fresh one each run. This is *why* /connect and /recorder never ask "do you already have
+  one?": nobody can answer it, so both pages just mint a fresh token on the single click and let
+  the old ones sit until they're revoked. Don't reintroduce a token-inventory prompt on the primary
+  path — that phrasing is what got the flow rewritten on 2026-08-01. `tokens.create` returns
+  `{ token, id, name }` so the caller can offer `tokens.rename` without a `list` round trip.
 - **The roster is admin-only** (2026-07-31): `orgs.members` requires `admin` — members and guests
   get FORBIDDEN, and the Team page doesn't render Members/Invites tabs for them (they see only
   their own API tokens). Don't add a procedure that returns member names/emails without that gate;
@@ -446,8 +453,8 @@ reaches the container on a plain push.
   `exact: true` for the nav's "Team".
 - **Extension is its own npm workspace** (`extension/`, npm not bun — vite CRX builds): two ordered
   vite builds (panel+worker ESM, then content IIFE with `emptyOutDir:false`). Chrome won't bind
-  bare-letter commands, so the dock keys (d/c/m/s) are a window keydown listener in the content
-  script; only Alt+Shift+M/D are real `commands`.
+  bare-letter commands, so the dock keys (**d** draw / **c** clear / **s** stop) are a window keydown
+  listener in the content script; only **Alt+Shift+D** is a real `command`.
 - **Preview harness seeds real IndexedDB** ('handback-recorder') and stubs `chrome.*` — it shares the
   origin's DB, so a preview tab and the real panel fight if both run on the same profile. Port 8777
   (`PORT` env to move it; the old gripe repo's harness also used 8777). **Its `SETTINGS` stub must
@@ -455,18 +462,39 @@ reaches the container on a plain push.
   reaches into `settings.links`, so a stub still carrying the flat 1.1.x `serverUrl`/`apiToken`
   fields throws on first render and the harness comes up **blank with no clue why**. That is exactly
   how it sat broken from the multi-workspace change until 2026-08-01.
-- **In the panel, drag scrubs — it does not select** (2026-08-01). Ruler, filmstrip cell and empty
-  track all start a `scrub`; a drag under `SLOP` falls back to that surface's click (a cell hands
-  over its frame, empty track clears). Multi-select lives entirely behind modifiers: **shift**-drag
-  sweeps a range on the ruler / marquees on the tracks, shift-click extends, ctrl/cmd-click toggles.
-  Don't put a bare drag back on selection — sweeping was the default once and read as the editor
-  fighting you.
+  Modes: `rec` (one 2:19 take) · `long` (the acceptance seed) · **`fresh`** (a take still running
+  with no frame kept yet — the empty-timeline case) · `home` · `empty`, plus `?unlinked=1` and
+  **`?ctx=none|fail`** (a workspace with no projects / a dead context fetch — the two states the
+  destination row's project control has to survive on screen).
+- **The panel's timeline is a scrubber and nothing else** (2026-08-01, owner's directive: "just the
+  scrobble please with dragging. no selection"). Pointer-down anywhere on the ruler, the filmstrip,
+  the voice lane or bare track scrubs, and holding keeps scrubbing — **one gesture, no modifiers, no
+  click-vs-drag fork**. There is no selection model at all: the range sweep, the marquee, the
+  shift/ctrl clicks, the `delete N items` bar and the drag-to-move are gone, and with them the
+  `timeline:move` / `timeline:delete` / `recording:frame:delete` / `recording:line:delete` messages.
+  What is left that mutates: **fixing a line** (`recording:line:update`, from the readout row or the
+  transcript list — an emptied line is a deleted line) and **deleting a take**. Don't reintroduce a
+  selection; it is the single thing the owner named as unusable.
+- **A take is deletable, and deleting one renumbers the rest.** `take:delete` (`lib/messages.ts` →
+  `background/index.ts`, modelled on `session:delete`) drops the recording row, its frames and its
+  blobs, then re-lays the survivors as `index` 1..N in `createdAt` order and sets
+  `Session.recCount` to their count — `rec-NN` is a position in the walkthrough, not a serial, and
+  a hole in it would put a hole in the axis `lib/timeline.ts` walks. The control is the take's own
+  label in the filmstrip (`.tl-take`); it arms into an inline question that is **clamped into the
+  scroll viewport** rather than anchored to a take that may be four seconds wide, and it is disabled
+  while recording or uploading (`busy` prop). Deleting the last take leaves exactly the fresh-session
+  empty state.
+- **The empty timeline has its own branch.** With no frames *and* no transcript the whole component
+  renders one muted line (`.tl.bare`) — no monitor, no ruler, no well, no zoom, no scrollbar. The
+  `.tl-scroll` floor and `.tl-monitor` cap below exist to protect the *populated* layout; letting the
+  empty case inherit them is what put ~500px of dead grey track and an orphan scrollbar under a
+  walkthrough three seconds old. Judge it at `?mode=fresh` in the harness.
 - **The axis takes the slack; the monitor gives it up.** `.tl-scroll` is `flex: 1 1 auto` with a
-  floor of one ruler + two lanes, and `.tl-monitor` is capped at 50% of the stacked panel and
+  floor of one ruler + the take lane + two lanes, and `.tl-monitor` is capped at 50% of the panel and
   collapses outright (`.bare`) when there is no frame to show. It used to be the reverse — a monitor
   that grew unbounded over a `flex: 0 1 auto` axis — which crushed the ruler and both lanes to a
-  sliver under a tall blank picture. Both rules are scoped `:not(.wide)`; popped out, the monitor is
-  a fixed column beside the axis and neither applies.
+  sliver under a tall blank picture. **There is only one shape now**: the popped-out editor strip and
+  its `wide` layout are gone (2026-08-01), so nothing is scoped `:not(.wide)` any more.
 - **`Dockerfile`, `drydock.yaml` and `.github/workflows/drydock.yml` are Drydock's** — it overwrites
   all three on every wire/re-wire. Change the deploy in the portal, not in the repo.
 - **`env.ts` parses at import time**, so a missing S3/auth var is a boot crash, not a runtime error —
@@ -591,6 +619,16 @@ reaches the container on a plain push.
   words.", RecorderPanelMock in the hero, de-bugged step copy, honest sign-off step, pricing hour
   quotas, MCP terminal block removed); **dev FOUC fix**. e2e re-baselined, 4/4. Prod DB migration
   pending — see the ⚠️ above.
+- **Done (2026-08-01, later)** — **the recorder panel's walkthrough UI, rebuilt** on the owner's
+  verdict ("clean up that walkthrough ui... i hate this ui"). Deleted outright: the **puck** (the PiP
+  pointer, `content/puck.ts` and every message, type and CSS rule behind it), the **popped-out editor
+  strip** (`?pop`, `strip:track`, the whole `wide` timeline layout), **mark** (hotkey, dock key,
+  `KeyFrame.reason` member, report annotations, the never-thin carve-out), the timeline's **entire
+  selection model**, and the transcript's **"reads right"** pill. Added: **per-take delete**
+  (`take:delete`, arming inline on the take's own label, renumbering the rest), an **empty-timeline
+  branch**, a **two-row walkthrough header** (crumb+meta, then title+`record a take`), an inline
+  right-aligned **zoom** control, and a **project picker that never hides** — `no project` /
+  `projects unavailable · retry`, with a way through to `/projects`.
 - **Next** — **deploy, then re-test the loop**: `/mcp` and `/connect` only exist locally until the
   next push to `main`, so the command `/connect` prints for handback.dev 404s until then. Sal's
   Drydock/DNS checklist in the rename plan (zone, project, S3 via

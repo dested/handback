@@ -13,20 +13,25 @@
        *
        * The stub is a fake service worker, not a fixture: `state:get` reads the same
        * 'handback-recorder' database the real worker reads, and every mutation in the
-       * Request union is applied to it the way src/background does. Dragging and
-       * deleting therefore survive a refresh instead of snapping back, which is the
-       * only way the timeline can be judged here.
+       * Request union is applied to it the way src/background does. Renaming a
+       * walkthrough, fixing a line and deleting a take therefore survive a refresh
+       * instead of snapping back, which is the only way the panel can be judged here.
        *
        * The workspace is stubbed too: `fetch` answers /api/ingest/context and
        * /api/ingest/walkthroughs, because the home screen is mostly a read of
        * somebody else's server and there is nothing to judge without one.
        *
-       * ?mode=rec | long | empty | home   ?pop=1 (the popped editor strip)
+       * ?mode=rec | long | fresh | empty | home
        * ?unlinked=1 (no workspace key at all — the other half of every state)
+       * ?ctx=none (no projects in the workspace) | fail (the context fetch dies) —
+       *   the two states the destination row's project control has to survive
+       *   on screen, because hiding itself is what read as "you can't pick one".
        */
       const Q = new URLSearchParams(location.search);
-      const MODE = ['rec', 'long', 'empty', 'home'].includes(Q.get('mode')) ? Q.get('mode') : 'rec';
+      const MODES = ['rec', 'long', 'fresh', 'empty', 'home'];
+      const MODE = MODES.includes(Q.get('mode')) ? Q.get('mode') : 'rec';
       const UNLINKED = Q.has('unlinked');
+      const CTX = ['none', 'fail'].includes(Q.get('ctx')) ? Q.get('ctx') : '';
       const NOW = Date.now();
       const SID = 'preview-session';
 
@@ -115,7 +120,10 @@
         const url = String(typeof input === 'string' ? input : input.url ?? input);
         // Order matters: /walkthroughs/:id is a longer path off the same prefix,
         // and the panel only ever asks for the list.
-        if (url.includes('/api/ingest/context')) return asJson(CONTEXT);
+        if (url.includes('/api/ingest/context')) {
+          if (CTX === 'fail') return new Response('nope', { status: 500 });
+          return asJson(CTX === 'none' ? { ...CONTEXT, projects: [] } : CONTEXT);
+        }
         if (url.includes('/api/ingest/walkthroughs')) return asJson(QUEUE);
         return realFetch(input, init);
       };
@@ -192,7 +200,7 @@
       }
 
       /** Keyframes with the reasons the real dedup produces, plus a pointer on most. */
-      function keyframes(durMs, count, seed, marks) {
+      function keyframes(durMs, count, seed) {
         const rnd = lcg(seed + 977);
         const step = durMs / count;
         const out = [];
@@ -203,7 +211,7 @@
             index: i + 1,
             t,
             file: `frames/${String(i + 1).padStart(2, '0')}-${String(Math.floor(t / 1000)).padStart(4, '0')}.jpg`,
-            reason: i === 0 ? 'start' : marks.includes(i) ? 'mark' : r < 0.62 ? 'change' : r < 0.78 ? 'click' : r < 0.88 ? 'nav' : 'beat',
+            reason: i === 0 ? 'start' : r < 0.66 ? 'change' : r < 0.82 ? 'click' : r < 0.91 ? 'nav' : 'beat',
           };
           if (frame.reason !== 'start') frame.dist = 4 + Math.round(rnd() * 80);
           if (rnd() < 0.8) {
@@ -235,7 +243,7 @@
           return { level, message, ...(detail ? { detail } : {}), ts: startedAt + offset };
         });
 
-      function take({ id, sid, index, ago, durMs, frames, lines, seed, marks, gaps, events, reviewed, interrupted }) {
+      function take({ id, sid, index, ago, durMs, frames, lines, seed, gaps, events, reviewed, interrupted }) {
         const startedAt = NOW - ago;
         const rec = {
           id,
@@ -249,7 +257,7 @@
             startedAt,
             durationMs: durMs,
             sampled: Math.round(durMs / 500),
-            frames: keyframes(durMs, frames, seed, marks),
+            frames: keyframes(durMs, frames, seed),
             transcript: talk(durMs, lines, seed, gaps),
             transcriber: 'whisper',
             rev: 1,
@@ -275,7 +283,6 @@
           frames: 40,
           lines: 25,
           seed: 11,
-          marks: [6, 19, 31],
           events: [[21000, 0], [64000, 3], [96000, 2]],
         }),
       ];
@@ -294,7 +301,6 @@
           frames: 97,
           lines: 78,
           seed: 23,
-          marks: [4, 22, 41, 63, 88],
           gaps: [{ at: 180000, len: 40000 }],
           events: [[12000, 0], [131000, 3], [212000, 2], [305000, 1], [352000, 4]],
         }),
@@ -306,11 +312,39 @@
           frames: 53,
           lines: 42,
           seed: 41,
-          marks: [7, 26, 44],
           reviewed: true,
           interrupted: true,
           events: [[8000, 3], [77000, 0]],
         }),
+      ];
+
+      /**
+       * fresh: a walkthrough seconds old — one take still running, no keyframe
+       * kept yet, nothing said yet. This is the state the timeline must collapse
+       * to one line for, rather than reserving a ruler, a well and a scrollbar
+       * around nothing.
+       */
+      const FRESH = [
+        {
+          id: 'preview-fresh-1',
+          sessionId: SID,
+          index: 1,
+          createdAt: NOW - 9000,
+          state: 'recording',
+          mime: 'video/webm;codecs=vp9,opus',
+          chunks: 9,
+          meta: {
+            startedAt: NOW - 9000,
+            durationMs: 0,
+            sampled: 18,
+            frames: [],
+            transcript: [],
+            rev: 1,
+            events: [],
+            eventScope: 'http://localhost:3995',
+            videoFile: 'walkthrough.webm',
+          },
+        },
       ];
 
       /**
@@ -377,13 +411,21 @@
       ];
 
       const HOME = [
-        take({ id: 'preview-home-1', sid: 'preview-draft', index: 1, ago: 5400000, durMs: 96000, frames: 24, lines: 17, seed: 5, marks: [3, 11] }),
-        take({ id: 'preview-home-2', sid: 'preview-draft', index: 2, ago: 4800000, durMs: 61000, frames: 16, lines: 11, seed: 9, marks: [4] }),
-        take({ id: 'preview-home-3', sid: 'preview-shipped', index: 1, ago: 2400000, durMs: 139000, frames: 40, lines: 25, seed: 11, marks: [6, 19] }),
+        take({ id: 'preview-home-1', sid: 'preview-draft', index: 1, ago: 5400000, durMs: 96000, frames: 24, lines: 17, seed: 5 }),
+        take({ id: 'preview-home-2', sid: 'preview-draft', index: 2, ago: 4800000, durMs: 61000, frames: 16, lines: 11, seed: 9 }),
+        take({ id: 'preview-home-3', sid: 'preview-shipped', index: 1, ago: 2400000, durMs: 139000, frames: 40, lines: 25, seed: 11 }),
       ];
 
       const RECORDINGS =
-        MODE === 'long' ? LONG : MODE === 'empty' ? [] : MODE === 'home' ? HOME : REC;
+        MODE === 'long'
+          ? LONG
+          : MODE === 'fresh'
+            ? FRESH
+            : MODE === 'empty'
+              ? []
+              : MODE === 'home'
+                ? HOME
+                : REC;
       if (MODE === 'long') moveSome(RECORDINGS);
 
       const SESSIONS =
@@ -421,7 +463,7 @@
       // A seed that drifts from src/lib/types.ts turns every judgment made here
       // into a lie, so it fails loudly at load instead of rendering something
       // plausible.
-      const REASONS = ['start', 'change', 'mark', 'click', 'nav', 'beat'];
+      const REASONS = ['start', 'change', 'click', 'nav', 'beat'];
 
       function check(recordings, sessions) {
         const bad = [];
@@ -434,21 +476,26 @@
         }
         for (const r of recordings) {
           const m = r.meta;
+          const live = r.state === 'recording';
           want(ids.has(r.sessionId), `${r.id}: orphan sessionId`);
-          want(r.index >= 1 && r.state === 'done' && r.mime && r.chunks === 0, `${r.id}: record header`);
-          want(m.durationMs > 0 && m.sampled >= m.frames.length, `${r.id}: duration/sampled`);
+          want(
+            r.index >= 1 && (live || (r.state === 'done' && r.chunks === 0)) && r.mime,
+            `${r.id}: record header`,
+          );
+          // A take still running has no duration yet — that is the whole of `fresh`.
+          want((live || m.durationMs > 0) && m.sampled >= m.frames.length, `${r.id}: duration/sampled`);
           want(m.videoFile && m.startedAt > 0 && m.rev >= 1, `${r.id}: meta header`);
           m.frames.forEach((f, i) => {
             want(f.index === i + 1, `${r.id}: frame ${i} index ${f.index}`);
             want(REASONS.includes(f.reason), `${r.id}: frame ${f.index} reason ${f.reason}`);
-            want(f.t >= 0 && f.t < m.durationMs, `${r.id}: frame ${f.index} t ${f.t}`);
+            want(f.t >= 0 && (live || f.t < m.durationMs), `${r.id}: frame ${f.index} t ${f.t}`);
             want(/^frames\/\d+-\d+\.jpg$/.test(f.file), `${r.id}: frame ${f.index} file ${f.file}`);
             want(f.tl === undefined || f.tl >= 0, `${r.id}: frame ${f.index} tl`);
           });
           let last = -1;
           m.transcript.forEach((seg, i) => {
             want(seg.t > last, `${r.id}: line ${i} out of order`);
-            want(seg.t + (seg.d ?? 0) <= m.durationMs, `${r.id}: line ${i} runs past the take`);
+            want(live || seg.t + (seg.d ?? 0) <= m.durationMs, `${r.id}: line ${i} runs past the take`);
             want(typeof seg.text === 'string' && seg.text.length > 4, `${r.id}: line ${i} text`);
             last = seg.t;
           });
@@ -625,41 +672,23 @@
             if ((await idbGet('kv', 'activeSessionId')) === m.id) await resumeOpen();
             return { ok: true };
           }
-          case 'timeline:move': {
-            for (const [recId, moves] of groupByRec(m.moves)) {
-              const rec = await idbGet('recordings', recId);
-              if (!rec || stale(rec, m.revs?.[recId])) continue;
-              for (const mv of moves) {
-                const item =
-                  mv.kind === 'frame'
-                    ? rec.meta.frames.find((f) => f.index === mv.index)
-                    : rec.meta.transcript[mv.index];
-                if (item) item.tl = mv.tl;
-              }
-              await touch(rec);
-            }
-            return { ok: true };
-          }
-          case 'timeline:delete': {
-            for (const [recId, items] of groupByRec(m.items)) {
-              const rec = await idbGet('recordings', recId);
-              if (!rec || stale(rec, m.revs?.[recId])) continue;
-              const frames = items.filter((i) => i.kind === 'frame').map((i) => i.index);
-              rec.meta.frames = rec.meta.frames.filter((f) => !frames.includes(f.index));
-              await dropFrameBlobs(recId, frames);
-              // Lines are array positions: splice from the back so earlier ones hold.
-              const lines = items.filter((i) => i.kind === 'line').map((i) => i.index).sort((a, b) => b - a);
-              for (const index of lines) rec.meta.transcript.splice(index, 1);
-              await touch(rec);
-            }
-            return { ok: true };
-          }
-          case 'recording:frame:delete': {
+          case 'take:delete': {
             const rec = await idbGet('recordings', m.id);
-            if (rec) {
-              rec.meta.frames = rec.meta.frames.filter((f) => f.index !== m.index);
-              await dropFrameBlobs(m.id, [m.index]);
-              await touch(rec);
+            if (!rec) return { ok: false };
+            await dropFrameBlobs(rec.id, rec.meta.frames.map((f) => f.index));
+            await idbDel('blobs', `${rec.id}:video`);
+            await idbDel('recordings', rec.id);
+            // Whatever is left is re-laid 1..N in recorded order, like the worker.
+            const rest = (await idbBySession(rec.sessionId)).sort((a, b) => a.createdAt - b.createdAt);
+            for (let i = 0; i < rest.length; i++) {
+              if (rest[i].index !== i + 1) {
+                rest[i].index = i + 1;
+                await idbPut('recordings', rest[i]);
+              }
+            }
+            const session = await idbGet('sessions', rec.sessionId);
+            if (session) {
+              await idbPut('sessions', { ...session, recCount: rest.length, updatedAt: Date.now() });
             }
             return { ok: true };
           }
@@ -671,14 +700,6 @@
             }
             return { ok: true };
           }
-          case 'recording:line:delete': {
-            const rec = await idbGet('recordings', m.id);
-            if (rec && !stale(rec, m.rev)) {
-              rec.meta.transcript.splice(m.index, 1);
-              await touch(rec);
-            }
-            return { ok: true };
-          }
           case 'recording:transcript': {
             const rec = await idbGet('recordings', m.id);
             if (rec) {
@@ -686,14 +707,6 @@
               rec.meta.transcriber = 'whisper';
               // A fresh transcript is unread again, like the worker treats it.
               rec.meta.reviewed = false;
-              await touch(rec);
-            }
-            return { ok: true };
-          }
-          case 'recording:reviewed': {
-            const rec = await idbGet('recordings', m.id);
-            if (rec) {
-              rec.meta.reviewed = true;
               await touch(rec);
             }
             return { ok: true };
@@ -714,7 +727,7 @@
           }
           default:
             // Everything else the panel may send here — recording:start, the pointer
-            // and telemetry relays, strip:track, the hotkeys — has nothing to do
+            // and telemetry relays, the draw hotkey — has nothing to do
             // with layout. The harness never records.
             return { ok: true };
         }

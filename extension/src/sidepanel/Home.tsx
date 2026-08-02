@@ -172,7 +172,7 @@ export function Home({
           Screen + voice. Talk through what's wrong — it becomes a brief your team's agent can act
           on.
         </p>
-        <p className="hero-keys">alt+shift+M mark a moment · alt+shift+D draw</p>
+        <p className="hero-keys">alt+shift+D draw on the page</p>
       </section>
 
       {link ? (

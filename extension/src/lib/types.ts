@@ -32,40 +32,8 @@ export interface TranscriptSegment {
   text: string;
 }
 
-/** The live dictation engine's state, as the panel and the puck both report it. */
+/** The live dictation engine's state, as the panel reports it. */
 export type MicState = 'listening' | 'off' | 'denied' | 'error';
-
-/**
- * What the puck — the draggable PiP pointer that follows a walkthrough outside
- * Chrome — reports about itself, over `recording:puck`. Tip and window bounds
- * are DIPs relative to the display the puck is on (its own `screen`), the same
- * space the in-page samples use for `screenX/Y`.
- */
-export interface PuckTelemetry {
-  /** The arrow tip — the one pixel that means anything. */
-  sx: number;
-  sy: number;
-  /** The puck's display, for the aspect-ratio mapping. */
-  sw: number;
-  sh: number;
-  /** The whole window's outer bounds — its clock and captions repaint every second,
-   *  so this rect is masked out of dedup or the puck itself burns the frame budget. */
-  wx: number;
-  wy: number;
-  ww: number;
-  wh: number;
-}
-
-/** The panel's answer to a `recording:puck` heartbeat — the puck's readout. */
-export interface PuckBeat {
-  /** False (or a missing response) means the take ended: the puck should close. */
-  active: boolean;
-  /** Whether the tip currently maps into the captured frame. */
-  onFrame: boolean;
-  elapsedMs: number;
-  interim: string;
-  micState: MicState;
-}
 
 /** Where the mouse was, sampled by the recorded tab while a walkthrough runs. All lengths are CSS px. */
 export interface PointerSample {
@@ -104,12 +72,12 @@ export interface RecordingFrame {
   /** Path relative to the gripe folder’s take dir, e.g. frames/03-0125.jpg */
   file: string;
   /**
-   * Why this frame exists: first frame, dedup said "new", the human hit the mark
-   * hotkey, a click just happened in the recorded tab, the page navigated (SPA
+   * Why this frame exists: first frame, dedup said "new", a click just happened
+   * in the recorded tab (drawing a stroke counts as one), the page navigated (SPA
    * route or full load), or the heartbeat fired — nothing had been kept for a
    * while and the screen wasn't strictly identical.
    */
-  reason: 'start' | 'change' | 'mark' | 'click' | 'nav' | 'beat';
+  reason: 'start' | 'change' | 'click' | 'nav' | 'beat';
   /** Changed-cell count (of 64×64) vs the closest of the last kept frames (absent on the first). */
   dist?: number;
   /** Mouse at capture time, when the recorded tab was reporting it. */
@@ -174,7 +142,8 @@ export interface Session {
   createdAt: number;
   updatedAt: number;
   origin: string;
-  /** Source of the next part index. Deleting a part doesn't renumber. */
+  /** How many takes this gripe holds — the next one is `recCount + 1`. Deleting a
+   *  take renumbers the rest contiguously, so this is always their count. */
   recCount: number;
   /** Handed off and finished. A closed session never receives another part; activating it reopens it. */
   closed?: boolean;
@@ -205,9 +174,6 @@ export interface SessionSummary {
 export type TimelineRef =
   | { kind: 'frame'; recId: string; index: number } // RecordingFrame.index — identity, survives deletes
   | { kind: 'line'; recId: string; index: number }; // array position in meta.transcript
-
-/** A dragged item and where it landed. */
-export type TimelineMove = TimelineRef & { tl: number };
 
 /** One workspace this recorder can upload to. A link is a server + org + the token that opens it. */
 export interface WorkspaceLink {

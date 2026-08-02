@@ -446,7 +446,12 @@ const tokensRouter = router({
       return { canConnect: true, tokenCount: rows.length, lastUsedAt: iso(lastUsed) }
     }),
 
-  /** The raw token is returned exactly once, at creation. */
+  /**
+   * The raw token is returned exactly once, at creation. The row's `id` and
+   * `name` come back with it so the caller can offer a rename without a
+   * round-trip through `list` — /connect mints with an auto-generated name and
+   * lets you correct it afterwards rather than demanding one up front.
+   */
   create: protectedProcedure
     .input(z.object({ orgId: z.string(), name: z.string().trim().min(1).max(80) }))
     .mutation(async ({ ctx, input }) => {
@@ -454,7 +459,7 @@ const tokensRouter = router({
       // A token reads the whole org through /api/ingest — guests get none.
       requireOrgScope(access)
       const raw = `hb_${randomBytes(24).toString('base64url')}`
-      await prisma.apiToken.create({
+      const created = await prisma.apiToken.create({
         data: {
           orgId: input.orgId,
           userId: ctx.session.user.id,
@@ -463,7 +468,25 @@ const tokensRouter = router({
           lastFour: raw.slice(-4),
         },
       })
-      return { token: raw }
+      return { token: raw, id: created.id, name: created.name }
+    }),
+
+  /** Label only — renaming can't change what a token reaches. */
+  rename: protectedProcedure
+    .input(
+      z.object({
+        orgId: z.string(),
+        tokenId: z.string(),
+        name: z.string().trim().min(1).max(80),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      await requireMembership(ctx.session.user.id, input.orgId)
+      await prisma.apiToken.updateMany({
+        where: { id: input.tokenId, orgId: input.orgId, userId: ctx.session.user.id },
+        data: { name: input.name },
+      })
+      return { ok: true }
     }),
 
   revoke: protectedProcedure

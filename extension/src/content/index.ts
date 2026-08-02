@@ -5,10 +5,9 @@
  * drives all of it. Nothing here exists outside a recording.
  */
 import type { Broadcast, ContentCommand, Request } from '../lib/messages';
-import type { PageEvent, PuckBeat } from '../lib/types';
+import type { PageEvent } from '../lib/types';
 import { COBALT } from '../lib/types';
 import { createOverlay, type Overlay } from './ui';
-import { openPuck, puckSupported, type PuckHandle } from './puck';
 
 /** One freehand line, in CSS px so it survives a resize. */
 interface Stroke {
@@ -49,17 +48,6 @@ function boot() {
   let lastInkAt = 0;
   let inkRaf: number | null = null;
 
-  // The puck — the PiP pointer that follows the walkthrough outside Chrome. It
-  // must open from THIS page (Chrome honours requestWindow only in real tabs),
-  // so the dock is its door and this tab is its life: navigate away and it dies,
-  // and the dock button brings it back.
-  let puck: PuckHandle | null = null;
-  let puckOpening = false;
-  /** The panel's last verdict on whether the tip is inside the captured frame. */
-  let puckOnFrame = false;
-  /** Beats the panel failed to answer; a couple in a row means the take is gone. */
-  let puckMissed = 0;
-
   // The on-page recording dock. `dockOn` is "this tab is the one being recorded
   // and it still is".
   let dockOn = false;
@@ -73,15 +61,6 @@ function boot() {
       void chrome.runtime.sendMessage(message).catch(() => {});
     } catch {
       /* extension context gone; the page carries on */
-    }
-  }
-
-  /** Like `tell`, but the answer matters — the puck's messages are a dialogue. */
-  async function ask<T>(message: Request): Promise<T | null> {
-    try {
-      return ((await chrome.runtime.sendMessage(message)) as T | undefined) ?? null;
-    } catch {
-      return null;
     }
   }
 
@@ -346,7 +325,9 @@ function boot() {
       }
       touchInk();
       // Dedup would drop the drawn state as "the same screen"; force the keyframe.
-      tell({ type: 'recording:mark' });
+      // A stroke is a pointer gesture on the page, so it rides the click path —
+      // same rate limit, same reason in the report.
+      tell({ type: 'recording:force', why: 'click', origin: location.origin });
     };
     o.live.addEventListener('pointerup', endStroke);
     o.live.addEventListener('pointercancel', endStroke);
@@ -393,78 +374,11 @@ function boot() {
     if (overlay) paintLive(overlay);
   }
 
-  // ── the puck (recorded tab only, dock button `p`) ───────────────────────
-  /**
-   * Open/close the PiP pointer. Every ~150ms the puck reports its geometry and
-   * the panel answers with the readout (`PuckBeat`) — one message, both
-   * directions. A beat that says the take ended, or a couple that nobody
-   * answers, closes the puck from this side.
-   */
-  function togglePuck() {
-    if (puck) {
-      puck.close();
-      return;
-    }
-    if (!dockOn || puckOpening || !puckSupported()) return;
-    puckOpening = true;
-    openPuck({
-      onBeat: (telemetry) => {
-        void ask<PuckBeat>({ type: 'recording:puck', telemetry, origin: location.origin }).then(
-          (beat) => {
-            if (!puck) return;
-            if (!beat || !beat.active) {
-              // One unanswered beat can be a dropped message; three is a verdict.
-              if (++puckMissed >= 3) puck.close();
-              return;
-            }
-            puckMissed = 0;
-            puckOnFrame = beat.onFrame;
-            puck.update({
-              elapsedMs: beat.elapsedMs,
-              interim: beat.interim,
-              micState: beat.micState,
-              onFrame: beat.onFrame,
-            });
-          },
-        );
-      },
-      // Parking the arrow is pointing — the out-of-Chrome twin of an ink stroke
-      // ending. Only when it actually landed in the recording, though.
-      onParked: () => {
-        if (puckOnFrame) tell({ type: 'recording:mark' });
-      },
-      onPin: async () => {
-        const answer = await ask<{ n: number | null }>({
-          type: 'recording:pin',
-          origin: location.origin,
-        });
-        return answer?.n ?? null;
-      },
-      onMark: () => tell({ type: 'recording:mark' }),
-      onStop: () => tell({ type: 'recording:stop' }),
-      onClosed: () => {
-        puck = null;
-        puckOnFrame = false;
-        puckMissed = 0;
-        paintDock();
-      },
-    }).then(
-      (handle) => {
-        puckOpening = false;
-        puck = handle;
-        paintDock();
-      },
-      () => {
-        puckOpening = false;
-      },
-    );
-  }
-
   // ── the recording dock (recorded tab only) ──────────────────────────────
   /**
    * Everything you can do to a walkthrough while it runs, on the page you're
-   * walking through: watch the clock, draw or click, wipe the ink, mark this
-   * moment, stop. It arrives with the recording and leaves with it. The clock is
+   * walking through: watch the clock, draw or click, wipe the ink, stop. It
+   * arrives with the recording and leaves with it. The clock is
    * local — it starts when the dock does, so a tab that loaded mid-walkthrough
    * reads low, which nobody can see.
    */
@@ -486,7 +400,6 @@ function boot() {
 
   function closeDock() {
     dockOn = false;
-    puck?.close();
     exitLive();
     clearLive();
     if (dockTimer) window.clearInterval(dockTimer);
@@ -508,9 +421,6 @@ function boot() {
     // Only the word swaps — the `d` keycap beside it is part of the button.
     overlay.dockDrawLabel.textContent = liveOn ? 'click' : 'draw';
     overlay.dockDraw.classList.toggle('arm', liveOn);
-    // The puck's door: armed while the pointer is out, gone where PiP doesn't exist.
-    overlay.dockPoint.style.display = puckSupported() ? '' : 'none';
-    overlay.dockPoint.classList.toggle('arm', Boolean(puck));
     dockBox = null; // the label swap changes the pill's width
   }
 
@@ -539,15 +449,6 @@ function boot() {
     if (dockOn && overlay) sizeLive(overlay);
   }
 
-  function mark() {
-    tell({ type: 'recording:mark' });
-    // A mark leaves nothing on screen, so the button says it landed.
-    const button = overlay?.dockMark;
-    if (!button) return;
-    button.classList.add('arm');
-    window.setTimeout(() => button.classList.remove('arm'), 260);
-  }
-
   /**
    * The keys the dock's own labels advertise. Manifest commands can't do this —
    * chrome refuses to bind bare letters — so the page holds them, and only while
@@ -556,8 +457,6 @@ function boot() {
   const DOCK_KEYS: Record<string, () => void> = {
     d: toggleLive,
     c: clearLive,
-    p: togglePuck,
-    m: mark,
     s: () => tell({ type: 'recording:stop' }),
   };
 
@@ -566,8 +465,6 @@ function boot() {
   const DOCK_CODE_KEYS: Record<string, string> = {
     KeyD: 'd',
     KeyC: 'c',
-    KeyP: 'p',
-    KeyM: 'm',
     KeyS: 's',
   };
 
@@ -611,9 +508,7 @@ function boot() {
       const act = button.dataset.act;
       if (act === 'draw') toggleLive();
       else if (act === 'clear') clearLive();
-      else if (act === 'point') togglePuck();
       else if (act === 'stop') tell({ type: 'recording:stop' });
-      else if (act === 'mark') mark();
     });
   }
 

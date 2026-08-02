@@ -10,8 +10,6 @@ import type {
   Session,
   SessionSummary,
   Settings,
-  TimelineMove,
-  TimelineRef,
   WorkspaceLink,
 } from '../lib/types';
 import { COBALT, DEFAULT_SERVER, DEFAULT_SETTINGS, activeLink, linkId } from '../lib/types';
@@ -31,7 +29,7 @@ import { slugify, stamp } from '../lib/format';
 
 /**
  * The service worker is the only component that's always alive when it needs to
- * be, so it owns: the two hotkeys, the on-page dock's reach into every tab, and
+ * be, so it owns: the draw hotkey, the on-page dock's reach into every tab, and
  * the write path into IndexedDB. The side panel is a view over that state — a
  * part recorded while it's closed is still captured, and uploaded later.
  */
@@ -41,50 +39,12 @@ const SETTINGS = 'settings';
 const RECORDING_ACTIVE = 'recordingActive';
 /** Origin of the tab being recorded — scopes the on-page dock to that app's tabs. */
 const RECORDING_ORIGIN = 'recordingOrigin';
-/** kv: { stripId, parentId } — the popped editor strip and the window it's pinned under. */
-const STRIP_DOCK = 'stripDock';
 
 chrome.runtime.onInstalled.addListener((details) => {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
   // Only on a fresh install — an update or a browser restart must not steal a tab.
   if (details.reason === 'install') {
     chrome.tabs.create({ url: `${DEFAULT_SERVER}/recorder` }).catch(() => {});
-  }
-});
-
-/**
- * Chrome won't dock a window, so the worker fakes it: whenever the browser
- * window under the strip moves or resizes, the strip is re-pinned to its bottom
- * edge. The strip's own height is kept — resizing it taller is the user's call.
- */
-chrome.windows.onBoundsChanged.addListener(async (win) => {
-  const dock = await kv.get<{ stripId: number; parentId: number }>(STRIP_DOCK);
-  if (!dock || win.id !== dock.parentId) return;
-  const strip = await chrome.windows.get(dock.stripId).catch(() => null);
-  if (!strip) {
-    await kv.delete(STRIP_DOCK);
-    return;
-  }
-  const height = strip.height ?? 400;
-  await chrome.windows
-    .update(dock.stripId, {
-      left: win.left ?? 0,
-      width: win.width ?? 1200,
-      top: (win.top ?? 0) + (win.height ?? 0) - height,
-      height,
-    })
-    .catch(() => {});
-});
-
-// The strip has no life of its own: parent closes, strip closes.
-chrome.windows.onRemoved.addListener(async (windowId) => {
-  const dock = await kv.get<{ stripId: number; parentId: number }>(STRIP_DOCK);
-  if (!dock) return;
-  if (windowId === dock.parentId) {
-    await chrome.windows.remove(dock.stripId).catch(() => {});
-    await kv.delete(STRIP_DOCK);
-  } else if (windowId === dock.stripId) {
-    await kv.delete(STRIP_DOCK);
   }
 });
 
@@ -177,20 +137,6 @@ async function ensureSession(name: string, origin: string): Promise<Session> {
   return createSession(name, origin);
 }
 
-/**
- * Did the caller see this recording as it is now? A Whisper pass replaces the
- * whole transcript array, so a positional line edit built against the old one
- * would land on the wrong words. No rev supplied = no claim made = go ahead.
- */
-function freshFor(
-  revs: Record<string, number> | undefined,
-  id: string,
-  rev: number | undefined,
-): boolean {
-  const seen = revs?.[id];
-  return seen === undefined || seen === (rev ?? 0);
-}
-
 /** What a part starts life with — `recording:progress` overwrites it wholesale. */
 function emptyMeta(now: number): RecordingMeta {
   return {
@@ -264,17 +210,9 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 
 chrome.commands.onCommand.addListener((command) => {
   if (command === 'draw-live') void drawLive();
-  // The recorder lives in the panel; a command only reaches the worker, so relay it.
-  if (command === 'mark-frame') {
-    chrome.runtime.sendMessage({ type: 'recording:mark' }).catch(() => {});
-  }
 });
 
 chrome.runtime.onMessage.addListener((message: Request, _sender, sendResponse) => {
-  // The puck's heartbeat and pin want the PANEL's answer (it owns the recorder).
-  // Unlike the fire-and-forget relays below, answering `ok` here would race the
-  // panel's real response for the one reply channel — so the worker stays out.
-  if (message.type === 'recording:puck' || message.type === 'recording:pin') return false;
   (async () => {
     switch (message.type) {
       case 'settings:get':
@@ -334,6 +272,27 @@ chrome.runtime.onMessage.addListener((message: Request, _sender, sendResponse) =
       case 'session:delete': {
         await deleteSession(message.id);
         if ((await kv.get<string>(ACTIVE_SESSION)) === message.id) await resumeOpen();
+        await updateBadge();
+        await broadcast();
+        return { ok: true };
+      }
+      case 'take:delete': {
+        const rec = await getRecording(message.id);
+        if (!rec) return { ok: false };
+        await deleteRecording(message.id);
+        // The takes that remain are re-laid 1..N in the order they were recorded:
+        // `rec-NN` is a position in this gripe, not a serial number, and a gap in
+        // it would put a hole in the axis the report and the upload both walk.
+        const rest = (await listRecordings(rec.sessionId)).sort(
+          (a, b) => a.createdAt - b.createdAt,
+        );
+        for (const [i, take] of rest.entries()) {
+          if (take.index !== i + 1) await putRecording({ ...take, index: i + 1 });
+        }
+        const session = await getSession(rec.sessionId);
+        if (session) {
+          await putSession({ ...session, recCount: rest.length, updatedAt: Date.now() });
+        }
         await updateBadge();
         await broadcast();
         return { ok: true };
@@ -440,22 +399,6 @@ chrome.runtime.onMessage.addListener((message: Request, _sender, sendResponse) =
         await setRecordingActive(message.active);
         return { ok: true };
       }
-      case 'recording:frame:delete': {
-        const rec = await getRecording(message.id);
-        if (!rec) return { ok: false };
-        await blobs.delete(`${message.id}:frame:${message.index}`);
-        // Frames are never renumbered.
-        await putRecording({
-          ...rec,
-          meta: {
-            ...rec.meta,
-            frames: rec.meta.frames.filter((f) => f.index !== message.index),
-            rev: (rec.meta.rev ?? 0) + 1,
-          },
-        });
-        await broadcast();
-        return { ok: true };
-      }
       case 'recording:line:update': {
         const rec = await getRecording(message.id);
         if (!rec) return { ok: false };
@@ -475,100 +418,6 @@ chrome.runtime.onMessage.addListener((message: Request, _sender, sendResponse) =
         await broadcast();
         return { ok: true };
       }
-      case 'recording:line:delete': {
-        const rec = await getRecording(message.id);
-        if (!rec) return { ok: false };
-        if (message.rev !== undefined && message.rev !== (rec.meta.rev ?? 0)) {
-          return { ok: true, stale: true };
-        }
-        await putRecording({
-          ...rec,
-          meta: {
-            ...rec.meta,
-            transcript: rec.meta.transcript.filter((_, i) => i !== message.index),
-            rev: (rec.meta.rev ?? 0) + 1,
-          },
-        });
-        await broadcast();
-        return { ok: true };
-      }
-      case 'timeline:move': {
-        const byRec = new Map<string, TimelineMove[]>();
-        let stale = false;
-        for (const move of message.moves) {
-          byRec.set(move.recId, [...(byRec.get(move.recId) ?? []), move]);
-        }
-        // One write per record, however many items the drag picked up.
-        for (const [id, moves] of byRec) {
-          const rec = await getRecording(id);
-          if (!rec) continue;
-          // Frames are addressed by identity and survive anything; lines are array
-          // positions, so a transcript swapped under the drag makes them meaningless.
-          const fresh = freshFor(message.revs, id, rec.meta.rev);
-          if (!fresh) stale = true;
-          const frames = new Map<number, number>();
-          const lines = new Map<number, number>();
-          for (const move of moves) {
-            if (move.kind === 'frame') frames.set(move.index, move.tl);
-            else if (fresh) lines.set(move.index, move.tl);
-          }
-          if (!frames.size && !lines.size) continue;
-          await putRecording({
-            ...rec,
-            meta: {
-              ...rec.meta,
-              frames: rec.meta.frames.map((f) =>
-                frames.has(f.index) ? { ...f, tl: frames.get(f.index) } : f,
-              ),
-              transcript: rec.meta.transcript.map((s, i) =>
-                lines.has(i) ? { ...s, tl: lines.get(i) } : s,
-              ),
-              rev: (rec.meta.rev ?? 0) + 1,
-            },
-          });
-        }
-        await broadcast();
-        return stale ? { ok: true, stale: true } : { ok: true };
-      }
-      case 'timeline:delete': {
-        const byRec = new Map<string, TimelineRef[]>();
-        let stale = false;
-        for (const item of message.items) {
-          byRec.set(item.recId, [...(byRec.get(item.recId) ?? []), item]);
-        }
-        for (const [id, items] of byRec) {
-          const rec = await getRecording(id);
-          if (!rec) continue;
-          // Same split as timeline:move — identity-addressed frames go, positional
-          // lines don't when the transcript is not the one the caller saw.
-          const fresh = freshFor(message.revs, id, rec.meta.rev);
-          if (!fresh) stale = true;
-          const frames = new Set<number>();
-          const lines = new Set<number>();
-          for (const item of items) {
-            if (item.kind === 'frame') frames.add(item.index);
-            else if (fresh) lines.add(item.index);
-          }
-          if (!frames.size && !lines.size) continue;
-          for (const index of frames) await blobs.delete(`${id}:frame:${index}`);
-          // Lines are addressed by array position; splice from the back so the
-          // earlier indexes still mean what the caller meant.
-          const transcript = [...rec.meta.transcript];
-          for (const index of [...lines].sort((a, b) => b - a)) transcript.splice(index, 1);
-          await putRecording({
-            ...rec,
-            meta: {
-              ...rec.meta,
-              // Frames are never renumbered.
-              frames: rec.meta.frames.filter((f) => !frames.has(f.index)),
-              transcript,
-              rev: (rec.meta.rev ?? 0) + 1,
-            },
-          });
-        }
-        await broadcast();
-        return stale ? { ok: true, stale: true } : { ok: true };
-      }
       case 'recording:transcript': {
         const rec = await getRecording(message.id);
         if (!rec) return { ok: false };
@@ -585,20 +434,6 @@ chrome.runtime.onMessage.addListener((message: Request, _sender, sendResponse) =
           },
         });
         await broadcast();
-        return { ok: true };
-      }
-      case 'recording:reviewed': {
-        const rec = await getRecording(message.id);
-        if (!rec) return { ok: false };
-        await putRecording({
-          ...rec,
-          meta: { ...rec.meta, reviewed: true, rev: (rec.meta.rev ?? 0) + 1 },
-        });
-        await broadcast();
-        return { ok: true };
-      }
-      case 'strip:track': {
-        await kv.set(STRIP_DOCK, { stripId: message.stripId, parentId: message.parentId });
         return { ok: true };
       }
       case 'recording:event':

@@ -1,11 +1,15 @@
 // /connect — the page that turns "someone recorded a walkthrough" into "my agent can
-// read it." Three numbered steps in the editorial style (ui.md): mint a token,
-// paste one command, confirm the agent landed.
+// read it."
 //
-// The whole design goal is that step 2's command is copy-paste-complete. A
-// token minted in step 1 is held in memory and interpolated into the command
-// below it, so nobody has to shuttle a secret between two screens. Reload the
-// page and it's gone — the raw token exists exactly once, at creation.
+// The whole page is one button and one paste. Landing here means you need an
+// agent connected, and because a raw token is shown exactly once and is never
+// recoverable, minting a fresh one is always the right answer — so the page just
+// does it. One click mints a token, bakes it into the `claude mcp add` command,
+// and puts the Copy button under your cursor. Naming the token is an optional
+// correction afterwards, never a gate in front.
+//
+// Everything else on the page — the tools reference, disconnect instructions,
+// the token list — is reference material and sits below that path, unnumbered.
 
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
@@ -13,15 +17,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, Copy, Terminal } from 'lucide-react'
 import { Button } from '~/components/ui/button'
 import { Input } from '~/components/ui/input'
-import { Label } from '~/components/ui/label'
-import { Step } from '~/components/setup-step'
+import { Step, autoTokenName } from '~/components/setup-step'
 import { useCopy } from '~/components/viewer/use-copy'
 import { useActiveOrg, type OrgSummary } from '~/lib/org'
 import { useTRPC } from '~/lib/trpc'
 import { cn } from '~/lib/utils'
 
-/** The placeholder that stands in for a real token until one is minted. */
-const TOKEN_PLACEHOLDER = 'hb_your_token_here'
+/** Stands in for a real token in the inert preview command. Never copyable. */
+const TOKEN_PLACEHOLDER = 'hb_…'
 
 type Agent = 'claude-code' | 'codex'
 
@@ -30,12 +33,15 @@ const AGENTS: Array<{ id: Agent; label: string; soon: boolean }> = [
   { id: 'codex', label: 'OpenAI Codex', soon: true },
 ]
 
+/** A token this page minted, held in memory only — reload and the raw value is gone. */
+type Minted = { token: string; id: string; name: string }
+
 export function ConnectPage() {
   const { org, orgsLoaded } = useActiveOrg()
 
   if (!org) {
     return orgsLoaded ? (
-      <Prose>
+      <div className="max-w-3xl">
         <h1 className="font-display text-3xl font-semibold">Connect your coding agent</h1>
         <p className="text-muted-foreground mt-3 text-sm">
           Your workspace is still being set up —{' '}
@@ -44,17 +50,13 @@ export function ConnectPage() {
           </Link>
           . Tokens belong to a workspace, so there has to be one to belong to.
         </p>
-      </Prose>
+      </div>
     ) : (
       <p className="text-muted-foreground text-sm">Loading…</p>
     )
   }
 
   return <Connect key={org.id} org={org} />
-}
-
-function Prose({ children }: { children: React.ReactNode }) {
-  return <div className="max-w-3xl">{children}</div>
 }
 
 function Connect({ org }: { org: OrgSummary }) {
@@ -67,13 +69,12 @@ function Connect({ org }: { org: OrgSummary }) {
   const trpc = useTRPC()
   const connection = useQuery({
     ...trpc.tokens.connection.queryOptions({ orgId: org.id }),
-    // Step 3 is a live check: once the page is open, someone is actively
-    // wiring an agent up and wants to see it land.
+    // A live check: once the page is open, someone is actively wiring an agent
+    // up and wants to see it land.
     refetchInterval: 5000,
   })
 
-  const [freshToken, setFreshToken] = useState<string | null>(null)
-  const token = freshToken ?? TOKEN_PLACEHOLDER
+  const [minted, setMinted] = useState<Minted | null>(null)
   const canConnect = connection.data?.canConnect ?? true
 
   return (
@@ -87,9 +88,9 @@ function Connect({ org }: { org: OrgSummary }) {
         </h1>
         <p className="text-muted-foreground text-base leading-relaxed">
           Every walkthrough in {org.name} was recorded for you: someone walked through the problem
-          out loud, and the recorder wrote it up as a brief. Point your agent at this workspace and
-          it can pull that brief — narration, keyframes, console errors and all — fix the thing, and
-          hand it back for a human to sign off.
+          out loud, and the recorder wrote it up as a brief. One button below, one paste into your
+          terminal, and your agent can pull that brief — narration, keyframes, console errors and
+          all — fix the thing, and hand it back for a human to sign off.
         </p>
       </header>
 
@@ -123,17 +124,246 @@ function Connect({ org }: { org: OrgSummary }) {
         <ClaudeCodeSteps
           org={org}
           origin={origin}
-          token={token}
-          hasFreshToken={freshToken !== null}
-          onToken={setFreshToken}
+          minted={minted}
+          onMinted={setMinted}
           tokenCount={connection.data?.tokenCount ?? 0}
           lastUsedAt={connection.data?.lastUsedAt ?? null}
         />
       )}
 
       <ToolReference />
+      {agent === 'claude-code' && canConnect && <WorkOne />}
       {agent === 'claude-code' && canConnect && <Disconnect origin={origin} />}
       {canConnect && <TokenManager org={org} />}
+    </div>
+  )
+}
+
+/**
+ * The one-click path. Two numbered steps, and the first is a single button:
+ * everything a person has to decide (which token, what to call it, where the
+ * secret goes) is decided for them, because there is no answer here that isn't
+ * "mint a fresh one and put it in the command".
+ */
+function ClaudeCodeSteps({
+  org,
+  origin,
+  minted,
+  onMinted,
+  tokenCount,
+  lastUsedAt,
+}: {
+  org: OrgSummary
+  origin: string
+  minted: Minted | null
+  onMinted: (minted: Minted) => void
+  tokenCount: number
+  lastUsedAt: string | null
+}) {
+  const command = mcpCommand(origin, minted?.token ?? TOKEN_PLACEHOLDER)
+
+  return (
+    <div className="space-y-12">
+      <Step
+        n="01"
+        title="Add Handback to Claude Code"
+        blurb="One command, any directory. Nothing is installed and there's no repo to clone — Claude Code talks to this workspace over HTTP.">
+        <CommandGate org={org} command={command} minted={minted} onMinted={onMinted} />
+        <ul className="text-muted-foreground mt-5 space-y-2 text-sm">
+          <li className="flex gap-2">
+            <span className="text-cobalt">·</span>
+            <span>
+              Add <code className="font-mono text-xs">-s user</code> to make Handback available in
+              every project on this machine instead of just the current one.
+            </span>
+          </li>
+          <li className="flex gap-2">
+            <span className="text-cobalt">·</span>
+            <span>
+              Already have a <code className="font-mono text-xs">handback</code> server configured?
+              Run <code className="font-mono text-xs">claude mcp remove handback</code> first.
+            </span>
+          </li>
+          <li className="flex gap-2">
+            <span className="text-cobalt">·</span>
+            <span>
+              MCP servers load when a session starts — <strong>restart Claude Code</strong> (or open
+              a new session) before the tools show up.
+            </span>
+          </li>
+        </ul>
+      </Step>
+
+      <Step
+        n="02"
+        title="Check it worked"
+        blurb="Start a session and ask for the queue. If the tools are wired up, Claude answers from your inbox instead of guessing.">
+        <PromptBlock>list my handback walkthroughs</PromptBlock>
+        <ConnectionStatus lastUsedAt={lastUsedAt} tokenCount={tokenCount} />
+      </Step>
+    </div>
+  )
+}
+
+function mcpCommand(origin: string, token: string): string {
+  return [
+    'claude mcp add --transport http handback \\',
+    `  ${origin}/mcp \\`,
+    `  --header "Authorization: Bearer ${token}"`,
+  ].join('\n')
+}
+
+/**
+ * Before the click: the command rendered visibly inert — dimmed, no Copy button
+ * — so nobody walks off with a placeholder in their config. After it: the real
+ * thing, with the token already in it and Copy under the cursor.
+ */
+function CommandGate({
+  org,
+  command,
+  minted,
+  onMinted,
+}: {
+  org: OrgSummary
+  command: string
+  minted: Minted | null
+  onMinted: (minted: Minted) => void
+}) {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+
+  const create = useMutation(
+    trpc.tokens.create.mutationOptions({
+      onSuccess: (result) => {
+        onMinted({ token: result.token, id: result.id, name: result.name })
+        void queryClient.invalidateQueries({
+          queryKey: trpc.tokens.connection.queryKey({ orgId: org.id }),
+        })
+        void queryClient.invalidateQueries({
+          queryKey: trpc.tokens.list.queryKey({ orgId: org.id }),
+        })
+      },
+    })
+  )
+
+  if (minted) {
+    return (
+      <div className="space-y-4">
+        <CommandBlock command={command} />
+        <p className="text-muted-foreground text-sm">
+          Your token is already in that command. It's shown here once and never again — only its
+          hash is stored.
+        </p>
+        <TokenAftercare org={org} minted={minted} />
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <Button
+        type="button"
+        size="lg"
+        disabled={create.isPending}
+        onClick={() =>
+          create.mutate({
+            orgId: org.id,
+            name: autoTokenName('Claude Code', navigator.userAgent, new Date()),
+          })
+        }>
+        {create.isPending ? 'Building your command…' : 'Create my command'}
+      </Button>
+      <p className="text-muted-foreground text-sm">
+        Mints an API token for {org.name} and drops it straight into the command below. Nothing to
+        name, nothing to paste twice.
+      </p>
+      {create.isError && <p className="text-destructive text-sm">{create.error.message}</p>}
+      <CommandBlock command={command} inert />
+    </div>
+  )
+}
+
+/**
+ * The two things you might still want after the copy, both folded away: the bare
+ * token (for a config file or the CLI) and a better name than the one we guessed.
+ * Neither is on the path to a working agent, so neither gets to sit on it.
+ */
+function TokenAftercare({ org, minted }: { org: OrgSummary; minted: Minted }) {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const [name, setName] = useState(minted.name)
+  const [saved, setSaved] = useState(minted.name)
+  const [renaming, setRenaming] = useState(false)
+
+  const rename = useMutation(
+    trpc.tokens.rename.mutationOptions({
+      onSuccess: (_result, variables) => {
+        setSaved(variables.name)
+        setRenaming(false)
+        void queryClient.invalidateQueries({
+          queryKey: trpc.tokens.list.queryKey({ orgId: org.id }),
+        })
+      },
+    })
+  )
+
+  return (
+    <div className="space-y-3">
+      <details className="group">
+        <summary className="text-muted-foreground hover:text-foreground cursor-pointer list-none text-sm underline decoration-dotted underline-offset-4 marker:content-['']">
+          Need the token on its own?
+        </summary>
+        <div className="mt-3 space-y-2">
+          <p className="text-muted-foreground text-sm">
+            For the CLI, the recorder's settings, or a config file you edit by hand.
+          </p>
+          <CopyRow value={minted.token} />
+        </div>
+      </details>
+
+      {renaming ? (
+        <form
+          className="flex flex-wrap items-center gap-2"
+          onSubmit={(e) => {
+            e.preventDefault()
+            const trimmed = name.trim()
+            if (!trimmed || rename.isPending) return
+            rename.mutate({ orgId: org.id, tokenId: minted.id, name: trimmed })
+          }}>
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            maxLength={80}
+            autoComplete="off"
+            aria-label="Token name"
+            className="h-8 max-w-64 text-sm"
+          />
+          <Button type="submit" variant="outline" size="sm" disabled={rename.isPending}>
+            {rename.isPending ? 'Saving…' : 'Save'}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setName(saved)
+              setRenaming(false)
+            }}>
+            Cancel
+          </Button>
+        </form>
+      ) : (
+        <p className="text-muted-foreground text-sm">
+          Filed as <span className="text-foreground font-medium">{saved}</span>.{' '}
+          <button
+            type="button"
+            className="text-primary underline underline-offset-4"
+            onClick={() => setRenaming(true)}>
+            Rename
+          </button>
+        </p>
+      )}
+      {rename.isError && <p className="text-destructive text-sm">{rename.error.message}</p>}
     </div>
   )
 }
@@ -149,15 +379,14 @@ function fmtDate(value: string | null) {
 }
 
 /**
- * The management half: every token this workspace holds, and the door to a new
- * one. Step 01 above mints tokens for the flow; this is the list you come back
- * to when you need to revoke one.
+ * Reference, not a step: the list you come back to when you want to cut one off.
+ * There is deliberately no "create" form here — the button at the top of the
+ * page is the one way to mint, so there's never a question about which control
+ * to use.
  */
 function TokenManager({ org }: { org: OrgSummary }) {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
-  const [name, setName] = useState('')
-  const [rawToken, setRawToken] = useState<string | null>(null)
 
   const tokensQuery = useQuery(trpc.tokens.list.queryOptions({ orgId: org.id }))
   const invalidate = () => {
@@ -166,16 +395,6 @@ function TokenManager({ org }: { org: OrgSummary }) {
       queryKey: trpc.tokens.connection.queryKey({ orgId: org.id }),
     })
   }
-
-  const create = useMutation(
-    trpc.tokens.create.mutationOptions({
-      onSuccess: (result) => {
-        setRawToken(result.token)
-        setName('')
-        invalidate()
-      },
-    })
-  )
   const revoke = useMutation(trpc.tokens.revoke.mutationOptions({ onSuccess: invalidate }))
 
   return (
@@ -183,7 +402,8 @@ function TokenManager({ org }: { org: OrgSummary }) {
       <h2 className="font-display text-xl font-semibold">Your API tokens</h2>
       <p className="text-muted-foreground mt-2 max-w-2xl text-sm leading-relaxed">
         These authenticate the recorder, the CLI, and the MCP server. They're yours alone and scoped
-        to {org.name}; revoking one disconnects whatever holds it.
+        to {org.name}; revoking one disconnects whatever holds it. Old ones keep working until you
+        revoke them — a new one never displaces them.
       </p>
 
       <div className="mt-5 space-y-3">
@@ -236,42 +456,6 @@ function TokenManager({ org }: { org: OrgSummary }) {
         )}
         {revoke.isError && <p className="text-destructive text-sm">{revoke.error.message}</p>}
       </div>
-
-      <form
-        className="mt-6 max-w-xl space-y-4"
-        onSubmit={(e) => {
-          e.preventDefault()
-          const trimmed = name.trim()
-          if (!trimmed || create.isPending) return
-          create.mutate({ orgId: org.id, name: trimmed })
-        }}>
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="min-w-48 flex-1 space-y-2">
-            <Label htmlFor="manage-token-name">New token</Label>
-            <Input
-              id="manage-token-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="laptop"
-              maxLength={80}
-              autoComplete="off"
-              required
-            />
-          </div>
-          <Button type="submit" disabled={create.isPending || !name.trim()}>
-            {create.isPending ? 'Creating…' : 'Create token'}
-          </Button>
-        </div>
-        {create.isError && <p className="text-destructive text-sm">{create.error.message}</p>}
-        {rawToken && (
-          <div className="border-cobalt/40 bg-cobalt-wash space-y-2 rounded-md border p-4">
-            <p className="text-cobalt text-sm font-medium">
-              Copy it now — it won't be shown again.
-            </p>
-            <CopyRow value={rawToken} />
-          </div>
-        )}
-      </form>
     </section>
   )
 }
@@ -335,8 +519,8 @@ function Disconnect({ origin }: { origin: string }) {
           </p>
           <p className="text-muted-foreground mt-3 text-sm">
             Tokens can't be un-revoked and the raw value is never recoverable — if you revoke by
-            mistake, create a new one and re-run the add command with it. Removing a member from the
-            workspace revokes their tokens automatically.
+            mistake, hit <span className="font-medium">Create my command</span> again and run the
+            new one. Removing a member from the workspace revokes their tokens automatically.
           </p>
         </div>
       </div>
@@ -350,173 +534,25 @@ function Disconnect({ origin }: { origin: string }) {
   )
 }
 
-function ClaudeCodeSteps({
-  org,
-  origin,
-  token,
-  hasFreshToken,
-  onToken,
-  tokenCount,
-  lastUsedAt,
-}: {
-  org: OrgSummary
-  origin: string
-  token: string
-  hasFreshToken: boolean
-  onToken: (token: string) => void
-  tokenCount: number
-  lastUsedAt: string | null
-}) {
-  const command = [
-    'claude mcp add --transport http handback \\',
-    `  ${origin}/mcp \\`,
-    `  --header "Authorization: Bearer ${token}"`,
-  ].join('\n')
-
+/** Not a setup step — the first thing worth saying once setup is done. */
+function WorkOne() {
   return (
-    <div className="space-y-12">
-      <Step
-        n="01"
-        title="Create an API token"
-        blurb="It authenticates your agent as a member of this workspace. Only the hash is stored — the token itself is shown once, here, and never again.">
-        <TokenMinter org={org} onToken={onToken} tokenCount={tokenCount} />
-      </Step>
-
-      <Step
-        n="02"
-        title="Add Handback to Claude Code"
-        blurb="One command, any directory. Nothing is installed and there's no repo to clone — Claude Code talks to the workspace over HTTP.">
-        <CommandBlock command={command} />
-        {!hasFreshToken && (
-          <p className="text-muted-foreground mt-3 text-sm">
-            Swap <code className="font-mono text-xs">{TOKEN_PLACEHOLDER}</code> for a real token —
-            or mint one in step 01 and this command fills itself in.
-          </p>
-        )}
-        <ul className="text-muted-foreground mt-4 space-y-2 text-sm">
-          <li className="flex gap-2">
-            <span className="text-cobalt">·</span>
-            <span>
-              Add <code className="font-mono text-xs">-s user</code> to make Handback available in
-              every project on this machine instead of just the current one.
-            </span>
-          </li>
-          <li className="flex gap-2">
-            <span className="text-cobalt">·</span>
-            <span>
-              Already have a <code className="font-mono text-xs">handback</code> server configured?
-              Run <code className="font-mono text-xs">claude mcp remove handback</code> first.
-            </span>
-          </li>
-          <li className="flex gap-2">
-            <span className="text-cobalt">·</span>
-            <span>
-              MCP servers are loaded when a session starts — <strong>restart Claude Code</strong>{' '}
-              (or open a new session) before the tools show up.
-            </span>
-          </li>
-        </ul>
-      </Step>
-
-      <Step
-        n="03"
-        title="Check it worked"
-        blurb="Start a session and ask for the queue. If the tools are wired up, Claude answers from your inbox instead of guessing.">
-        <PromptBlock>list my handback walkthroughs</PromptBlock>
-        <ConnectionStatus lastUsedAt={lastUsedAt} tokenCount={tokenCount} />
-      </Step>
-
-      <Step
-        n="04"
-        title="Work one"
-        blurb="A walkthrough carries its own instructions — report.md is written for an agent, not for a person. Paste a line like this and the agent takes it from there.">
+    <section className="border-border border-t pt-6">
+      <h2 className="font-display text-xl font-semibold">Putting it to work</h2>
+      <p className="text-muted-foreground mt-2 text-sm leading-relaxed">
+        A walkthrough carries its own instructions — report.md is written for an agent, not for a
+        person. Say something like this and it takes it from there.
+      </p>
+      <div className="mt-5">
         <PromptBlock>
           Pull the newest open walkthrough from handback, read its report.md, and fix it. Set it to
           in_review when the fix is up.
         </PromptBlock>
-        <p className="text-muted-foreground mt-3 text-sm">
-          Or hand it a specific one — every walkthrough page has a copyable prompt with its id in
-          it.
-        </p>
-      </Step>
-    </div>
-  )
-}
-
-function TokenMinter({
-  org,
-  onToken,
-  tokenCount,
-}: {
-  org: OrgSummary
-  onToken: (token: string) => void
-  tokenCount: number
-}) {
-  const trpc = useTRPC()
-  const queryClient = useQueryClient()
-  const [name, setName] = useState('')
-  const [minted, setMinted] = useState<string | null>(null)
-
-  const create = useMutation(
-    trpc.tokens.create.mutationOptions({
-      onSuccess: (result) => {
-        setMinted(result.token)
-        onToken(result.token)
-        setName('')
-        void queryClient.invalidateQueries({
-          queryKey: trpc.tokens.connection.queryKey({ orgId: org.id }),
-        })
-      },
-    })
-  )
-
-  return (
-    <div>
-      <form
-        className="flex flex-wrap items-end gap-3"
-        onSubmit={(e) => {
-          e.preventDefault()
-          const trimmed = name.trim()
-          if (!trimmed || create.isPending) return
-          create.mutate({ orgId: org.id, name: trimmed })
-        }}>
-        <div className="min-w-56 flex-1 space-y-2">
-          <Label htmlFor="connect-token-name">Name it after the machine or agent</Label>
-          <Input
-            id="connect-token-name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="claude code — laptop"
-            maxLength={80}
-            autoComplete="off"
-            required
-          />
-        </div>
-        <Button type="submit" disabled={create.isPending || !name.trim()}>
-          {create.isPending ? 'Creating…' : 'Create token'}
-        </Button>
-      </form>
-
-      {create.isError && <p className="text-destructive mt-3 text-sm">{create.error.message}</p>}
-
-      {minted && (
-        <div className="border-cobalt/40 bg-cobalt-wash mt-4 space-y-2 rounded-md border p-4">
-          <p className="text-cobalt text-sm font-medium">
-            Copy it now — it won't be shown again. It's already in the command below.
-          </p>
-          <CopyRow value={minted} />
-        </div>
-      )}
-
-      {!minted && tokenCount > 0 && (
-        <p className="text-muted-foreground mt-4 text-sm">
-          This workspace already has {tokenCount} active {tokenCount === 1 ? 'token' : 'tokens'}. If
-          you still have one, use it below — otherwise create a fresh one; old tokens keep working
-          until you revoke them under <span className="font-medium">Your API tokens</span> at the
-          bottom of this page.
-        </p>
-      )}
-    </div>
+      </div>
+      <p className="text-muted-foreground mt-3 text-sm">
+        Or hand it a specific one — every walkthrough page has a copyable prompt with its id in it.
+      </p>
+    </section>
   )
 }
 
@@ -538,25 +574,45 @@ function CopyRow({ value }: { value: string }) {
   )
 }
 
-/** A shell command, with the copy button that is the actual point of the page. */
-function CommandBlock({ command }: { command: string }) {
+/**
+ * A shell command, with the copy button that is the actual point of the page.
+ * `inert` renders the preview: dimmed, and with no Copy button at all, because a
+ * command carrying a placeholder token is one that must not be pasted anywhere.
+ */
+function CommandBlock({ command, inert = false }: { command: string; inert?: boolean }) {
   const { copied, copy } = useCopy()
   return (
-    <div className="border-border bg-card relative rounded-md border">
+    <div
+      className={cn(
+        'border-border bg-card relative rounded-md border',
+        inert && 'bg-muted/30 opacity-60'
+      )}>
       <div className="border-border text-muted-foreground flex items-center gap-2 border-b px-3 py-2">
         <Terminal className="size-3.5" />
         <span className="font-mono text-xs">terminal</span>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="ml-auto h-7"
-          onClick={() => void copy(command)}>
-          {copied ? <Check /> : <Copy />}
-          {copied ? 'Copied' : 'Copy'}
-        </Button>
+        {inert ? (
+          <span className="ml-auto font-mono text-xs">preview</span>
+        ) : (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="ml-auto h-7"
+            onClick={() => void copy(command)}>
+            {copied ? <Check /> : <Copy />}
+            {copied ? 'Copied' : 'Copy'}
+          </Button>
+        )}
       </div>
-      <pre className="overflow-x-auto p-4 font-mono text-xs leading-relaxed">{command}</pre>
+      <pre
+        className={cn(
+          'overflow-x-auto p-4 font-mono text-xs leading-relaxed',
+          // A placeholder command must not be selectable-and-pasteable either;
+          // dimming alone still leaves a drag-select waiting to go wrong.
+          inert && 'select-none'
+        )}>
+        {command}
+      </pre>
     </div>
   )
 }
@@ -605,7 +661,7 @@ function ConnectionStatus({
       <span className="bg-muted-foreground/40 size-2 shrink-0 animate-pulse rounded-full" />
       <p className="text-muted-foreground text-sm">
         {tokenCount === 0
-          ? 'No token yet — start at step 01. This line turns green the moment an agent calls in.'
+          ? 'No token yet — hit the button in step 01. This line turns green the moment an agent calls in.'
           : 'Waiting for the first call. This line turns green the moment an agent uses a token.'}
       </p>
     </div>

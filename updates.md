@@ -2,6 +2,43 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-08-01 — the walkthrough panel, rebuilt ("i hate this ui. god i hate it so much")
+Asked: the recorder panel's walkthrough surface — four bands of chrome, a timeline nobody could
+use, no way to drop a take, no way to pick a project.
+Done: **deleted** the puck (content/puck.ts + every message/type/CSS behind it), the popped editor
+strip (`?pop`, `strip:track`, the whole `wide` layout), **mark** (hotkey, dock key, `reason`
+member, report ★ annotations + counts, the never-thin carve-out), the timeline's **entire
+selection model** (sweep, marquee, modifier clicks, `delete N items`, drag-to-move — and the now
+callerless `timeline:move`/`timeline:delete`/`recording:frame:delete`/`recording:line:delete`),
+and the transcript's `reads right` pill. **Built**: the timeline as a pure scrubber (one gesture,
+pointer-down anywhere on the axis); a **take lane** with per-take delete (`take:delete` — drops
+row/frames/blobs, renumbers the rest 1..N) arming inline and clamped into the viewport; an
+empty-timeline branch (`.tl.bare` — one line, no ruler/well/scrollbar); a two-row header
+(crumb+meta, then title + `record a take`); zoom folded small and right-aligned into the readout
+row; and a **project picker that never hides** (`no project` / `projects unavailable · retry`, plus
+a route to /projects). Harness gained `mode=fresh` and `?ctx=none|fail`. Verified: root typecheck
+and `extension: tsc` green, both vite builds green, all modes walked at 380/560 in the harness
+(take delete → renumber → last-take-gone → fresh empty state). Nothing under server/ or src/ reads
+`reason`, so dropping `mark` from recording.json is safe.
+Touched: extension/src/{lib/{types,messages,report}.ts, background/index.ts, content/{index,ui}.ts,
+sidepanel/{App,Timeline,Home}.tsx, sidepanel/{recorder.ts,panel.css,timeline.css}},
+extension/public/manifest.json, extension/scripts/preview*
+
+## 2026-08-01 — /connect is one button and one paste ("i hate it, i need it to be better")
+Asked: /connect demanded ~9 interactions — name a token, create it, then reason about "you already
+have 2 active tokens" before a command with `hb_your_token_here` in it became copyable.
+Done: collapsed the mint + command into **one cobalt "Create my command"** button — auto-names the
+token (`Claude Code — <OS>, <date>`, `autoTokenName` in setup-step.tsx) and renders the real
+`claude mcp add` line with Copy in place. Before the click the command is a visibly **inert
+preview** (dimmed, `select-none`, no Copy). Killed the token-inventory paragraph and the second
+create form; "Your API tokens" is now list + revoke only. Steps 01–04 → **01/02**, with tools,
+"Putting it to work", disconnecting and tokens demoted to unnumbered reference. /recorder: 03
+"Record" → unnumbered "Then just record"; dropped the removed **Alt+Shift+M mark** hotkey; fixed
+two stale "Team → API tokens" links to /connect; recorder tokens auto-named too.
+Server: `tokens.create` also returns `{ id, name }`; new `tokens.rename` behind the optional
+rename link. Verified: typecheck green, both pages walked in Chrome (one click → real command).
+Touched: src/app/connect.tsx, src/app/recorder.tsx, src/components/setup-step.tsx, server/router.ts
+
 ## 2026-08-01 — the puck earns its pixels ("this looks like shit haha")
 Asked: first live run worked but the body was tall, empty, and mute about its purpose.
 Done: inner window 320×118 (was 300×170; Chrome's PiP title bar sits on top regardless). Body is

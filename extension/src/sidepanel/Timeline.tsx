@@ -3,22 +3,24 @@ import { blobs } from '../lib/db';
 import { mmss } from '../lib/format';
 import { send } from '../lib/messages';
 import { framePos, linePos, partSpans, totalMs } from '../lib/timeline';
-import type { Recording, Session, TimelineMove, TimelineRef } from '../lib/types';
+import type { Recording, Session, TimelineRef } from '../lib/types';
 import './timeline.css';
 
 /**
- * The editor. A gripe is one time axis and this is the surface that edits it:
- * scrub it, read back what you said, fix a word, sweep a junk stretch and delete
- * it, drag something to where it belongs. The uploaded report is generated from
- * these same positions, so an edit here is an edit to the handoff.
+ * The editor. A walkthrough is one time axis and this is the surface that reads
+ * it: drag anywhere to scrub, watch the monitor follow, read back what you said,
+ * fix a word, drop a whole take. The uploaded report is generated from these same
+ * positions, so what is drawn here is what the agent gets.
+ *
+ * **One gesture.** Pointer-down on the ruler, the filmstrip, the voice lane or
+ * bare track scrubs, and keeping the button down keeps scrubbing. There is no
+ * selection: no sweep, no marquee, no modifier, no click-versus-drag fork. The
+ * only other things you can do to the axis are fixing a line (the readout row or
+ * the transcript below) and deleting a take (its own label in the strip).
  *
  * Every position comes from lib/timeline — nothing here does take arithmetic.
  * Every mutation goes out as a message and comes back as new props: the worker
  * broadcasts, the panel re-pulls, this component redraws. It keeps no copy.
- *
- * Two shapes, one tree: it measures its own box and sits the monitor beside the
- * axis when that box is landscape (the popped editor strip), stacked otherwise
- * (the side rail).
  */
 
 type Row = 'frames' | 'voice';
@@ -33,7 +35,6 @@ interface Item {
   dur: number;
   text?: string;
   url?: string;
-  mark?: boolean;
 }
 
 /** One slot of the filmstrip. The strip is cells, not frames — that is the whole point. */
@@ -46,20 +47,8 @@ interface Cell {
   frame?: Item;
 }
 
-type Drag =
-  // Dragging anywhere on the axis scrubs. `click` is what a drag that never
-  // travelled meant instead — a cell hands over the frame it was showing, empty
-  // track hands over nothing and so clears.
-  | { mode: 'scrub'; x0: number; click?: { key?: string; pos: number } }
-  /** Ruler and filmstrip both resolve to a time range; `click` is what a sub-slop drag meant. */
-  | { mode: 'range'; a: number; b: number; click?: { key?: string; pos: number } }
-  | { mode: 'marquee'; x0: number; y0: number; x1: number; y1: number }
-  | { mode: 'move'; x0: number; dx: number; live: boolean };
-
 /** Both edges get breathing room so a clip at 0:00 and one at the end are both whole. */
 const EDGE = 8;
-/** A drag has to beat this before a click stops being a click. */
-const SLOP = 3;
 const TICKS = [1e3, 2e3, 5e3, 1e4, 15e3, 3e4, 6e4, 12e4, 3e5, 6e5, 12e5];
 /** Narrower than this and a line is a block, not a label — the readout carries its text. */
 const TEXT_MIN = 48;
@@ -69,16 +58,13 @@ const WINDOW_AT = 300;
 const GAP_MS = 8000;
 const CELL_FALLBACK = 72;
 const MAX_ZOOM = 64;
-/** Monitor beside the axis only when the box is genuinely landscape, not merely big. */
-const WIDE_MIN_W = 900;
-const WIDE_RATIO = 2.2;
-/** A box mid-layout is 0 tall, and 0 tall divides into any width — that is not landscape. */
-const WIDE_MIN_H = 120;
 /** Frame blobs are read in batches so a few hundred of them don't open a few hundred
  *  transactions at once — a long take's budget scales (recorder.ts `frameBudget`). */
 const LOAD_BATCH = 12;
 /** A quiet notice is a notice, not a state — it goes away on its own. */
 const NOTICE_MS = 8000;
+/** Roughly how wide the armed take's question renders — enough to keep it on screen. */
+const ASK_W = 210;
 
 /** No transcriber told us how long the line took, so guess from the words. */
 const estimate = (text: string) => Math.max(700, text.trim().split(/\s+/).length * 320);
@@ -110,40 +96,38 @@ function nearest(list: Item[], t: number): Item | undefined {
   return t - before.pos <= after.pos - t ? before : after;
 }
 
-export function Timeline({ session, recordings }: { session: Session; recordings: Recording[] }) {
-  const [sel, setSel] = useState<Set<string>>(new Set());
-  /** Set only when the selection came from a time sweep — the bar says so. */
-  const [range, setRange] = useState<{ a: number; b: number } | null>(null);
+export function Timeline({
+  session,
+  recordings,
+  /** Recording or uploading: the axis is still readable, but nothing may be destroyed. */
+  busy,
+}: {
+  session: Session;
+  recordings: Recording[];
+  busy: boolean;
+}) {
   const [ph, setPh] = useState<number | null>(null);
   const [zoom, setZoom] = useState(1);
   const [viewW, setViewW] = useState(0);
   const [cellW, setCellW] = useState(CELL_FALLBACK);
   const [scrollX, setScrollX] = useState(0);
-  /** Landscape enough to sit the monitor beside the axis — the popped editor strip. */
-  const [wide, setWide] = useState(false);
-  const [drag, setDrag] = useState<Drag | null>(null);
-  // Which line is open AND on which surface. The readout usually covers the same
-  // line the selected block holds, and two autofocused inputs blur each other shut.
-  const [editing, setEditing] = useState<{ key: string; at: 'clip' | 'read' | 'script' } | null>(
-    null,
-  );
+  /** The pointer is down on the axis. There is exactly one drag in this component. */
+  const [scrubbing, setScrubbing] = useState(false);
+  /** Which line is open AND on which surface — two autofocused inputs blur each other shut. */
+  const [editing, setEditing] = useState<{ key: string; at: 'read' | 'script' } | null>(null);
   /** The transcript, whole. The axis shows where words sit; this is where you read them. */
   const [script, setScript] = useState(true);
-  /** A frame held in the monitor until the next click — double-click parks it there. */
+  /** A frame held in the monitor until the next scrub — double-click parks it there. */
   const [pinned, setPinned] = useState<string | null>(null);
   /** What someone is typing into the playhead readout, while they are typing it. */
   const [clockDraft, setClockDraft] = useState<string | null>(null);
   /** The transcript moved underneath an edit. Said quietly, then gone. */
   const [notice, setNotice] = useState<{ text: string; tone: 'stale' | 'plain' } | null>(null);
+  /** A take's delete is armed. Same discipline as discard: it names what it costs first. */
+  const [confirmTake, setConfirmTake] = useState<string | null>(null);
 
-  const rootRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const tracksRef = useRef<HTMLDivElement | null>(null);
-  const dragRef = useRef<Drag | null>(null);
-  const boxRef = useRef<DOMRect | null>(null);
   const anchorZoom = useRef<{ ms: number; px: number } | null>(null);
-  /** Where a shift-click extends from. */
-  const anchorKey = useRef<string | null>(null);
   const scrollTick = useRef(0);
   const scriptRef = useRef<HTMLDivElement | null>(null);
 
@@ -153,8 +137,8 @@ export function Timeline({ session, recordings }: { session: Session; recordings
 
   // ── the frames, as pictures ───────────────────────────────────────────
   // The monitor is an image lookup, not a video seek, so it has to be instant
-  // while the playhead is being dragged — every keyframe of the open gripe is
-  // held as an object URL, and a URL is revoked the moment its frame is gone.
+  // while the playhead is being dragged — every keyframe of the open walkthrough
+  // is held as an object URL, and a URL is revoked the moment its frame is gone.
   const urlsRef = useRef(new Map<string, string>());
   const [urls, setUrls] = useState<Record<string, string>>({});
 
@@ -213,7 +197,6 @@ export function Timeline({ session, recordings }: { session: Session; recordings
           pos: framePos(rec, frame, spans),
           dur: 0,
           url: urls[`${rec.id}:frame:${frame.index}`],
-          mark: frame.reason === 'mark',
         });
       }
       rec.meta.transcript.forEach((seg, i) => {
@@ -233,15 +216,9 @@ export function Timeline({ session, recordings }: { session: Session; recordings
   const byKey = useMemo(() => new Map(items.map((i) => [i.key, i])), [items]);
   const frames = useMemo(() => items.filter((i) => i.row === 'frames'), [items]);
   const lines = useMemo(() => items.filter((i) => i.row === 'voice'), [items]);
-  const marks = useMemo(() => frames.filter((f) => f.mark), [frames]);
 
-  // Handlers live for a whole drag; the data under them doesn't.
-  const selRef = useRef(sel);
-  const itemsRef = useRef(items);
   const recsRef = useRef(recordings);
   useLayoutEffect(() => {
-    selRef.current = sel;
-    itemsRef.current = items;
     recsRef.current = recordings;
   });
 
@@ -255,22 +232,12 @@ export function Timeline({ session, recordings }: { session: Session; recordings
     return () => clearTimeout(timer);
   }, [notice]);
 
-  // Lines are positional and a transcription pass replaces the whole array — every
-  // batch says which rev it was drawn from, and the worker skips a take that moved on.
-  const revsFor = (refs: TimelineRef[]) => {
-    const revs: Record<string, number> = {};
-    for (const ref of refs) {
-      const rec = recsRef.current.find((r) => r.id === ref.recId);
-      if (rec) revs[ref.recId] = rec.meta.rev ?? 0;
-    }
-    return revs;
-  };
-
   const span = Math.max(axisEnd, 1000) * 1.04;
   const contentW = Math.max(viewW - EDGE * 2, 200) * zoom;
   const pxPerMs = contentW / span;
   const playhead = ph ?? 0;
-  const hasContent = recordings.length > 0;
+  /** Nothing to draw: no picture, no words. The axis collapses to one line. */
+  const bare = frames.length === 0 && lines.length === 0;
 
   const x = useCallback((pos: number) => EDGE + pos * pxPerMs, [pxPerMs]);
   const msAt = useCallback(
@@ -286,8 +253,7 @@ export function Timeline({ session, recordings }: { session: Session; recordings
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    // --cell-w steps at the same breakpoints the width does, and the shape
-    // restyles it too, so both are read together.
+    // --cell-w steps at the same breakpoints the width does, so both are read together.
     const read = () => {
       setViewW(el.clientWidth);
       const w = parseFloat(getComputedStyle(el).getPropertyValue('--cell-w'));
@@ -297,29 +263,7 @@ export function Timeline({ session, recordings }: { session: Session; recordings
     const ro = new ResizeObserver(read);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [hasContent, wide]);
-
-  // The shape question is about the component's own box, not the window: the same
-  // component is a 380px rail, a tab, and a 400px-tall strip across the screen.
-  const measure = useCallback(() => {
-    const el = rootRef.current;
-    if (!el) return;
-    const { width, height } = el.getBoundingClientRect();
-    setWide(height >= WIDE_MIN_H && width >= WIDE_MIN_W && width > height * WIDE_RATIO);
-  }, []);
-
-  // Whatever sits above the timeline settles over several commits while a gripe
-  // loads, and this box is the height they leave behind — one observation during
-  // that is a shape that never existed. Re-read every commit; `wide` changes
-  // nothing about the root's own box, so it cannot feed back.
-  useLayoutEffect(measure);
-  useEffect(() => {
-    const el = rootRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [hasContent, measure]);
+  }, [bare]);
 
   // Zoom keeps whatever was under the cursor (or the middle) where it was.
   const zoomTo = useCallback(
@@ -359,275 +303,43 @@ export function Timeline({ session, recordings }: { session: Session; recordings
     const onWheel = (e: WheelEvent) => wheel.current(e);
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-  }, [hasContent]);
+  }, [bare]);
 
-  const setDragBoth = useCallback((next: Drag | null) => {
-    dragRef.current = next;
-    setDrag(next);
-  }, []);
-
-  const clearSel = useCallback(() => {
-    setSel(new Set());
-    setRange(null);
-    setEditing(null);
-    anchorKey.current = null;
-  }, []);
-
-  const doDelete = useCallback(async () => {
-    const refs = itemsRef.current.filter((i) => selRef.current.has(i.key)).map((i) => i.ref);
-    if (!refs.length) return;
-    clearSel();
-    setPinned(null);
-    const res = await send<{ ok: boolean; stale?: boolean }>({
-      type: 'timeline:delete',
-      items: refs,
-      revs: revsFor(refs),
-    });
-    if (res?.stale) say('the transcript changed underneath — check what remains', 'stale');
-    else say(`deleted ${refs.length} item${refs.length === 1 ? '' : 's'}`);
-  }, [clearSel, say]);
-
-  const commitMove = useCallback(
-    async (dms: number) => {
-      const picked = itemsRef.current.filter((i) => selRef.current.has(i.key));
-      if (!picked.length) return;
-      const moves: TimelineMove[] = picked.map((i) => ({
-        kind: i.ref.kind,
-        recId: i.ref.recId,
-        index: i.ref.index,
-        tl: Math.max(0, Math.round(i.pos + dms)),
-      }));
-      const res = await send<{ ok: boolean; stale?: boolean }>({
-        type: 'timeline:move',
-        moves,
-        revs: revsFor(moves),
-      });
-      if (res?.stale) say('the transcript changed underneath — that drag partly missed', 'stale');
-    },
-    [say],
+  // ── the one gesture ───────────────────────────────────────────────────
+  /** Land the playhead where the pointer is. Bounded by the axis: past the end there is nothing. */
+  const scrubTo = useCallback(
+    (clientX: number) => setPh(Math.min(Math.max(0, msAt(clientX)), Math.max(axisEnd, 0))),
+    [msAt, axisEnd],
   );
 
-  /** Everything whose extent intersects a stretch of the axis — including frames no cell is showing. */
-  const selectRange = useCallback((a: number, b: number) => {
-    const [from, to] = a <= b ? [a, b] : [b, a];
-    setRange({ a: from, b: to });
-    setSel(new Set(itemsRef.current.filter((i) => i.pos + i.dur >= from && i.pos <= to).map((i) => i.key)));
+  const startScrub = (e: React.PointerEvent) => {
+    scrubTo(e.clientX);
+    setPinned(null);
     setEditing(null);
-  }, []);
+    setScrubbing(true);
+  };
 
-  // ── dragging ──────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!drag) return;
-    const onMove = (e: PointerEvent) => {
-      const current = dragRef.current;
-      if (!current) return;
-      if (current.mode === 'scrub') setPh(Math.max(0, msAt(e.clientX)));
-      else if (current.mode === 'range') setDragBoth({ ...current, b: msAt(e.clientX) });
-      else if (current.mode === 'marquee') {
-        const box = boxRef.current;
-        if (!box) return;
-        setDragBoth({ ...current, x1: e.clientX - box.left, y1: e.clientY - box.top });
-      } else {
-        const dx = e.clientX - current.x0;
-        if (!current.live && Math.abs(dx) < SLOP) return;
-        setDragBoth({ ...current, dx, live: true });
-      }
-    };
-    const onUp = (e: PointerEvent) => {
-      const current = dragRef.current;
-      setDragBoth(null);
-      if (!current) return;
-      if (current.mode === 'scrub') {
-        // Travelled: the playhead already followed the pointer, nothing else to do.
-        if (Math.abs(e.clientX - current.x0) >= SLOP) return;
-        const click = current.click;
-        if (!click) return;
-        setSel(click.key ? new Set([click.key]) : new Set());
-        setRange(null);
-        setPh(Math.max(0, click.pos));
-        setPinned(null);
-        setEditing(null);
-        anchorKey.current = click.key ?? null;
-      } else if (current.mode === 'range') {
-        const [a, b] = [Math.min(current.a, current.b), Math.max(current.a, current.b)];
-        // Under the slop it was a click: the ruler only moved the playhead, a cell
-        // also hands over the frame it was showing.
-        if ((b - a) * pxPerMs < SLOP) {
-          const click = current.click;
-          if (!click) return;
-          setSel(click.key ? new Set([click.key]) : new Set());
-          setRange(null);
-          setPh(Math.max(0, click.pos));
-          setPinned(null);
-          setEditing(null);
-          anchorKey.current = click.key ?? null;
-          return;
-        }
-        selectRange(a, b);
-      } else if (current.mode === 'marquee') {
-        const box = boxRef.current;
-        const inner = tracksRef.current;
-        if (!box || !inner) return;
-        const [lx, rx] = [Math.min(current.x0, current.x1), Math.max(current.x0, current.x1)];
-        const [ty, by] = [Math.min(current.y0, current.y1), Math.max(current.y0, current.y1)];
-        // A pointerup that never travelled is a click on empty space: clear.
-        if (rx - lx < SLOP && by - ty < SLOP) {
-          clearSel();
-          return;
-        }
-        const hit = new Set<string>();
-        for (const node of inner.querySelectorAll<HTMLElement>('[data-key]')) {
-          const r = node.getBoundingClientRect();
-          const l = r.left - box.left;
-          const t = r.top - box.top;
-          if (l <= rx && l + r.width >= lx && t <= by && t + r.height >= ty) {
-            hit.add(node.dataset.key!);
-          }
-        }
-        setRange(null);
-        setSel(hit);
-      } else if (current.mode === 'move' && current.live) {
-        void commitMove(current.dx / pxPerMs);
-      }
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setDragBoth(null);
-    };
+    if (!scrubbing) return;
+    const onMove = (e: PointerEvent) => scrubTo(e.clientX);
+    const onUp = () => setScrubbing(false);
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
-    window.addEventListener('keydown', onKey);
+    window.addEventListener('pointercancel', onUp);
     return () => {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('pointercancel', onUp);
     };
-  }, [drag?.mode, msAt, pxPerMs, setDragBoth, commitMove, selectRange, clearSel]);
+  }, [scrubbing, scrubTo]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const el = e.target as HTMLElement | null;
-      const typing = !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
-      if (e.key === 'Escape') {
-        setEditing(null);
-        return;
-      }
-      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
-      if (typing || !selRef.current.size) return;
-      e.preventDefault();
-      void doDelete();
+      if (e.key === 'Escape') setEditing(null);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [doDelete]);
-
-  const toggle = (key: string) => {
-    setRange(null);
-    anchorKey.current = key;
-    setSel((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  };
-
-  /** Shift-click reaches back to the last thing clicked and takes the stretch between. */
-  const extendTo = (pos: number) => {
-    const from = anchorKey.current ? byKey.get(anchorKey.current)?.pos : undefined;
-    selectRange(from ?? playhead, pos);
-  };
-
-  /** A cell you don't own yet sweeps a range; one you do drags the whole selection. */
-  const onCellDown = (e: React.PointerEvent, cell: Cell) => {
-    e.stopPropagation();
-    const frame = cell.frame;
-    if (e.shiftKey) {
-      extendTo(frame ? frame.pos : cell.mid);
-      return;
-    }
-    if ((e.ctrlKey || e.metaKey) && frame) {
-      toggle(frame.key);
-      return;
-    }
-    if (frame && sel.has(frame.key)) {
-      setDragBoth({ mode: 'move', x0: e.clientX, dx: 0, live: false });
-      return;
-    }
-    // Plain drag off a cell scrubs — it is the visual gesture, you drag along and
-    // watch the monitor. Sweeping a stretch to delete it is shift-drag, above.
-    setPh(Math.max(0, msAt(e.clientX)));
-    setDragBoth({
-      mode: 'scrub',
-      x0: e.clientX,
-      click: { key: frame?.key, pos: frame ? frame.pos : cell.mid },
-    });
-  };
-
-  const onClipDown = (e: React.PointerEvent, item: Item, roomy: boolean) => {
-    if (editing?.key === item.key) return;
-    e.stopPropagation();
-    if (e.shiftKey) {
-      extendTo(item.pos);
-      return;
-    }
-    if (e.ctrlKey || e.metaKey) {
-      toggle(item.key);
-      return;
-    }
-    if (!sel.has(item.key)) {
-      setRange(null);
-      setSel(new Set([item.key]));
-      setPh(item.pos);
-      setPinned(null);
-      setEditing(null);
-      anchorKey.current = item.key;
-      return;
-    }
-    if (sel.size === 1) {
-      // Already the one thing selected: the second click is the edit. A block too
-      // narrow to type in hands the job to the readout, which is why it exists.
-      // preventDefault, or pointerdown's focus default blurs the input as it mounts.
-      e.preventDefault();
-      setEditing({ key: item.key, at: roomy ? 'clip' : 'read' });
-      if (!roomy) setPh(item.pos);
-      return;
-    }
-    // Grabbing anything in the selection drags the whole selection.
-    setDragBoth({ mode: 'move', x0: e.clientX, dx: 0, live: false });
-  };
-
-  const onTracksDown = (e: React.PointerEvent) => {
-    const inner = tracksRef.current;
-    if (!inner) return;
-    boxRef.current = inner.getBoundingClientRect();
-    const box = boxRef.current;
-    setEditing(null);
-    if (e.shiftKey) {
-      setDragBoth({
-        mode: 'marquee',
-        x0: e.clientX - box.left,
-        y0: e.clientY - box.top,
-        x1: e.clientX - box.left,
-        y1: e.clientY - box.top,
-      });
-      return;
-    }
-    // No key held: scrub. A click that never travelled lands on nothing, which
-    // is how you drop a selection.
-    const at = msAt(e.clientX);
-    setPh(Math.max(0, at));
-    setDragBoth({ mode: 'scrub', x0: e.clientX, click: { pos: at } });
-  };
-
-  const onRulerDown = (e: React.PointerEvent) => {
-    const at = msAt(e.clientX);
-    if (e.shiftKey) {
-      setDragBoth({ mode: 'range', a: at, b: at });
-      return;
-    }
-    setPh(Math.max(0, at));
-    setDragBoth({ mode: 'scrub', x0: e.clientX });
-  };
+  }, []);
 
   const commitLine = async (item: Item, text: string) => {
     setEditing(null);
@@ -652,9 +364,21 @@ export function Timeline({ session, recordings }: { session: Session; recordings
     setPinned(null);
   };
 
+  /**
+   * Drop a whole take: its row, its frames, its blobs. The worker re-lays what is
+   * left as takes 1..N, so the axis stays one continuous clock and the playhead is
+   * pointing at the wrong moment afterwards — it goes home rather than lie.
+   */
+  const deleteTake = async (recId: string) => {
+    setConfirmTake(null);
+    setPinned(null);
+    setPh(0);
+    await send({ type: 'take:delete', id: recId });
+  };
+
   // ── the filmstrip ─────────────────────────────────────────────────────
   const cells = useMemo<Cell[]>(() => {
-    if (!hasContent) return [];
+    if (!frames.length) return [];
     const count = Math.max(1, Math.ceil(contentW / cellW));
     const sliceMs = cellW / pxPerMs;
     // Every cell reaches for the keyframe nearest its middle; past that reach the
@@ -675,7 +399,7 @@ export function Timeline({ session, recordings }: { session: Session; recordings
       });
     }
     return out;
-  }, [hasContent, frames, contentW, cellW, pxPerMs, scrollX, viewW]);
+  }, [frames, contentW, cellW, pxPerMs, scrollX, viewW]);
 
   // ── what the monitor is showing ───────────────────────────────────────
   const shot = useMemo(() => {
@@ -704,9 +428,6 @@ export function Timeline({ session, recordings }: { session: Session; recordings
     return before ?? lines[0];
   }, [lines, playhead]);
 
-  // The popped strip has no vertical room to spare; the tall panel does.
-  useEffect(() => setScript(!wide), [wide]);
-
   // Reading follows the playhead — the current line stays in view, never yanked.
   useEffect(() => {
     if (!script || !readout) return;
@@ -724,43 +445,46 @@ export function Timeline({ session, recordings }: { session: Session; recordings
 
   const seams = useMemo(() => spans.slice(1).map((s) => s.start), [spans]);
 
+  /** The take whose delete is armed, and which number it wears on the axis. */
+  const armed = useMemo(() => {
+    const i = spans.findIndex((s) => s.rec.id === confirmTake);
+    return i < 0 ? null : { n: i + 1, span: spans[i] };
+  }, [spans, confirmTake]);
+
   // ── status, honestly ──────────────────────────────────────────────────
-  /** Takes with words nobody has read back yet. This is the one thing an agent can't recover from. */
-  const unread = recordings.filter((r) => r.meta.transcript.length && !r.meta.reviewed);
-  const readBack =
-    !unread.length && recordings.some((r) => r.meta.transcript.length && r.meta.reviewed);
   const live = recordings.some((r) => r.state === 'recording');
   const recovered = recordings.some((r) => r.interrupted);
   const status = live
     ? 'recording — the axis grows as you talk'
     : recovered
       ? 'one take was recovered after the panel closed'
-      : // The row is there either way; idle it earns its keep by naming the two
-        // gestures, since drag-to-scrub is not a thing you discover by accident.
-        sel.size
-        ? ''
-        : 'drag to scrub · shift-drag sweeps a stretch';
+      : // Drag-to-scrub is not a thing anyone discovers by accident, and it is now
+        // the only gesture there is, so the row spends its one line saying it.
+        'drag anywhere to scrub';
 
-  const dx = drag?.mode === 'move' && drag.live ? drag.dx : 0;
-  const sweep = drag?.mode === 'range' ? drag : null;
-  const marquee = drag?.mode === 'marquee' ? drag : null;
-  const shift = dx ? `translateX(${dx}px)` : undefined;
-
-  if (!hasContent) {
+  /**
+   * Nothing recorded and nothing said yet — a fresh walkthrough, or one that is
+   * three seconds into its first take. There is no axis to draw, so it does not
+   * draw one: no monitor, no ruler, no empty well, no zoom. One line.
+   */
+  if (bare) {
     return (
-      <div className="tl" ref={rootRef}>
+      <div className="tl bare">
         <div className="tl-empty">
-          <span>nothing yet</span>
-          hit <b>Record</b> and talk through what's wrong
+          {live ? (
+            'listening — the axis appears as the screen changes'
+          ) : (
+            <>
+              hit <b>Record</b> and talk through what's wrong
+            </>
+          )}
         </div>
       </div>
     );
   }
 
-  // Two shapes, one tree: the monitor and the axis are siblings, and `wide` is the
-  // only thing that decides whether CSS stacks them or sits them side by side.
   return (
-    <div className={`tl${wide ? ' wide' : ''}`} ref={rootRef}>
+    <div className="tl">
       {/* With no frame to show, the monitor is a blank slab that eats the panel and
           crushes the axis against the bottom edge. Empty, it collapses to a line
           that says why it is empty; full, it still never takes more than half. */}
@@ -769,7 +493,7 @@ export function Timeline({ session, recordings }: { session: Session; recordings
           {shot ? (
             <img src={shot} alt="" draggable={false} />
           ) : (
-            <span className="tl-noshot">{live ? 'frames land here as you go' : 'no frame here'}</span>
+            <span className="tl-noshot">no frame here</span>
           )}
         </div>
       </div>
@@ -817,13 +541,35 @@ export function Timeline({ session, recordings }: { session: Session; recordings
           ) : (
             <span className="tl-said tl-none">no words on this stretch</span>
           )}
+
+          {/* Zoom is a preference, not an action: small, muted, out of the way at
+              the end of the row it belongs to. It used to be a full-width band. */}
+          <span className="tl-zoom">
+            <button onClick={() => zoomTo(zoom / 1.5)} disabled={zoom <= 1} title="zoom out">
+              –
+            </button>
+            <input
+              className="tl-slider"
+              type="range"
+              min={0}
+              max={Math.log2(MAX_ZOOM)}
+              step={0.05}
+              value={Math.log2(zoom)}
+              aria-label="zoom"
+              onChange={(e) => zoomTo(2 ** Number(e.target.value))}
+            />
+            <button onClick={() => zoomTo(zoom * 1.5)} disabled={zoom >= MAX_ZOOM} title="zoom in">
+              +
+            </button>
+            <button className="tl-fit" onClick={() => zoomTo(1)} disabled={zoom <= 1}>
+              fit
+            </button>
+          </span>
         </div>
 
-        {(status || notice) && (
-          <div className={`tl-status${notice?.tone === 'stale' ? ' stale' : ''}`}>
-            {notice ? notice.text : status}
-          </div>
-        )}
+        <div className={`tl-status${notice?.tone === 'stale' ? ' stale' : ''}`}>
+          {notice ? notice.text : status}
+        </div>
 
         <div
           className="tl-scroll"
@@ -839,57 +585,81 @@ export function Timeline({ session, recordings }: { session: Session; recordings
           }}
         >
           <div className="tl-inner" style={{ width: contentW + EDGE * 2 }}>
-            <div className="tl-ruler" onPointerDown={onRulerDown}>
+            <div className="tl-ruler" onPointerDown={startScrub}>
               {ticks.map((t) => (
                 <span className="tl-tickmark" key={t} style={{ left: EDGE + t * pxPerMs }}>
                   {mmss(t)}
                 </span>
               ))}
-              <span
-                className="tl-knob"
-                style={{ left: x(playhead) }}
-                onPointerDown={(e) => {
-                  e.stopPropagation();
-                  setDragBoth({ mode: 'scrub', x0: e.clientX });
-                }}
-              />
+              <span className="tl-knob" style={{ left: x(playhead) }} onPointerDown={startScrub} />
             </div>
 
-            <div className="tl-tracks" ref={tracksRef} onPointerDown={onTracksDown}>
+            <div className="tl-tracks" onPointerDown={startScrub}>
+              {/* Each take says which one it is and offers the only way to remove it.
+                  It arms in place — the row is a fixed height, so the question never
+                  shoves the axis around while it is being answered. */}
+              <div className="tl-takes">
+                {spans.map((s, i) => (
+                  <div
+                    key={s.rec.id}
+                    className={`tl-take${confirmTake === s.rec.id ? ' arm' : ''}`}
+                    style={{ left: x(s.start), width: Math.max(2, (s.end - s.start) * pxPerMs) }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                  >
+                    <span className="tl-take-name">
+                      take {i + 1} · {mmss(s.end - s.start)}
+                    </span>
+                    <button
+                      className="tl-take-kill"
+                      disabled={busy}
+                      title={
+                        busy
+                          ? 'Not while this walkthrough is recording or uploading'
+                          : `Delete take ${i + 1} and everything in it`
+                      }
+                      onClick={() => setConfirmTake(s.rec.id)}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+                {/* The question is a sibling of the labels, not a child of one: a
+                    take can be four seconds wide or start off the right edge, and
+                    the one thing that must never happen is a confirm you can read
+                    half of. It rides its take, clamped into the viewport. */}
+                {armed && (
+                  <span
+                    className="tl-take-ask"
+                    style={{
+                      left: Math.max(
+                        scrollX + 2,
+                        Math.min(x(armed.span.start), scrollX + viewW - ASK_W),
+                      ),
+                    }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                  >
+                    delete take {armed.n} ({mmss(armed.span.end - armed.span.start)})?
+                    <button className="tl-take-yes" onClick={() => void deleteTake(armed.span.rec.id)}>
+                      yes
+                    </button>
+                    <button onClick={() => setConfirmTake(null)}>keep</button>
+                  </span>
+                )}
+              </div>
+
               {frames.length > 0 && (
                 <div className="tl-strip">
                   <span className="tl-label">frames</span>
-                  {cells.map((cell) => {
-                    const on = !!cell.frame && sel.has(cell.frame.key);
-                    return (
-                      <div
-                        key={cell.i}
-                        data-key={cell.frame?.key}
-                        className={`tl-cell${on ? ' on' : ''}${cell.frame ? '' : ' gap'}`}
-                        style={{
-                          left: cell.left,
-                          width: cell.w,
-                          transform: on ? shift : undefined,
-                        }}
-                        onPointerDown={(e) => onCellDown(e, cell)}
-                        onDoubleClick={() => {
-                          if (!cell.frame) return;
-                          setPinned(cell.frame.key);
-                          setRange(null);
-                          setSel(new Set([cell.frame.key]));
-                          anchorKey.current = cell.frame.key;
-                        }}
-                      >
-                        {cell.frame?.url && <img src={cell.frame.url} alt="" draggable={false} />}
-                      </div>
-                    );
-                  })}
-                  {/* Marks are instants, not cells — they ride the strip's top edge. */}
-                  <span className="tl-marks">
-                    {marks.map((m) => (
-                      <span className="tl-mark" key={m.key} style={{ left: x(m.pos) }} />
-                    ))}
-                  </span>
+                  {cells.map((cell) => (
+                    <div
+                      key={cell.i}
+                      className={`tl-cell${cell.frame ? '' : ' gap'}`}
+                      style={{ left: cell.left, width: cell.w }}
+                      onDoubleClick={() => cell.frame && setPinned(cell.frame.key)}
+                    >
+                      {cell.frame?.url && <img src={cell.frame.url} alt="" draggable={false} />}
+                    </div>
+                  ))}
                 </div>
               )}
 
@@ -897,44 +667,20 @@ export function Timeline({ session, recordings }: { session: Session; recordings
                 <div className="tl-voice">
                   <span className="tl-label">voice</span>
                   {lines.map((item, idx) => {
-                    const on = sel.has(item.key);
                     // Width is duration — except a transcriber that overruns the next
-                    // line would bury it, and a buried block can't be clicked. The
-                    // overrun is trimmed, never the block: a well-formed transcript
-                    // is untouched by this.
+                    // line would bury it. The overrun is trimmed, never the block: a
+                    // well-formed transcript is untouched by this.
                     const next = lines[idx + 1];
                     const room = next ? next.pos - item.pos : Infinity;
                     const w = Math.max(Math.min(item.dur, room) * pxPerMs, 2);
-                    const roomy = w >= TEXT_MIN;
-                    const open = editing?.key === item.key && editing.at === 'clip';
                     const now = playhead >= item.pos && playhead <= item.pos + item.dur;
                     return (
                       <div
                         key={item.key}
-                        data-key={item.key}
-                        className={`tl-clip${on ? ' on' : ''}${open ? ' edit' : ''}${now ? ' now' : ''}`}
-                        style={{
-                          left: x(item.pos),
-                          // Editing drops the duration width — a 22px block can't be typed in.
-                          width: open ? undefined : w,
-                          transform: on ? shift : undefined,
-                        }}
-                        onPointerDown={(e) => onClipDown(e, item, roomy)}
+                        className={`tl-clip${now ? ' now' : ''}`}
+                        style={{ left: x(item.pos), width: w }}
                       >
-                        {open ? (
-                          <input
-                            className="tl-linein"
-                            autoFocus
-                            defaultValue={item.text}
-                            onPointerDown={(e) => e.stopPropagation()}
-                            onBlur={(e) => void commitLine(item, e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') e.currentTarget.blur();
-                            }}
-                          />
-                        ) : (
-                          roomy && <span>{item.text}</span>
-                        )}
+                        {w >= TEXT_MIN && <span>{item.text}</span>}
                       </div>
                     );
                   })}
@@ -944,70 +690,10 @@ export function Timeline({ session, recordings }: { session: Session; recordings
               {seams.map((s) => (
                 <span className="tl-seam" key={s} style={{ left: x(s) }} />
               ))}
-              {sweep && (
-                <span
-                  className="tl-range"
-                  style={{
-                    left: x(Math.min(sweep.a, sweep.b)),
-                    width: Math.abs(sweep.b - sweep.a) * pxPerMs,
-                  }}
-                />
-              )}
-              {marquee && (
-                <span
-                  className="tl-marquee"
-                  style={{
-                    left: Math.min(marquee.x0, marquee.x1),
-                    width: Math.abs(marquee.x1 - marquee.x0),
-                    top: Math.min(marquee.y0, marquee.y1),
-                    height: Math.abs(marquee.y1 - marquee.y0),
-                  }}
-                />
-              )}
             </div>
 
             <span className="tl-head" style={{ left: x(playhead) }} />
           </div>
-        </div>
-
-        {sel.size > 0 && (
-          <div className="tl-bar">
-            {/* The count moved onto the delete button, so this says the one thing
-                the button can't: which stretch of the axis the sweep took. */}
-            <span className="tl-count">{range ? `${mmss(range.a)}–${mmss(range.b)}` : ''}</span>
-            {/* "delete" and "clear" read as the same word next to each other. One
-                throws the items away, the other only drops the highlight — so the
-                one that destroys says what it destroys, and the one that doesn't
-                says so in a different verb. */}
-            <button className="tl-del" onClick={() => void doDelete()}>
-              delete {sel.size} {sel.size === 1 ? 'item' : 'items'}
-            </button>
-            <button onClick={clearSel}>deselect</button>
-          </div>
-        )}
-
-        <div className="tl-zoom">
-          <button onClick={() => zoomTo(zoom / 1.5)} disabled={zoom <= 1} title="zoom out">
-            –
-          </button>
-          <input
-            className="tl-slider"
-            type="range"
-            min={0}
-            max={Math.log2(MAX_ZOOM)}
-            step={0.05}
-            value={Math.log2(zoom)}
-            aria-label="zoom"
-            onChange={(e) => zoomTo(2 ** Number(e.target.value))}
-          />
-          <button onClick={() => zoomTo(zoom * 1.5)} disabled={zoom >= MAX_ZOOM} title="zoom in">
-            +
-          </button>
-          {zoom > 1 && (
-            <button className="tl-fit" onClick={() => zoomTo(1)}>
-              fit
-            </button>
-          )}
         </div>
 
         {lines.length > 0 && (
@@ -1018,22 +704,6 @@ export function Timeline({ session, recordings }: { session: Session; recordings
                 {lines.length === 1 ? '' : 's'}
               </button>
               <span className="tl-script-hint">click seeks · double-click fixes a line</span>
-              {unread.length > 0 ? (
-                <button
-                  className="tl-script-ok"
-                  title="Confirm the wording is yours — the agent then treats it as exact"
-                  onClick={async () => {
-                    for (const rec of unread) {
-                      await send({ type: 'recording:reviewed', id: rec.id });
-                    }
-                    say('transcript confirmed');
-                  }}
-                >
-                  reads right
-                </button>
-              ) : (
-                readBack && <span className="tl-script-done">✓ confirmed</span>
-              )}
             </div>
             {script && (
               <div className="tl-script-list" ref={scriptRef}>

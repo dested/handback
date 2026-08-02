@@ -572,10 +572,6 @@
   background: #fff;
   flex: none;
 }
-.rec.mini {
-  padding: 5px 10px;
-  font-size: var(--fs-1);
-}
 .rec.live {
   background: var(--cobalt-wash);
   color: var(--cobalt);
@@ -706,15 +702,6 @@ button.ticker.warn:hover {
   font-size: var(--fs-0);
   color: var(--muted);
 }
-/* The puck lives on the page dock (PiP can't open from a side panel); this is
- * just the panel telling you it's worth reaching for, in the accent. */
-.note.puck-note {
-  color: var(--cobalt);
-}
-.note.puck-note b {
-  font-weight: 600;
-}
-
 /* ── The gripe ──────────────────────────────────────────────────────────── */
 
 .gripe {
@@ -724,13 +711,14 @@ button.ticker.warn:hover {
   padding: 8px 12px 8px;
 }
 
-/* Leaving and discarding, above the title — the two things a person hunts for
- * when they are in the wrong walkthrough, and neither of them is Send. */
+/* Where you are, what this walkthrough amounts to, and the way to throw it away —
+ * one row, above the title. The meta used to be a band of its own; it is a
+ * caption, and captions ride along. */
 .crumb {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 8px;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
   min-height: 20px;
 }
 .back {
@@ -778,21 +766,35 @@ button.ticker.warn:hover {
   outline: none;
   border-bottom-color: var(--cobalt);
 }
-.title.slim {
-  font-size: var(--fs-2);
-  width: 12em;
-  flex: none;
-}
 .meta {
   font-family: var(--font-mono);
   font-size: var(--fs-0);
   color: var(--muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.takerow {
+/* The name and the one thing you do to this walkthrough next, on one line. The
+ * take button used to own a whole band under the meta line under the title. */
+.titlerow {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-top: 8px;
+  gap: 10px;
+}
+.titlerow .title {
+  flex: 1;
+  min-width: 4em;
+}
+.titlerow .rec.ghost {
+  flex: none;
+  padding: 5px 10px;
+  font-size: var(--fs-0);
+  white-space: nowrap;
+}
+.titlerow .rec.ghost .dot {
+  width: 6px;
+  height: 6px;
 }
 
 .empty {
@@ -997,17 +999,14 @@ button.ticker.warn:hover {
 .primary:hover:not(:disabled) {
   filter: brightness(1.06);
 }
-.primary.slim {
-  padding: 5px 12px;
-  font-size: var(--fs-1);
-}
 /* The one irreversible thing the panel does, and it says where it is sending. */
 .send {
   height: 46px;
   padding: 0 14px;
   font-size: var(--fs-3);
 }
-/* Where it lands, one line under the send: workspace · project, both changeable. */
+/* Where it lands, one line under the send: workspace · project, both changeable.
+ * Both controls are always here — one that hides is one nobody believes exists. */
 .dest {
   display: flex;
   align-items: center;
@@ -1038,6 +1037,11 @@ button.ticker.warn:hover {
 .dest-to,
 .dest-dot {
   color: var(--muted);
+}
+/* The way out of a dead project control, right where it died. */
+.dest-fix {
+  flex: none;
+  font-size: var(--fs-0);
 }
 
 .send-sub {
@@ -1170,22 +1174,4 @@ button.ticker.warn:hover {
   border-radius: var(--radius);
   font-size: var(--fs-1);
   text-align: center;
-}
-
-/* ── The popped strip ───────────────────────────────────────────────────── */
-/* One slim bar of chrome, and the timeline gets every remaining pixel. */
-
-.app.pop {
-  height: 100%;
-  overflow: hidden;
-}
-.app.pop .head {
-  border-bottom: 1px solid var(--border);
-  padding: 6px 10px;
-}
-.app.pop .striprow {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  padding: 6px 10px;
 }

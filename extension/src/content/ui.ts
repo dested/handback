@@ -198,10 +198,6 @@ export interface Overlay {
   dockDraw: HTMLElement;
   /** Just the word inside it: `draw` ⇄ `click`. The keycap must survive the swap. */
   dockDrawLabel: HTMLElement;
-  /** The puck's door — takes `.arm` while the pointer is out, hides when the
-   *  browser has no document PiP. */
-  dockPoint: HTMLElement;
-  dockMark: HTMLElement;
   clock: HTMLElement;
   live: HTMLCanvasElement;
 }
@@ -230,8 +226,6 @@ export function createOverlay(): Overlay {
         <span class="sep"></span>
         <button class="draw" data-act="draw"><span class="lbl">draw</span><i class="cap">d</i></button>
         <button data-act="clear"><span class="lbl">clear</span><i class="cap">c</i></button>
-        <button class="point" data-act="point"><span class="lbl">point</span><i class="cap">p</i></button>
-        <button class="mark" data-act="mark"><span class="lbl">mark</span><i class="cap">m</i></button>
         <button class="stop" data-act="stop"><span class="lbl">stop</span><i class="cap">s</i></button>
       </div>
     </div>
@@ -246,8 +240,6 @@ export function createOverlay(): Overlay {
     dock: q('.dock'),
     dockDraw: q('.dock button.draw'),
     dockDrawLabel: q('.dock button.draw .lbl'),
-    dockPoint: q('.dock button.point'),
-    dockMark: q('.dock button.mark'),
     clock: q('.clock'),
     live: q<HTMLCanvasElement>('canvas.live'),
   };

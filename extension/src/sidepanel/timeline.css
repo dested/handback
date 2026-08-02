@@ -1,8 +1,11 @@
 /*
  * The timeline editor. LIGHT ONLY, nothing orange: paper ground, white track
- * cards, hairline rules, cobalt for the pen (playhead, selection, state) —
- * violet only for a stale transcript, green only for a signed-off read-back.
+ * cards, hairline rules, cobalt for the pen (the playhead, and nothing else) —
+ * violet only for a stale transcript, red only for the one destructive verb.
  * Density is a print contact sheet: tight, ruled, precise.
+ *
+ * One shape: a tall rail. The editor is a scrubber — there is no selection, so
+ * there is no selected state to style, no sweep, no marquee and no action bar.
  *
  * The measurements (monitor height, ruler, track height, cell width and their
  * breakpoints) are ported from the recorder that survived a 10-minute
@@ -17,8 +20,7 @@
   --tl-ruler-h: 20px;
   --tl-track-h: 30px;
   --cell-w: 56px;
-  /* Landscape has room for a cell that stays landscape against a 16:10 frame. */
-  --cell-w-wide: 140px;
+  --tl-take-h: 16px;
   /* The track area is one step down from paper, the way a well is. */
   --tl-well: #f4f2ee;
   /* The mat behind a keyframe: neutral, so a screenshot's own white still reads. */
@@ -77,17 +79,18 @@
   border-color: var(--cobalt);
 }
 
-.tl-empty {
-  padding: clamp(32px, 9vh, 64px) var(--tl-gut);
-  text-align: center;
-  color: var(--muted);
-  font-size: var(--fs-2);
-  line-height: 1.8;
+/* Nothing recorded yet. There is no axis, so nothing draws one — the whole
+   component is one quiet line, and it takes only the height that line needs.
+   It used to inherit the populated layout's floor and reserve half a panel of
+   empty well, dead ruler and orphan scrollbar under a fresh walkthrough. */
+.tl.bare {
+  flex: none;
+  overflow: visible;
 }
-.tl-empty span {
-  display: block;
-  font-size: var(--fs-3);
-  color: var(--ink);
+.tl-empty {
+  padding: 10px var(--tl-gut) 14px;
+  color: var(--muted);
+  font-size: var(--fs-1);
 }
 .tl-empty b {
   color: var(--cobalt);
@@ -95,27 +98,22 @@
 
 /* The monitor: the one place a keyframe is big enough to read anything in. It is
    also the elastic member — slack goes into the picture and a squeeze comes out
-   of it first (shrink 100 against the axis's 1), so the lanes, the selection bar
-   and the zoom row are the last things to give ground, never the first. */
+   of it first (shrink 100 against the axis's 1), so the ruler and both lanes are
+   the last things to give ground, never the first. It grows into slack but never
+   past half the editor: past that the picture is winning an argument against the
+   thing you are actually working in. */
 .tl-monitor {
   position: relative;
   flex: 1 100 var(--tl-monitor-h);
   min-height: 64px;
+  max-height: 50%;
   display: flex;
   flex-direction: column;
   background: var(--tl-mat);
   border-bottom: 1px solid var(--border);
 }
-/* Both of these are about the stacked panel only. Popped out wide the monitor is
-   a fixed column beside the axis, and capping its *height* there would be
-   meaningless at best. */
-.tl:not(.wide) .tl-monitor {
-  /* It grows into slack, but never past half the editor — past that the picture
-     is winning an argument against the thing you are actually working in. */
-  max-height: 50%;
-}
 /* Nothing to show: stop growing and stop pretending. One line, not a slab. */
-.tl:not(.wide) .tl-monitor.bare {
+.tl-monitor.bare {
   flex: none;
   min-height: 0;
   background: var(--paper);
@@ -215,8 +213,7 @@
 
 /* ── the transcript, whole ──────────────────────────────────────────────
    The axis shows where the words sit; this is where you read them. Reading
-   follows the playhead; a click seeks; a double-click fixes a line. The
-   confirm lives here too — one small word, not a banner. */
+   follows the playhead; a click seeks; a double-click fixes a line. */
 .tl-script {
   flex: none;
   display: flex;
@@ -257,26 +254,6 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-.tl-script-ok {
-  flex: none;
-  padding: 3px 10px;
-  font-size: var(--fs-0);
-  color: var(--approve);
-  border: 1px solid var(--approve);
-  border-radius: 999px;
-  background: none;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.tl-script-ok:hover {
-  background: var(--approve-wash);
-}
-/* Signed off. The only green in the editor, and only once. */
-.tl-script-done {
-  flex: none;
-  font-size: var(--fs-0);
-  color: var(--approve);
 }
 .tl-script-list {
   max-height: 236px;
@@ -342,7 +319,7 @@
    is one ruler plus two full lanes: below that there is nothing to aim at. */
 .tl-scroll {
   flex: 1 1 auto;
-  min-height: calc(var(--tl-ruler-h) + var(--tl-track-h) * 2 + 26px);
+  min-height: calc(var(--tl-ruler-h) + var(--tl-take-h) + var(--tl-track-h) * 2 + 26px);
   overflow: auto;
   overscroll-behavior: contain;
   background: var(--tl-well);
@@ -455,28 +432,95 @@
     rgba(35, 38, 46, 0.05) 5px 6px
   );
 }
-.tl-cell.on {
-  outline: 2px solid var(--cobalt);
-  outline-offset: -2px;
-  z-index: 2;
-  cursor: grab;
+/* ── the takes ──────────────────────────────────────────────────────────
+   A walkthrough is takes laid end to end, and this is the only place that says
+   so out loud: one label per take, sitting over the stretch of axis it owns,
+   carrying the only control that can remove it. Fixed height, so arming the
+   question never moves the axis underneath the person answering it. */
+.tl-takes {
+  position: relative;
+  height: var(--tl-take-h);
+  border-bottom: 1px solid var(--border);
 }
-/* A human said "this one matters" while recording. Marks are instants, so they
-   ride the strip's top edge at their own x, not a cell's. */
-.tl-marks {
-  position: absolute;
-  inset: 0 0 auto 0;
-  height: 3px;
-  pointer-events: none;
-  z-index: 3;
-}
-.tl-mark {
+.tl-take {
   position: absolute;
   top: 0;
-  width: 2px;
-  height: 3px;
-  margin-left: -1px;
-  background: var(--cobalt);
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 6px;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: var(--fs-0);
+  line-height: 1;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.tl-take + .tl-take {
+  border-left: 1px dashed var(--tl-border-strong);
+}
+.tl-take-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Visible without hovering — a control nobody can see is the reason "I can't
+   delete a take" was true. Quiet until it is reached for, then ink. */
+.tl-take-kill {
+  flex: none;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: var(--fs-1);
+  line-height: 1;
+  opacity: 0.6;
+}
+.tl-take:hover .tl-take-kill {
+  opacity: 1;
+}
+.tl-take-kill:hover:not(:disabled) {
+  color: var(--danger);
+}
+.tl-take-kill:disabled {
+  opacity: 0;
+}
+/* The take that is about to go says so, in the one colour that means gone. */
+.tl-take.arm {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+.tl-take.arm .tl-take-kill {
+  opacity: 0;
+}
+/* The question itself is clamped into the viewport by the component — a confirm
+   you can only read half of is worse than no confirm at all. */
+.tl-take-ask {
+  position: absolute;
+  top: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  padding: 0 6px;
+  white-space: nowrap;
+  color: var(--ink);
+  background: var(--card);
+  box-shadow: 0 0 0 1px var(--border);
+}
+.tl-take-ask button {
+  padding: 0 5px;
+  border: 0;
+  background: none;
+  font-family: var(--font-mono);
+  font-size: var(--fs-0);
+  color: var(--cobalt);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.tl-take-ask .tl-take-yes {
+  color: var(--danger);
 }
 
 /* Voice is blocks first, text second: width is duration, always, and the words
@@ -498,8 +542,9 @@
   color: var(--muted);
   overflow: hidden;
   white-space: nowrap;
-  cursor: grab;
+  cursor: crosshair;
   user-select: none;
+  pointer-events: none;
 }
 .tl-clip span {
   min-width: 0;
@@ -513,25 +558,6 @@
   box-shadow: inset 2px 0 0 var(--cobalt);
   color: var(--ink);
 }
-.tl-clip.edit {
-  width: auto;
-  min-width: 240px;
-  max-width: 62ch;
-  background: var(--card);
-  z-index: 6;
-}
-.tl-clip input {
-  width: 100%;
-  font-size: var(--fs-1);
-  padding: 1px 5px;
-}
-/* Selected is a state, so it wears the pen — as an outline, never a fill. */
-.tl-clip.on {
-  outline: 2px solid var(--cobalt);
-  outline-offset: -2px;
-  color: var(--ink);
-  z-index: 2;
-}
 
 /* Where one take ends and the next begins. No label, no number — it's one gripe. */
 .tl-seam {
@@ -542,69 +568,21 @@
   pointer-events: none;
   z-index: 3;
 }
-.tl-range,
-.tl-marquee {
-  position: absolute;
-  background: color-mix(in srgb, var(--cobalt) 12%, transparent);
-  border: 1px solid var(--cobalt);
-  pointer-events: none;
-  z-index: 4;
-}
-.tl-range {
-  top: 0;
-  bottom: 0;
-}
-
-/* Only here when something is picked, and it carries the one destructive verb. */
-.tl-bar {
-  display: flex;
-  align-items: center;
-  flex: none;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: calc(var(--tl-strip) - 2px) var(--tl-gut);
-  border-top: 1px solid var(--border);
-  background: var(--cobalt-wash);
-  font-size: var(--fs-1);
-  color: var(--ink);
-}
-.tl-count {
-  font-family: var(--font-mono);
-  font-size: var(--fs-0);
-}
-.tl-bar button {
-  flex: none;
-  padding: 4px 11px;
-  font-size: var(--fs-1);
-}
-.tl-bar button:hover {
-  border-color: var(--cobalt);
-  color: var(--cobalt);
-}
-.tl-bar .tl-del {
-  margin-left: auto;
-  color: var(--danger);
-  border-color: var(--danger);
-}
-.tl-bar .tl-del:hover {
-  background: var(--danger);
-  border-color: var(--danger);
-  color: #fff;
-}
-
+/* Zoom rides the end of the readout row rather than owning a band of its own.
+   It is a preference, so it is small, muted, and never competes with the axis. */
 .tl-zoom {
   display: flex;
   align-items: center;
   flex: none;
-  gap: 8px;
-  padding: 5px var(--tl-gut) 6px;
-  border-top: 1px solid var(--border);
-  background: var(--paper);
+  gap: 2px;
 }
 .tl-zoom button {
-  width: 22px;
-  height: 20px;
-  font-size: var(--fs-1);
+  width: 17px;
+  height: 17px;
+  padding: 0;
+  border-color: transparent;
+  background: none;
+  font-size: var(--fs-0);
   line-height: 1;
   color: var(--muted);
 }
@@ -613,78 +591,21 @@
   border-color: var(--cobalt);
 }
 .tl-zoom button:disabled {
-  opacity: 0.4;
+  opacity: 0.35;
   cursor: default;
 }
 .tl-zoom .tl-fit {
   width: auto;
-  padding: 0 9px;
+  padding: 0 4px;
   font-family: var(--font-mono);
-  font-size: var(--fs-0);
 }
 .tl .tl-slider {
-  flex: 1;
-  min-width: 60px;
-  max-width: 220px;
-  height: 20px;
+  flex: none;
+  width: 54px;
+  height: 17px;
   padding: 0;
   background: none;
   border: 0;
   accent-color: var(--cobalt);
   cursor: ew-resize;
-}
-
-/* ── landscape ──────────────────────────────────────────────
-   The popped editor is a strip across the bottom of the window: short and very
-   wide. Same tree, one flex direction turned — picture on the left, the whole
-   axis beside it. The component measures its own box, not the window, because
-   the rail and the strip are the same component. */
-.tl.wide {
-  flex-direction: row;
-  --cell-w: var(--cell-w-wide);
-}
-.tl.wide .tl-monitor {
-  flex: 0 0 clamp(300px, 30%, 360px);
-  min-height: 0;
-  border-bottom: 0;
-  border-right: 1px solid var(--border);
-}
-.tl.wide .tl-axis {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-/* The popped strip has no vertical room to spare — the list stays short when open. */
-.tl.wide .tl-script-list {
-  max-height: 96px;
-}
-/* Landscape has vertical room the rail never has, so the well takes it and both
-   lanes grow into it — nothing is left reserved and empty. The filmstrip stops
-   at a height its cells stay landscape at (140×88 against a 16:10 frame is
-   almost no crop); past that the voice lane takes the rest, which is what an
-   audio track does anyway. */
-.tl.wide .tl-scroll {
-  flex: 1 1 auto;
-}
-.tl.wide .tl-inner {
-  display: flex;
-  flex-direction: column;
-  min-height: 100%;
-}
-.tl.wide .tl-tracks {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-.tl.wide .tl-strip {
-  flex: 1 1 auto;
-  min-height: var(--tl-track-h);
-  max-height: 88px;
-}
-.tl.wide .tl-voice {
-  flex: 1 1 auto;
-  min-height: var(--tl-track-h);
-}
-.tl.wide .tl-clip {
-  height: calc(100% - 9px);
 }

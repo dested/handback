@@ -44,10 +44,6 @@
     }
   ],
   "commands": {
-    "mark-frame": {
-      "suggested_key": { "default": "Alt+Shift+M" },
-      "description": "Mark this moment while recording a walkthrough"
-    },
     "draw-live": {
       "suggested_key": { "default": "Alt+Shift+D" },
       "description": "Draw on the page while recording"

@@ -10,7 +10,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Check, Copy } from 'lucide-react'
-import { Step } from '~/components/setup-step'
+import { Step, autoTokenName } from '~/components/setup-step'
 import { Button } from '~/components/ui/button'
 import { useCopy } from '~/components/viewer/use-copy'
 import { useActiveOrg, type OrgSummary } from '~/lib/org'
@@ -295,38 +295,7 @@ function Recorder({ org }: { org: OrgSummary }) {
             <LinkStep org={org} origin={origin} presence={presence} />
           </Step>
 
-          <Step n="03" title="Record" blurb="That's the whole setup.">
-            <ul className="text-muted-foreground space-y-2 text-sm">
-              <li className="flex gap-2">
-                <span className="text-cobalt">·</span>
-                <span>
-                  Pin it: puzzle-piece icon in Chrome's toolbar → pin{' '}
-                  <strong>Handback Recorder</strong>, then click it to open the side panel.
-                </span>
-              </li>
-              <li className="flex gap-2">
-                <span className="text-cobalt">·</span>
-                <span>
-                  Hit <strong>Record</strong>, pick the tab or screen, and talk — say what you
-                  expected and what happened instead.
-                </span>
-              </li>
-              <li className="flex gap-2">
-                <span className="text-cobalt">·</span>
-                <span>
-                  <code className="font-mono text-xs">Alt+Shift+M</code> marks a moment;{' '}
-                  <code className="font-mono text-xs">Alt+Shift+D</code> draws on the page in ink.
-                </span>
-              </li>
-              <li className="flex gap-2">
-                <span className="text-cobalt">·</span>
-                <span>
-                  Hit <strong>Send to Handback</strong> when you're done — the walkthrough lands in
-                  the inbox here, ready for an agent.
-                </span>
-              </li>
-            </ul>
-          </Step>
+          <Recording />
         </>
       )}
 
@@ -394,7 +363,10 @@ function LinkStep({
 
   const link = useCallback(() => {
     setPhase('linking')
-    create.mutate({ orgId: org.id, name: 'recorder — chrome' })
+    create.mutate({
+      orgId: org.id,
+      name: autoTokenName('Recorder', navigator.userAgent, new Date()),
+    })
   }, [create, org.id])
 
   const linkedThisOrg = isLinkedTo(presence, org.id, origin)
@@ -474,8 +446,8 @@ function LinkStep({
       {alreadyHere && (
         <p className="text-muted-foreground text-sm">
           Re-linking mints a fresh token; the old one keeps working until you revoke it under{' '}
-          <Link to="/team" className="text-primary underline underline-offset-4">
-            Team → API tokens
+          <Link to="/connect" className="text-primary underline underline-offset-4">
+            Your API tokens
           </Link>
           .
         </p>
@@ -487,8 +459,8 @@ function LinkStep({
             The extension didn't answer, but your token was created — paste it into the extension's
             settings (server <span className="font-mono text-xs">{origin}</span>), or revoke it
             under{' '}
-            <Link to="/team" className="text-primary underline underline-offset-4">
-              Team → API tokens
+            <Link to="/connect" className="text-primary underline underline-offset-4">
+              Your API tokens
             </Link>
             .
           </p>
@@ -621,6 +593,45 @@ function PresenceIndicator({
         already? Reload this page.
       </p>
     </div>
+  )
+}
+
+/**
+ * Not a step — setup ends at the link. This is what happens next, in the
+ * extension, and numbering it made a two-step page look like a three-step one.
+ */
+function Recording() {
+  return (
+    <section className="border-border border-t pt-6">
+      <h2 className="font-display text-xl font-semibold">Then just record</h2>
+      <p className="text-muted-foreground mt-2 text-sm leading-relaxed">
+        Setup is done — the rest happens in the panel.
+      </p>
+      <ul className="text-muted-foreground mt-5 space-y-2 text-sm">
+        <li className="flex gap-2">
+          <span className="text-cobalt">·</span>
+          <span>
+            Pin it: puzzle-piece icon in Chrome's toolbar → pin{' '}
+            <strong>Handback Recorder</strong>, then click it to open the side panel.
+          </span>
+        </li>
+        <li className="flex gap-2">
+          <span className="text-cobalt">·</span>
+          <span>
+            Hit <strong>Record</strong>, pick the tab or screen, and talk — say what you expected
+            and what happened instead. <code className="font-mono text-xs">Alt+Shift+D</code> draws
+            on the page in ink.
+          </span>
+        </li>
+        <li className="flex gap-2">
+          <span className="text-cobalt">·</span>
+          <span>
+            Hit <strong>Send to Handback</strong> when you're done — the walkthrough lands in the
+            inbox here, ready for an agent.
+          </span>
+        </li>
+      </ul>
+    </section>
   )
 }
 

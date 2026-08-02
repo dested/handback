@@ -225,13 +225,12 @@ function spread<T>(pool: T[], budget: number): T[] {
   return Array.from({ length: budget }, (_, i) => pool[Math.floor(i * step)]);
 }
 
-/** The frames every take opens on, plus everything the human marked. These are never thinned. */
+/** The frame every take opens on. These are never thinned. */
 function mustShow(recordings: Recording[]): Set<string> {
   const keys = new Set<string>();
   for (const rec of recordings) {
     const first = rec.meta.frames[0];
     if (first) keys.add(`${rec.id}:${first.index}`);
-    for (const f of rec.meta.frames) if (f.reason === 'mark') keys.add(`${rec.id}:${f.index}`);
   }
   return keys;
 }
@@ -318,11 +317,8 @@ function pointerLine(frame: RecordingFrame): string | null {
 
 /** One inlined still. */
 function frameBlock(shot: Shot): string[] {
-  const marked = shot.frame.reason === 'mark';
   const at = mmss(shot.pos);
-  const bits = [`${marked ? '★ ' : ''}${at}`];
-  if (marked) bits.push('the human marked this moment');
-  bits.push(`\`${shot.prefix}${shot.frame.file}\``);
+  const bits = [at, `\`${shot.prefix}${shot.frame.file}\``];
   if (shot.sheet) bits.push(`also on \`${sheetFile(shot.sheet, shot.prefix)}\``);
   const lines = [
     '---',
@@ -548,7 +544,6 @@ export function buildReport(session: Session, recordings: Recording[], url?: str
   const lines = axisLines(takes, spans);
   const traces = axisEvents(takes, spans);
   const shown = inlineShots(shots, lines, takes);
-  const marks = shots.filter((s) => s.frame.reason === 'mark').length;
 
   // The span the evidence covers, not when the gripe was last touched — a rename
   // hours later must not stretch the recorded window.
@@ -565,7 +560,6 @@ export function buildReport(session: Session, recordings: Recording[], url?: str
   if (takes.length) counts.push(`\`walkthrough ${mmss(totalMs(spans))}\``);
   if (shots.length) counts.push(`\`${shots.length} keyframe${shots.length === 1 ? '' : 's'}\``);
   if (lines.length) counts.push(`\`${lines.length} spoken line${lines.length === 1 ? '' : 's'}\``);
-  if (marks) counts.push(`\`${marks} marked\``);
   if (traces.length) {
     counts.push(`\`${traces.length} error${traces.length === 1 ? '' : 's'} captured\``);
   }
@@ -609,7 +603,7 @@ export function buildReport(session: Session, recordings: Recording[], url?: str
   }
   if (shots.length) {
     out.push(
-      `${shown.size} of ${shots.length} keyframe${shots.length === 1 ? '' : 's'} are inlined below — the moments the narration is pointing at${marks ? ', plus everything the human marked' : ''}. The rest are named by filename in the flow, run by run; only where a silent run passes ${RUN_NAMES} frames are the first ${RUN_NAMES - 1} named and the remainder counted. Nothing is dropped, and every keyframe is on the sheets above. Machine-readable: \`rec-NN/recording.json\` — frame times, pointer positions, transcript windows, events. Words alone: \`rec-NN/transcript.txt\`.`,
+      `${shown.size} of ${shots.length} keyframe${shots.length === 1 ? '' : 's'} are inlined below — the moments the narration is pointing at. The rest are named by filename in the flow, run by run; only where a silent run passes ${RUN_NAMES} frames are the first ${RUN_NAMES - 1} named and the remainder counted. Nothing is dropped, and every keyframe is on the sheets above. Machine-readable: \`rec-NN/recording.json\` — frame times, pointer positions, transcript windows, events. Words alone: \`rec-NN/transcript.txt\`.`,
     );
     out.push('');
   }
@@ -745,7 +739,6 @@ export function buildManifestTxt(
   for (const part of parts) {
     const rec = part.meta;
     const dir = recDirName(part.index);
-    const marks = rec.frames.filter((f) => f.reason === 'mark').length;
     const sheets = Math.ceil(rec.frames.length / GRID_PER_SHEET);
     rows.push([
       `${dir}/`,
@@ -753,7 +746,7 @@ export function buildManifestTxt(
     ]);
     rows.push([
       `${dir}/frames/`,
-      `${rec.frames.length} keyframes, NN-mmss.jpg (the mmss is time inside this part's own ${rec.videoFile}, not a position in report.md's timeline) — 0.5s candidates + live dedup, deduped from ${rec.sampled} sampled${marks ? `, ${marks} marked by hand` : ''}`,
+      `${rec.frames.length} keyframes, NN-mmss.jpg (the mmss is time inside this part's own ${rec.videoFile}, not a position in report.md's timeline) — 0.5s candidates + live dedup, deduped from ${rec.sampled} sampled`,
     ]);
     if (sheets) {
       rows.push([

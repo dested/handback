@@ -1,7 +1,7 @@
 # Handback — UI
 
 > Visual-language source of truth. Follow exactly; deviations are bugs.
-> Last updated: 2026-07-30.
+> Last updated: 2026-08-01.
 
 ## The one law
 
@@ -60,7 +60,16 @@ Loaded via Google Fonts in `index.html`. Do not add other font families.
 - **Ink underline** (`.ink-underline`) — cobalt underline stroke for one key
   word in a headline. Landing only.
 - **Numbered sections** — editorial `01 / 02 / 03` mono numerals for
-  how-it-works flows.
+  how-it-works flows and setup pages (`src/components/setup-step.tsx`).
+  **Only number what the person actually does on this page**; reference
+  material (tool lists, disconnect instructions, token management, "what
+  happens next") takes a plain `font-display` heading over a hairline rule
+  instead. A shorter numbered run reads lighter, and an inflated one reads as
+  work — /connect went 01–04 → 01/02 for exactly that reason.
+- **Inert command blocks** — a copyable block whose contents aren't yet real
+  (a placeholder token) renders dimmed (`bg-muted/30 opacity-60`),
+  `select-none`, and with the Copy button replaced by a mono `preview` label.
+  Never ship a Copy button on something that must not be pasted.
 
 ## Components
 
@@ -89,36 +98,53 @@ properties in `extension/src/sidepanel/styles.css` (no Tailwind there).
   the right, divided by hairlines, never boxes. Status reads twice on a queue
   row, as a 7px dot and as the word, in the three fixed inks; filter chips are
   pills that go from hairline to that same ink when on. Nothing below the hero
-  may be louder than it. An open walkthrough wears a **crumb row** above its
-  title — `← all walkthroughs` muted on the left, `discard` on the right — and
-  those are the only two navigation controls; discard arms into one line
+  may be louder than it. An open walkthrough is **two rows of
+  chrome and then content, never more**: a **crumb row** (`← all walkthroughs`
+  muted, the mono meta line as a caption on the same row, `discard` on the
+  right), then a **title row** (the name, with `● record a take` as the cobalt
+  ghost beside it). Discard arms into one line
   (`discard 2 takes? yes, discard / keep`, the yes in `--destructive`) so the
   row never grows and shoves the timeline down mid-decision.
   Above the send button sits the destination row — "to [workspace] · [project]",
   two hairline selects with a drawn chevron (`appearance: none`, never Chrome's
-  stock arrow); the project select hides rather than renders dead when the list
-  can't be fetched or is empty. "Record another take" is the cobalt *outline*
+  stock arrow). **Both selects are always rendered**: a workspace with no projects
+  reads `no project` and offers `+ make one…`; a failed context fetch reads
+  `projects unavailable` beside a `retry` link — a control that hides itself is
+  read as a control that was never there. The take button is the cobalt *outline*
   ghost — never louder than send. Settings live behind the header gear and lead
   with the Workspaces list (one row per linked workspace, cobalt border + filled
   dot on the active one, whole row clickable, `×` to unlink); unlinked states
   point at `/recorder` (cobalt-wash callout), they never demand a pasted token. Upload errors are a
   white card with a 2px danger left rule: mono `UPLOAD FAILED` head, one human
   sentence, `try again`/`details` links — never a raw server body.
-- **Timeline** (`timeline.css`): white track on paper, mono ruler, cobalt mark
-  carets and selection, dashed hairline take seams, thumbnail filmstrip with
-  stamped `take·m:ss` labels, voice lane as ink-gray density bars.
+- **Timeline** (`timeline.css`): white track on paper, mono ruler, a cobalt
+  playhead (the only cobalt on the axis), dashed hairline take seams, thumbnail
+  filmstrip, voice lane as ink-gray density bars. **It is a scrubber**:
+  pointer-down anywhere on the ruler, filmstrip, voice lane or bare track scrubs
+  and dragging keeps scrubbing — one gesture, no modifiers, and **no selection of
+  any kind** (no sweep, no marquee, no selected-cell outline, no action bar).
+  Above the filmstrip runs the **take lane**: one mono `take N · m:ss` label per
+  take over the stretch it owns, each with a quiet `×` that arms into one inline
+  question clamped into the viewport (`delete take 2 (3:38)? yes / keep`, the yes
+  in `--danger`) — never a browser `confirm()`, never a row that grows. Zoom is
+  `− ▭ + fit`, small and muted at the right end of the readout row, never a
+  full-width band of its own. With no frames and no words the whole component
+  collapses to one muted line: an empty editor draws no ruler, no well, no
+  scrollbar.
 - **Transcript list** (`.tl-script`): the whole transcript under the timeline —
   cobalt mono times, current line cobalt-washed with an inset bar, click seeks,
-  double-click edits in place. Collapsed by default in the popped strip. The
-  read-back confirm is one small green outline pill in its header (`reads
-  right`) — never a banner; lecturing callouts are banned.
-- **On-page dock** (`content/ui.ts`): white pill, hairline border, mono
-  keycaps for its keys; ink strokes draw in cobalt. Never dark, never orange.
+  double-click edits in place. Open by default — it is the readable surface, and
+  the axis above it is deliberately terse.
+- **On-page dock** (`content/ui.ts`): white pill, hairline border, mono keycaps
+  for its three keys — **draw `d`**, **clear `c`**, **stop `s`**; ink strokes
+  draw in cobalt. Never dark, never orange.
 - **Draw mode says so**: while ink owns the pointer the viewport wears a cobalt
   inset frame with one top tag (`drawing · esc to click`), and the dock never
   fades. The frame is captured in the recording on purpose.
 - Judged in the preview harness (`npm run preview` → `:8777/gallery.html`),
-  acceptance seed is `mode=long` (10:18, two takes, 150 frames).
+  acceptance seed is `mode=long` (10:18, two takes, 150 frames). `mode=fresh` is
+  the other one that has to hold: a walkthrough seconds old must be one quiet
+  line, not a stack of empty scaffolding.
 
 ## Don'ts
 

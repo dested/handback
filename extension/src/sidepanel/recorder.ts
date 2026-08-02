@@ -3,7 +3,6 @@ import type {
   MicState,
   PageEvent,
   PointerSample,
-  PuckTelemetry,
   RecordingFrame,
   RecordingMeta,
   TranscriptSegment,
@@ -15,8 +14,8 @@ import { pad2, mmssFile } from '../lib/format';
 
 /**
  * Screen capture, distilled while it records — claude-real-video's dedup shape
- * (sliding window of KEPT frames, forced keyframes only where a human or the page
- * said so: marks, clicks, navigations, and a 15 s heartbeat when the screen is
+ * (sliding window of KEPT frames, forced keyframes only where the page said so:
+ * clicks, navigations, and a 15 s heartbeat when the screen is
  * drifting below the dedup bar, uniform thinning past a length-scaled budget —
  * see `frameBudget`), recalibrated for
  * screen recordings. The reference compares 16×16 RGB
@@ -31,10 +30,9 @@ import { pad2, mmssFile } from '../lib/format';
  * Speech is stamped where the sentence started, not where recognition finally
  * admitted what it heard.
  *
- * Two things the reference has no equivalent for, both from an agent that read a
- * real bundle: frames carry the mouse (drawn when the capture can be mapped, named
- * by selector always — "these over here" is otherwise unresolvable), and the mark
- * hotkey forces a keyframe mid-sentence.
+ * One thing the reference has no equivalent for, from an agent that read a real
+ * bundle: frames carry the mouse (drawn when the capture can be mapped, named by
+ * selector always — "these over here" is otherwise unresolvable).
  *
  * Nothing here lives only in panel memory. Every MediaRecorder chunk is written to
  * IndexedDB as it arrives and the meta is pushed to the worker every couple of
@@ -61,16 +59,6 @@ const MAX_FRAME_W = 1920;
 const JPEG_QUALITY = 0.9;
 const MAX_EVENTS = 200;
 const POINTER_STALE_MS = 2500; // a pointer older than this says nothing about this frame
-// Pins mirror the page ink's expiry: parked long enough to read, then gone. A pin
-// lives on the *keyframes*, not the screen — nothing can paint outside a tab, but
-// the tip was physically at the spot when the human pinned it, so drawing it into
-// the frames afterward isn't drawing blind, it's developing the photo.
-const PIN_HOLD_MS = 8000;
-const PIN_FADE_MS = 4000;
-// The puck reports over messaging that can die without a goodbye (its host tab
-// navigates, the PiP window closes). Its poll runs at ~150ms, so a beat this old
-// means the puck is gone, not parked — parked pucks keep reporting.
-const PUCK_STALE_MS = 1200;
 const MAP_TOLERANCE = 0.02; // aspect-ratio match required before we believe a coordinate mapping
 const PROGRESS_MS = 1500; // floor between meta pushes — the worker writes IndexedDB on every one
 
@@ -83,33 +71,13 @@ export function frameBudget(durationMs: number): number {
 
 const MIME_TYPES = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
 
-/** MicState and PuckTelemetry moved to lib/types — the content script speaks them too. */
-export type { MicState, PuckTelemetry };
-
-/** A pinned spot: where the tip was when the human clicked the arrow. */
-interface Pin {
-  n: number;
-  /** ms from recording start */
-  at: number;
-  sx: number;
-  sy: number;
-  sw: number;
-  sh: number;
-}
-
-/** Signature cells the dedup must not read, inclusive. */
-interface CellRect {
-  x0: number;
-  y0: number;
-  x1: number;
-  y1: number;
-}
+/** MicState moved to lib/types — the content script speaks it too. */
+export type { MicState };
 
 export interface RecorderUpdate {
   elapsedMs: number;
   frameCount: number;
   segmentCount: number;
-  markCount: number;
   interim: string;
   micState: MicState;
 }
@@ -144,18 +112,12 @@ export type TickerCtor = new (handlers: TickerHandlers, lang: string) => Ticker;
 
 /**
  * Count of cells whose max channel delta exceeds PIX_TOL — the reference's
- * pct_diff, kept as a count. Cells under any mask rect are skipped: the puck's
- * clock ticks and its caption line rewrites, and neither is the screen changing.
- * Both sides' rects are masked (the union), because the puck may have moved
- * between the two captures — what it *revealed* by moving still counts.
+ * pct_diff, kept as a count.
  */
-function cellDiff(a: Uint8ClampedArray, b: Uint8ClampedArray, masks: (CellRect | null)[]): number {
+function cellDiff(a: Uint8ClampedArray, b: Uint8ClampedArray): number {
   const cells = SIG_SIZE * SIG_SIZE;
   let changed = 0;
   for (let i = 0; i < cells; i++) {
-    const cx = i % SIG_SIZE;
-    const cy = (i / SIG_SIZE) | 0;
-    if (masks.some((m) => m && cx >= m.x0 && cx <= m.x1 && cy >= m.y0 && cy <= m.y1)) continue;
     const p = i * 4;
     const d = Math.max(
       Math.abs(a[p] - b[p]),
@@ -224,33 +186,6 @@ function drawCrosshair(ctx: CanvasRenderingContext2D, x: number, y: number, widt
   ctx.restore();
 }
 
-/** A numbered cobalt dot where the puck's tip was pinned. Same halo logic as the ink. */
-function drawPin(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  n: number,
-  alpha: number,
-  width: number,
-) {
-  const r = Math.max(11, Math.round(width / 90));
-  ctx.save();
-  ctx.globalAlpha = alpha;
-  ctx.beginPath();
-  ctx.arc(x, y, r, 0, Math.PI * 2);
-  ctx.fillStyle = COBALT;
-  ctx.strokeStyle = 'rgba(255,255,255,0.9)';
-  ctx.lineWidth = Math.max(2, r / 3.5);
-  ctx.fill();
-  ctx.stroke();
-  ctx.fillStyle = '#fff';
-  ctx.font = `600 ${Math.round(r * 1.15)}px system-ui, sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(String(n), x, y + r * 0.06);
-  ctx.restore();
-}
-
 export class Recorder {
   private stream: MediaStream | null = null;
   private micStream: MediaStream | null = null;
@@ -273,23 +208,14 @@ export class Recorder {
   /** Events from tabs that aren't the one being recorded — counted, not kept. */
   private dropped = 0;
   private pointer: PointerSample | null = null;
-  /** The puck's latest report. Unlike the mouse, a *reporting* puck never goes
-   *  stale — parked is a deliberate act of pointing — but a puck that stopped
-   *  reporting (tab navigated, window closed) ages out fast via `puckAt`. */
-  private puck: PuckTelemetry | null = null;
-  private puckAt = 0;
-  private pins: Pin[] = [];
-
   private frames: RecordingFrame[] = [];
-  private marks = 0;
   /** Something demanded the next sample be kept whatever dedup thinks, and what it was. */
-  private forcedWhy: 'mark' | 'click' | 'nav' | null = null;
+  private forcedWhy: 'click' | 'nav' | null = null;
   private lastClickForce = 0;
   /** When the last kept frame landed, ms from start — the heartbeat measures from here. */
   private lastKeptT = 0;
-  /** Signatures of the KEPT frames only — that ring *is* the dedup window. Each
-   *  remembers where the puck sat at its capture, so later diffs can mask it. */
-  private sigs: { data: Uint8ClampedArray; mask: CellRect | null }[] = [];
+  /** Signatures of the KEPT frames only — that ring *is* the dedup window. */
+  private sigs: Uint8ClampedArray[] = [];
   private sampled = 0;
   private startedAt = 0;
 
@@ -431,63 +357,10 @@ export class Recorder {
     if (this.inScope(origin)) this.pointer = sample;
   }
 
-  /** The puck's latest self-report, or null when it closes. */
-  setPuck(telemetry: PuckTelemetry | null) {
-    this.puck = telemetry;
-    this.puckAt = telemetry ? Date.now() : 0;
-  }
-
-  /** True while the puck's heartbeat is current — the reporting-or-gone test. */
-  private puckLive(): boolean {
-    return this.puck !== null && Date.now() - this.puckAt <= PUCK_STALE_MS;
-  }
-
-  /** The live readout the puck's heartbeat answers with — same facts `emit()` sends. */
-  liveStats(): { elapsedMs: number; interim: string; micState: MicState } {
-    return { elapsedMs: this.elapsed(), interim: this.interim, micState: this.micState };
-  }
-
-  /** Whether the puck's tip currently maps into the captured frame — false when it
-   *  was dragged to a monitor we're not recording, or the capture is a lone window. */
-  puckOnFrame(): boolean {
-    const t = this.puck;
-    const v = this.video;
-    if (!t || !this.puckLive() || !v?.videoWidth || !v.videoHeight) return false;
-    return mapPointer(this.puckAsSample(t), v.videoWidth, v.videoHeight) !== null;
-  }
-
-  /** The captured frame's shape, for "is this a whole screen" hints. */
-  frameShape(): { w: number; h: number } | null {
-    const v = this.video;
-    return v?.videoWidth && v.videoHeight ? { w: v.videoWidth, h: v.videoHeight } : null;
-  }
-
   /**
-   * Pin the puck's tip: remember the spot, number it, and force the keyframe.
-   * The dot itself is painted into every frame sampled while the pin is alive —
-   * `drawPin` in `sample()` — because live paint outside a tab does not exist.
-   */
-  pin(): number | null {
-    const t = this.puck;
-    if (!t || !this.puckLive() || !this.stream) return null;
-    const n = this.pins.length + 1;
-    this.pins.push({ n, at: this.elapsed(), sx: t.sx, sy: t.sy, sw: t.sw, sh: t.sh });
-    this.forcedWhy = 'mark';
-    if (!this.sampling) this.pending = this.sample();
-    return n;
-  }
-
-  /** Capture this instant no matter what dedup thinks — the human said it matters. */
-  mark() {
-    if (!this.stream) return;
-    this.forcedWhy = 'mark';
-    if (!this.sampling) this.pending = this.sample();
-  }
-
-  /**
-   * The page said something happened — a click, or a route change. Same kick as
-   * `mark()`, but it never outranks a mark that's still waiting for its sample,
-   * and clicks are rate-limited: a walkthrough is mostly clicking.
+   * The page said something happened — a click (a finished ink stroke counts as
+   * one), or a route change. Keep the next sample whatever dedup thinks. Clicks
+   * are rate-limited: a walkthrough is mostly clicking.
    */
   force(why: 'click' | 'nav', origin?: string) {
     if (!this.stream) return;
@@ -497,7 +370,6 @@ export class Recorder {
       if (now - this.lastClickForce < CLICK_FORCE_MS) return;
       this.lastClickForce = now;
     }
-    if (this.forcedWhy === 'mark') return;
     this.forcedWhy = why;
     if (!this.sampling) this.pending = this.sample();
   }
@@ -525,15 +397,11 @@ export class Recorder {
       const sig = sigCtx.getImageData(0, 0, SIG_SIZE, SIG_SIZE).data;
 
       const t = this.elapsed();
-      const mask = this.puckCellRect();
       const minDist = this.sigs.length
-        ? Math.min(...this.sigs.map((k) => cellDiff(sig, k.data, [mask, k.mask])))
+        ? Math.min(...this.sigs.map((k) => cellDiff(sig, k)))
         : undefined;
       let reason: RecordingFrame['reason'];
-      if (forced === 'mark') {
-        reason = 'mark';
-        this.marks++;
-      } else if (forced) {
+      if (forced) {
         // A click or a nav that changed literally nothing is a duplicate, and a
         // duplicate spends one of the slots the whole walkthrough shares.
         if (minDist !== undefined && minDist === 0) return;
@@ -563,7 +431,6 @@ export class Recorder {
       if (pointer?.nx !== undefined && pointer.ny !== undefined) {
         drawCrosshair(frameCtx, pointer.nx * width, pointer.ny * height, width);
       }
-      this.drawPins(frameCtx, width, height, t);
 
       const index = this.frames.length + 1;
       await blobs.set(`${this.id}:frame:${index}`, await toJpeg(canvas));
@@ -576,7 +443,7 @@ export class Recorder {
         ...(pointer ? { pointer } : {}),
       });
       this.lastKeptT = t;
-      this.sigs.push({ data: sig, mask });
+      this.sigs.push(sig);
       if (this.sigs.length > DEDUP_WINDOW) this.sigs.shift();
       this.emit();
       this.saveProgress();
@@ -585,79 +452,14 @@ export class Recorder {
     }
   }
 
-  /**
-   * The pointer as it applies to the frame being written. A fresh page sample wins
-   * — mousing in Chrome is where the attention is — and the puck is the fallback
-   * with no staleness at all: while it's open, parked is pointing.
-   */
+  /** The pointer as it applies to the frame being written, while it's fresh enough to mean anything. */
   private pointerNow(width: number, height: number): FramePointer | undefined {
     const p = this.pointer;
     if (p && Date.now() - p.ts <= POINTER_STALE_MS) {
       const mapped = mapPointer(p, width, height);
       if (mapped || p.selector) return { ...(mapped ?? {}), selector: p.selector, text: p.text };
     }
-    const t = this.puck;
-    if (t && this.puckLive()) {
-      const mapped = mapPointer(this.puckAsSample(t), width, height);
-      if (mapped) return mapped;
-    }
     return undefined;
-  }
-
-  /** The tip as a PointerSample — zeroed viewport fields keep the mapping screen-only. */
-  private puckAsSample(t: PuckTelemetry): PointerSample {
-    return { ts: Date.now(), x: 0, y: 0, sx: t.sx, sy: t.sy, vw: 0, vh: 0, sw: t.sw, sh: t.sh };
-  }
-
-  /**
-   * The puck's window, in signature cells, padded a cell each side — the rect
-   * dedup must ignore. Null when the frame isn't shaped like the puck's screen
-   * (window capture, other monitor): the puck isn't in those pixels at all.
-   */
-  private puckCellRect(): CellRect | null {
-    const t = this.puck;
-    const v = this.video;
-    if (!t || !this.puckLive() || !v?.videoWidth || !v.videoHeight || !t.sw || !t.sh) return null;
-    const screenAspect = t.sw / t.sh;
-    if (Math.abs(v.videoWidth / v.videoHeight - screenAspect) / screenAspect > MAP_TOLERANCE) {
-      return null;
-    }
-    const pad = 1;
-    const x0 = Math.floor((t.wx / t.sw) * SIG_SIZE) - pad;
-    const y0 = Math.floor((t.wy / t.sh) * SIG_SIZE) - pad;
-    const x1 = Math.ceil(((t.wx + t.ww) / t.sw) * SIG_SIZE) + pad;
-    const y1 = Math.ceil(((t.wy + t.wh) / t.sh) * SIG_SIZE) + pad;
-    if (x1 < 0 || y1 < 0 || x0 > SIG_SIZE - 1 || y0 > SIG_SIZE - 1) return null;
-    return {
-      x0: Math.max(0, x0),
-      y0: Math.max(0, y0),
-      x1: Math.min(SIG_SIZE - 1, x1),
-      y1: Math.min(SIG_SIZE - 1, y1),
-    };
-  }
-
-  /** Every pin still alive, at ink-style hold-then-fade opacity, onto this frame. */
-  private drawPins(ctx: CanvasRenderingContext2D, width: number, height: number, now: number) {
-    if (!this.pins.length) return;
-    this.pins = this.pins.filter((p) => now - p.at <= PIN_HOLD_MS + PIN_FADE_MS);
-    for (const p of this.pins) {
-      const sample: PointerSample = {
-        ts: Date.now(),
-        x: 0,
-        y: 0,
-        sx: p.sx,
-        sy: p.sy,
-        vw: 0,
-        vh: 0,
-        sw: p.sw,
-        sh: p.sh,
-      };
-      const mapped = mapPointer(sample, width, height);
-      if (!mapped) continue;
-      const age = now - p.at;
-      const alpha = age <= PIN_HOLD_MS ? 1 : Math.max(0, 1 - (age - PIN_HOLD_MS) / PIN_FADE_MS);
-      drawPin(ctx, mapped.nx * width, mapped.ny * height, p.n, alpha, width);
-    }
   }
 
   // ── persistence ─────────────────────────────────────────────────────────
@@ -745,13 +547,11 @@ export class Recorder {
 
     const allowed = frameBudget(this.elapsed());
     if (this.frames.length > allowed) {
-      // Marked frames are the human pointing at something; they never get thinned.
+      // A uniform thin: survivors stay spread across the whole take, so nothing
+      // is protected from it and nothing gets a run of neighbours it doesn't earn.
       const keepIdx = new Set<number>();
-      this.frames.forEach((f, i) => f.reason === 'mark' && keepIdx.add(i));
-      const rest = this.frames.map((_, i) => i).filter((i) => !keepIdx.has(i));
-      const budget = Math.max(0, allowed - keepIdx.size);
-      const step = rest.length / budget;
-      for (let i = 0; i < budget; i++) keepIdx.add(rest[Math.floor(i * step)]);
+      const step = this.frames.length / allowed;
+      for (let i = 0; i < allowed; i++) keepIdx.add(Math.floor(i * step));
       const survivors = this.frames.filter((_, i) => keepIdx.has(i));
       const dropped = this.frames.filter((_, i) => !keepIdx.has(i));
       await Promise.all(dropped.map((f) => blobs.delete(`${this.id}:frame:${f.index}`)));
@@ -805,7 +605,6 @@ export class Recorder {
       elapsedMs: this.elapsed(),
       frameCount: this.frames.length,
       segmentCount: this.segments.length,
-      markCount: this.marks,
       interim: this.interim,
       micState: this.micState,
     });
