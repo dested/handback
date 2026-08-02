@@ -36,7 +36,7 @@ export interface UploadProgress {
 }
 
 export interface UploadResult {
-  gripeId: string;
+  walkthroughId: string;
   /** The gripe's page in the workspace — what the panel shows and the prompt carries. */
   url: string;
 }
@@ -156,14 +156,14 @@ export async function pushGripe(
     onProgress?.({ done: 0, total: files.length, bytesDone: 0, bytesTotal, ...p });
 
   report({ phase: 'declare' });
-  const declareRes = await fetch(`${server}/api/ingest/gripes`, {
+  const declareRes = await fetch(`${server}/api/ingest/walkthroughs`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
     body: JSON.stringify(declaration(session, recordings, files, opts?.projectId, opts?.teamId)),
   });
   if (!declareRes.ok) throw await explain('declare', declareRes);
-  const { gripeId, uploads } = (await declareRes.json()) as {
-    gripeId: string;
+  const { walkthroughId, uploads } = (await declareRes.json()) as {
+    walkthroughId: string;
     uploads: { path: string; url: string; contentType: string }[];
   };
 
@@ -190,11 +190,11 @@ export async function pushGripe(
   await Promise.all(Array.from({ length: UPLOAD_CONCURRENCY }, worker));
 
   report({ phase: 'finalize', done, total: uploads.length, bytesDone });
-  const finalizeRes = await fetch(`${server}/api/ingest/gripes/${gripeId}/finalize`, {
+  const finalizeRes = await fetch(`${server}/api/ingest/walkthroughs/${walkthroughId}/finalize`, {
     method: 'POST',
     headers: { authorization: `Bearer ${token}` },
   });
   if (!finalizeRes.ok) throw await explain('finalize', finalizeRes);
 
-  return { gripeId, url: `${server}/gripes/${gripeId}` };
+  return { walkthroughId, url: `${server}/walkthroughs/${walkthroughId}` };
 }

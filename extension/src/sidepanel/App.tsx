@@ -1,4 +1,4 @@
-import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   PageEvent,
   PointerSample,
@@ -31,6 +31,153 @@ import { transcribeRecording, type TranscribeProgress } from './transcribe';
 import { Timeline } from './Timeline';
 import { Home } from './Home';
 import './panel.css';
+
+/**
+ * The destination as one control: a trigger reading "to <space> · <project>",
+ * and one panel grouped by space where a single row picks the space and the
+ * project together. Only the active link's teams and projects are known (context
+ * follows the active link), so every other linked server offers just its personal
+ * space until it's the one selected. "General" is the project-less row.
+ */
+function DestinationPicker({
+  links,
+  activeLinkId,
+  ctx,
+  ctxFailed,
+  teamId,
+  currentProjectId,
+  disabled,
+  onRetry,
+  onOpenRecorder,
+  onOpenProjects,
+  onPick,
+}: {
+  links: ServerLink[];
+  activeLinkId: string;
+  ctx: ServerContext | null;
+  ctxFailed: boolean;
+  teamId: string;
+  currentProjectId: string;
+  disabled: boolean;
+  onRetry: () => void;
+  onOpenRecorder: () => void;
+  onOpenProjects: () => void;
+  onPick: (linkId: string, teamId: string, projectId: string, projectName: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLDivElement | null>(null);
+  const multi = links.length > 1;
+  const active = links.find((l) => l.id === activeLinkId) ?? links[0] ?? null;
+
+  useEffect(() => {
+    if (!open) return;
+    function onDown(e: MouseEvent) {
+      if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false);
+    }
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  // The spaces of one link, as sections of the panel.
+  const spacesOf = (l: ServerLink): { teamId: string; name: string }[] => {
+    if (l.id !== active?.id) return [{ teamId: '', name: 'Personal' }];
+    const spaces = [{ teamId: '', name: 'Personal' }];
+    for (const t of ctx?.teams ?? []) spaces.push({ teamId: t.id, name: t.name });
+    return spaces;
+  };
+
+  const spaceLabel = teamId
+    ? (ctx?.teams.find((t) => t.id === teamId)?.name ?? 'team')
+    : 'Personal';
+  const projectLabel = currentProjectId
+    ? (spaceProjects(ctx, teamId).find((p) => p.id === currentProjectId)?.name ?? 'General')
+    : 'General';
+
+  const choose = (l: ServerLink, tId: string, pId: string, pName: string) => {
+    onPick(l.id, tId, pId, pName);
+    setOpen(false);
+  };
+
+  return (
+    <div className="dest" ref={wrap}>
+      <span className="dest-to">to</span>
+      <button
+        type="button"
+        className="dest-trigger"
+        disabled={disabled}
+        onClick={() => setOpen((o) => !o)}
+        aria-label="Destination">
+        <span className="dest-space">{spaceLabel}</span>
+        <span className="dest-sep">·</span>
+        <span className="dest-proj">{projectLabel}</span>
+      </button>
+
+      {open && (
+        <div className="dest-pop">
+          {links.map((l) => (
+            <div key={l.id}>
+              {multi && <div className="dest-host">{hostOf(l.serverUrl)}</div>}
+              {spacesOf(l).map((s) => {
+                const activeSpace = l.id === active?.id;
+                const projects = activeSpace ? spaceProjects(ctx, s.teamId) : [];
+                const here = activeSpace && s.teamId === teamId;
+                const rows = [{ id: '', name: 'General' }, ...projects];
+                return (
+                  <div className="dest-grp" key={`${l.id}:${s.teamId}`}>
+                    <div className="dest-grp-h">{s.name}</div>
+                    {rows.map((r) => {
+                      const on = here && r.id === currentProjectId;
+                      return (
+                        <button
+                          type="button"
+                          key={r.id || 'general'}
+                          className={`dest-opt${on ? ' on' : ''}`}
+                          onClick={() => choose(l, s.teamId, r.id, r.id ? r.name : '')}>
+                          <span className="dest-mark" />
+                          <span className="dest-opt-name">{r.name}</span>
+                        </button>
+                      );
+                    })}
+                    {here && !ctx && !ctxFailed && <div className="dest-note">loading projects…</div>}
+                    {here && ctxFailed && (
+                      <div className="dest-note">
+                        projects unavailable ·{' '}
+                        <button type="button" className="link" onClick={onRetry}>
+                          retry
+                        </button>
+                      </div>
+                    )}
+                    {here && ctx && projects.length === 0 && (
+                      <button type="button" className="dest-opt dest-make" onClick={onOpenProjects}>
+                        <span className="dest-mark dest-mark-ghost" />
+                        <span className="dest-opt-name">+ new project…</span>
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+          <div className="dest-foot">
+            <button type="button" className="link" onClick={onOpenProjects}>
+              manage projects
+            </button>
+            <button type="button" className="link" onClick={onOpenRecorder}>
+              + link a server
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 /**
  * The side panel is the remote: Record, a live readout while it runs, the editor,
@@ -671,46 +818,32 @@ export function App() {
   const openProjectsUrl = () => void chrome.tabs.create({ url: appUrl('/projects') });
 
   /**
-   * The destination is one choice — which space on which server — so it is one
-   * value: `${serverUrl}::${teamId}`, empty team id meaning the token owner's own
-   * space. Only the active server's teams are known (the context fetch follows
-   * the active link), so every other server offers its personal space and grows
-   * its teams the moment it is picked.
+   * The destination is one choice — which space on which server, and which
+   * project within it — so it is one control (`DestinationPicker`): a trigger
+   * that reads "to <space> · <project>" and one grouped panel where a single
+   * row sets the space and the project together. Switching space drops the
+   * project (a project belongs to exactly one space); "General" is the
+   * project-less row — the server still routes by origin when it's chosen.
    */
-  const spaceValue = `${link?.serverUrl ?? ''}::${teamId}`;
-  const spaceOptions = (l: ServerLink | undefined) => {
-    if (!l) return [];
-    const options = [{ value: `${l.serverUrl}::`, label: 'Personal' }];
-    if (l.id !== link?.id) return options;
-    for (const t of ctx?.teams ?? []) options.push({ value: `${l.serverUrl}::${t.id}`, label: t.name });
-    // Whatever is selected has to be in the list, or the row reads as unset while
-    // the context is still in flight — or after a team went away.
-    if (teamId && !options.some((o) => o.value === spaceValue)) {
-      options.push({ value: spaceValue, label: ctxFailed ? 'your team' : ctx ? 'a team you left' : 'loading…' });
-    }
-    return options;
-  };
-  const onPickSpace = (e: ChangeEvent<HTMLSelectElement>) => {
-    const value = e.target.value;
-    if (value === '__add') {
-      openRecorderUrl();
-      return;
-    }
-    const cut = value.indexOf('::');
-    if (cut < 0) return;
+  const currentProjectId =
+    session && session.projectId && projects.some((p) => p.id === session.projectId)
+      ? session.projectId
+      : '';
+  const pickDestination = (
+    nextLinkId: string,
+    nextTeamId: string,
+    projectId: string,
+    projectName: string,
+  ) =>
     void (async () => {
-      await patchSettings({ activeLinkId: value.slice(0, cut), activeTeamId: value.slice(cut + 2) });
-      // A project belongs to one space, so it can't survive the move.
-      if (session?.projectId) {
-        await send({ type: 'session:project', id: session.id, projectId: '', projectName: '' });
-        await refresh();
+      if (nextLinkId !== link?.id || nextTeamId !== teamId) {
+        await patchSettings({ activeLinkId: nextLinkId, activeTeamId: nextTeamId });
       }
+      if (session) {
+        await send({ type: 'session:project', id: session.id, projectId, projectName });
+      }
+      await refresh();
     })();
-  };
-
-  /** Where Handback would file this gripe on its own, from the recorded origin. */
-  const autoProject = projects.find((p) => session && p.originHints.includes(session.origin));
-  const autoLabel = `auto${autoProject ? ` → ${autoProject.name}` : ''}`;
 
   const summary = [
     // Duration, not a count — the panel presents one timeline.
@@ -956,7 +1089,7 @@ export function App() {
                   onClick={() => void startRecording()}
                 >
                   <span className="dot" />
-                  record a take
+                  add another recording
                 </button>
               )}
             </div>
@@ -970,92 +1103,21 @@ export function App() {
           {statusRow}
           {linked && hasContent && (
             <>
-              {/* Where it lands, said as a sentence you can change: space · project.
-                  Above the button — the destination is read before the trigger is pulled. */}
-              <div className="dest">
-                <span className="dest-to">to</span>
-                <select className="dest-sel" value={spaceValue} onChange={onPickSpace}>
-                  {/* One token reaches the owner's personal space and every team,
-                      so the choice is a space, not a key. With keys to more than
-                      one server the spaces group under the host they live on. */}
-                  {state.settings.links.length > 1
-                    ? state.settings.links.map((l) => (
-                        <optgroup key={l.id} label={hostOf(l.serverUrl)}>
-                          {spaceOptions(l).map((o) => (
-                            <option key={o.value} value={o.value}>
-                              {o.label}
-                            </option>
-                          ))}
-                        </optgroup>
-                      ))
-                    : spaceOptions(state.settings.links[0]).map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                  <option value="__add">+ link another server…</option>
-                </select>
-                <span className="dest-dot">·</span>
-                {/* The project control is ALWAYS here. It used to hide itself
-                    whenever the fetch failed or the space had no projects,
-                    which read as "this recorder can't pick a project" — so both
-                    of those are now states of the control, each with the way out
-                    of them. Handback still routes by origin either way. */}
-                {ctxFailed ? (
-                  <>
-                    <select className="dest-sel" value="" disabled>
-                      <option value="">projects unavailable</option>
-                    </select>
-                    <button className="link dest-fix" onClick={() => setCtxReloads((n) => n + 1)}>
-                      retry
-                    </button>
-                  </>
-                ) : (
-                  <select
-                    className="dest-sel"
-                    value={
-                      session && session.projectId && projects.some((p) => p.id === session.projectId)
-                        ? session.projectId
-                        : ''
-                    }
-                    disabled={!ctx || !session}
-                    onChange={(e) => {
-                      if (e.target.value === '__projects') {
-                        openProjectsUrl();
-                        return;
-                      }
-                      if (!session) return;
-                      const projectId = e.target.value;
-                      void (async () => {
-                        await send({
-                          type: 'session:project',
-                          id: session.id,
-                          projectId,
-                          projectName: projects.find((p) => p.id === projectId)?.name ?? '',
-                        });
-                        await refresh();
-                      })();
-                    }}
-                  >
-                    {/* Loading reads as loading, not as a decision already made;
-                        a space with nothing in it says it has no projects rather
-                        than offering an empty list. */}
-                    <option value="">
-                      {!ctx ? 'loading projects…' : projects.length ? autoLabel : 'no project'}
-                    </option>
-                    {projects.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                    {ctx && (
-                      <option value="__projects">
-                        {projects.length ? 'manage projects…' : '+ make one…'}
-                      </option>
-                    )}
-                  </select>
-                )}
-              </div>
+              {/* Where it lands — space and project as one control, read before
+                  the trigger is pulled. One panel, one click sets both. */}
+              <DestinationPicker
+                links={state.settings.links}
+                activeLinkId={state.settings.activeLinkId}
+                ctx={ctx}
+                ctxFailed={ctxFailed}
+                teamId={teamId}
+                currentProjectId={currentProjectId}
+                disabled={recording || uploading}
+                onRetry={() => setCtxReloads((n) => n + 1)}
+                onOpenRecorder={openRecorderUrl}
+                onOpenProjects={openProjectsUrl}
+                onPick={pickDestination}
+              />
               <button
                 className="primary send"
                 disabled={recording || uploading}

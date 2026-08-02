@@ -2,6 +2,22 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-08-02 — recorder upload 404 fix + destination/header UI cleanup
+Asked: extension upload failed at finalize (404 "Unknown walkthrough"); make the header space
+dropdown legible; reword "record a take"; rename "no project" and merge the space+project double
+dropdown into one clean control.
+Done: fixed the finalize 404 — `upload.ts` still destructured `gripeId` from declare, but the
+server renamed that field to `walkthroughId`, so it was undefined and finalize hit
+`/gripes/undefined/finalize` → "Unknown walkthrough". EVERY extension upload was broken (CLI
+unaffected — it reads `walkthroughId`); aligned the declare/finalize URLs to `/walkthroughs*` too.
+Merged the send-view space + project selects into one grouped `DestinationPicker` (trigger
+"to <space> · <project>", one upward panel grouped by space, `General` = project-less, one click
+sets both); "no project" → **General**. "record a take" → "add another recording". Header
+`SpaceSwitcher` now shows a muted "Space" label. Extension 1.6.0 → 1.6.1 — **needs republish**
+(`bun run publish:extension`) to reach installs; verified in the preview harness (mode=long).
+Touched: extension/src/lib/upload.ts, extension/src/sidepanel/App.tsx,
+extension/src/sidepanel/panel.css, extension/{package.json,public/manifest.json}, src/app/layout.tsx
+
 ## 2026-08-02 — admin team-page member management
 Asked: "i need to be able to add and remove members and stuff" on /admin/teams/:id.
 Done: admin.addTeamMember (by email of an existing account, seats enforced) / removeTeamMember

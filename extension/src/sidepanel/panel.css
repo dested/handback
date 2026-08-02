@@ -1005,9 +1005,10 @@ button.ticker.warn:hover {
   padding: 0 14px;
   font-size: var(--fs-3);
 }
-/* Where it lands, one line under the send: space · project, both changeable.
- * Both controls are always here — one that hides is one nobody believes exists. */
+/* Where it lands, one line under the send: space · project, as ONE control.
+ * A single trigger opens one panel grouped by space; a row sets both at once. */
 .dest {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1015,8 +1016,16 @@ button.ticker.warn:hover {
   margin-bottom: 6px;
   font-size: var(--fs-1);
 }
-.dest-sel {
-  max-width: 46%;
+.dest-to {
+  flex: none;
+  color: var(--muted);
+}
+.dest-trigger {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   /* The panel draws its own controls — Chrome's stock arrow would be the one
@@ -1024,24 +1033,133 @@ button.ticker.warn:hover {
   appearance: none;
   background: var(--paper)
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath d='M1 1l3 3 3-3' fill='none' stroke='%23767676' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
-    no-repeat right 6px center;
-  padding: 3px 18px 3px 6px;
+    no-repeat right 8px center;
+  padding: 4px 22px 4px 8px;
   color: var(--ink);
   font: inherit;
   font-size: var(--fs-1);
+  text-align: left;
+  cursor: pointer;
+}
+.dest-trigger:hover:not(:disabled) {
+  border-color: var(--cobalt);
+}
+.dest-trigger:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+.dest-space {
+  flex: none;
+  font-weight: 600;
+}
+.dest-sep {
+  flex: none;
+  color: var(--muted);
+}
+.dest-proj {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
   text-overflow: ellipsis;
 }
-.dest-sel:disabled {
-  color: var(--muted);
+/* One panel, opening upward — the row sits at the foot of the panel. */
+.dest-pop {
+  position: absolute;
+  z-index: 40;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  margin-bottom: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 5px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(20, 22, 28, 0.12);
 }
-.dest-to,
-.dest-dot {
-  color: var(--muted);
-}
-/* The way out of a dead project control, right where it died. */
-.dest-fix {
-  flex: none;
+.dest-host {
+  padding: 4px 6px 2px;
+  font-family: var(--font-mono);
   font-size: var(--fs-0);
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.dest-grp {
+  padding: 2px 0;
+}
+.dest-grp + .dest-grp {
+  margin-top: 2px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+.dest-grp-h {
+  padding: 2px 6px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-0);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.dest-opt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  padding: 5px 8px;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--fs-1);
+  text-align: left;
+  cursor: pointer;
+}
+.dest-opt:hover {
+  background: var(--cobalt-wash);
+}
+.dest-opt.on {
+  background: var(--cobalt-wash);
+  color: var(--cobalt);
+  font-weight: 600;
+}
+.dest-opt-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* The active row's cobalt tick; a hairline ring on the rest keeps the column
+ * aligned so the names read as one list. */
+.dest-mark {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+}
+.dest-opt.on .dest-mark {
+  background: var(--cobalt);
+  border-color: var(--cobalt);
+}
+.dest-mark-ghost {
+  visibility: hidden;
+}
+.dest-make {
+  color: var(--cobalt);
+}
+.dest-note {
+  padding: 4px 8px 4px 23px;
+  font-size: var(--fs-0);
+  color: var(--muted);
+}
+.dest-foot {
+  display: flex;
+  gap: 14px;
+  margin-top: 4px;
+  padding: 6px 8px 2px;
+  border-top: 1px solid var(--border);
 }
 
 .send-sub {

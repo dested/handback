@@ -2,6 +2,20 @@
 
 > ADR-lite: what was decided, why, what was rejected. Append-only.
 
+## 2026-08-02 — The recorder destination is ONE grouped control; "General" is the project-less row
+**Why:** the send-view "to [space] · [project]" was two native selects the owner disliked ("i
+dont liek the double drop down... just make it one and make it clean and cool"). It's now one
+trigger + one panel grouped by space (`DestinationPicker` in `App.tsx`): mono-uppercase space
+headers, a `General` row then that space's projects under each, one click sets space AND project
+together (switching space drops the project — a project belongs to exactly one). Only the active
+link's teams/projects are known, so other linked servers show just their Personal space until
+selected. The panel opens **upward** because the row sits at the foot of the panel. `no project`
+was renamed **General** (owner: "dont call it no project. give it a name") — the server still
+routes by origin when General is chosen, so nothing about routing changed, only the label.
+**Rejected:** two selects (the thing being replaced); project-first with space as a tag (owner
+picked the space-grouped panel); an actual default "General" Project row in the DB (General is a
+UI label for `projectId: null`, not a real project — avoids a migration and a magic row).
+
 ## 2026-08-02 — /admin is a console with its own sidebar; the sidebar primitive is hand-rolled
 **Why:** admin outgrew one page ("a 3 screen mess" — owner asked for a full real admin with a
 shadcn sidebar). It's now a nested route section (`src/app/admin/*`) behind one gate in

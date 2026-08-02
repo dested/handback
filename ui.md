@@ -104,17 +104,24 @@ properties in `extension/src/sidepanel/styles.css` (no Tailwind there).
   may be louder than it. An open walkthrough is **two rows of
   chrome and then content, never more**: a **crumb row** (`← all walkthroughs`
   muted, the mono meta line as a caption on the same row, `discard` on the
-  right), then a **title row** (the name, with `● record a take` as the cobalt
-  ghost beside it). Discard arms into one line
+  right), then a **title row** (the name, with `● add another recording` as the
+  cobalt ghost beside it). Discard arms into one line
   (`discard 2 takes? yes, discard / keep`, the yes in `--destructive`) so the
   row never grows and shoves the timeline down mid-decision.
-  Above the send button sits the destination row — "to [workspace] · [project]",
-  two hairline selects with a drawn chevron (`appearance: none`, never Chrome's
-  stock arrow). **Both selects are always rendered**: a workspace with no projects
-  reads `no project` and offers `+ make one…`; a failed context fetch reads
-  `projects unavailable` beside a `retry` link — a control that hides itself is
-  read as a control that was never there. The take button is the cobalt *outline*
-  ghost — never louder than send. Settings live behind the header gear and lead
+  Above the send button sits the destination row — **one** control, "to [space] ·
+  [project]", not two selects. Its trigger is a single hairline button with a
+  drawn chevron (`appearance: none`, never Chrome's stock arrow); clicking opens
+  **one panel that opens upward** (the row lives at the foot of the panel),
+  grouped by space — mono-uppercase space headers, and under each a `General` row
+  (the project-less choice — the server still routes by origin) then that space's
+  projects. One click sets space *and* project together; the active row is
+  cobalt-washed with a filled cobalt dot, the rest carry a hairline ring so the
+  names align. A space with no projects shows just `General` + `+ new project…`; a
+  failed context fetch shows `projects unavailable · retry` under the current
+  space; a foot row carries `manage projects` / `+ link a server`. With keys to
+  more than one server the spaces group under a mono host header. The take button
+  is the cobalt *outline* ghost — never louder than send. Settings live behind the
+  header gear and lead
   with the Workspaces list (one row per linked workspace, cobalt border + filled
   dot on the active one, whole row clickable, `×` to unlink); unlinked states
   point at `/recorder` (cobalt-wash callout), they never demand a pasted token. Upload errors are a

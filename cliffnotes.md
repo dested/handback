@@ -327,7 +327,12 @@ reaches the container on a plain push.
   `/api/ingest/gripes*` aliases stay registered (Recorder ≤1.2.x posts them). MCP tools have NO
   old-name aliases — old report.md files that say `get_gripe` predate the rename. The extension's
   internal identifiers are still `Gripe*` on purpose (only its emitted strings changed); rename
-  them in a quiet moment, not while panel work is in flight.
+  them in a quiet moment, not while panel work is in flight. **But the extension's ingest *client*
+  must speak the server's current *field* names** — `upload.ts` kept reading `gripeId` off the
+  declare response after the server renamed it to `walkthroughId`, so finalize POSTed to
+  `/gripes/undefined/finalize` and 404'd every extension upload until it was fixed 2026-08-02
+  (the CLI was fine — it read `walkthroughId`). Internal `Gripe*` type *names* are free; the JSON
+  keys crossing the wire are not.
 - **A personal space is the absence of a team, not a row.** `teamId: null` in a tRPC input means
   "the caller's own personal space" and nothing else — it cannot be spoofed (server/router.ts
   `toSpace`). Nothing provisions it, nothing can fail to provision it, and it takes no invites by

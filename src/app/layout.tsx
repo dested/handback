@@ -188,6 +188,7 @@ function SpaceSwitcher() {
         aria-label="Space"
         onClick={() => setOpen((o) => !o)}
         className="border-input bg-background text-foreground flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-sm font-medium">
+        <span className="text-muted-foreground text-xs font-normal">Space</span>
         {space.name}
         <ChevronDown className="size-3.5" />
       </button>
