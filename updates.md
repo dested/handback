@@ -2,6 +2,14 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-08-02 — /connect: Windows-correct `claude mcp add` command
+Asked: make "Create my command" detect Windows and emit a command that actually runs there.
+Done: the `mcpCommand` builder used Unix `\` line-continuations, which cmd/PowerShell treat as
+literal (they'd run only the first line). `ConnectPage` now detects the OS on mount
+(`/win/i.test(navigator.userAgent)`, SSR-safe like `origin`) and threads `isWindows` into
+`mcpCommand`, which returns the command on a single line for Windows and keeps the readable
+multi-line POSIX form otherwise. Typecheck clean.
+
 ## 2026-08-02 — recorder upload 404 fix + destination/header UI cleanup
 Asked: extension upload failed at finalize (404 "Unknown walkthrough"); make the header space
 dropdown legible; reword "record a take"; rename "no project" and merge the space+project double

@@ -285,7 +285,6 @@ export function RecorderPage() {
 
       <Recording />
 
-      <CliAside origin={origin} />
     </div>
   )
 }
@@ -585,19 +584,6 @@ function NotChromeNotice() {
   )
 }
 
-function CliAside({ origin }: { origin: string }) {
-  return (
-    <section className="border-border border-t pt-6">
-      <h2 className="font-display text-xl font-semibold">Prefer the command line?</h2>
-      <p className="text-muted-foreground mt-2 text-sm">
-        A walkthrough folder pushes straight up with the CLI:
-      </p>
-      <pre className="border-border bg-muted/60 mt-3 overflow-x-auto rounded-md border p-3 font-mono text-xs">
-        HANDBACK_TOKEN=hb_… bun cli/push.ts &lt;walkthrough-folder&gt; --server {origin}
-      </pre>
-    </section>
-  )
-}
 
 function CopyRow({ value }: { value: string }) {
   const { copied, copy } = useCopy()

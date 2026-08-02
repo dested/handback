@@ -39,7 +39,15 @@ export function ConnectPage() {
   // window is absent during SSR; render the production host, then correct it on
   // mount so a local dev session gets a command that points at localhost.
   const [origin, setOrigin] = useState('https://handback.dev')
-  useEffect(() => setOrigin(window.location.origin), [])
+  // Same story for the OS: assume POSIX for SSR, then correct on mount. A `\`
+  // line-continuation is a Unix-shell thing — cmd and PowerShell both treat a
+  // trailing backslash as literal and run only the first line — so a Windows
+  // visitor gets the command on one line instead.
+  const [isWindows, setIsWindows] = useState(false)
+  useEffect(() => {
+    setOrigin(window.location.origin)
+    setIsWindows(/win/i.test(navigator.userAgent))
+  }, [])
 
   const trpc = useTRPC()
   const connection = useQuery({
@@ -95,6 +103,7 @@ export function ConnectPage() {
       ) : (
         <ClaudeCodeSteps
           origin={origin}
+          isWindows={isWindows}
           minted={minted}
           onMinted={setMinted}
           tokenCount={connection.data?.tokenCount ?? 0}
@@ -118,18 +127,20 @@ export function ConnectPage() {
  */
 function ClaudeCodeSteps({
   origin,
+  isWindows,
   minted,
   onMinted,
   tokenCount,
   lastUsedAt,
 }: {
   origin: string
+  isWindows: boolean
   minted: Minted | null
   onMinted: (minted: Minted) => void
   tokenCount: number
   lastUsedAt: string | null
 }) {
-  const command = mcpCommand(origin, minted?.token ?? TOKEN_PLACEHOLDER)
+  const command = mcpCommand(origin, minted?.token ?? TOKEN_PLACEHOLDER, isWindows)
 
   return (
     <div className="space-y-12">
@@ -174,7 +185,13 @@ function ClaudeCodeSteps({
   )
 }
 
-function mcpCommand(origin: string, token: string): string {
+function mcpCommand(origin: string, token: string, isWindows = false): string {
+  // Windows shells (cmd, PowerShell) don't honour a trailing-backslash line
+  // continuation, so give them the whole command on one line. POSIX shells get
+  // the readable multi-line form.
+  if (isWindows) {
+    return `claude mcp add --transport http handback ${origin}/mcp --header "Authorization: Bearer ${token}"`
+  }
   return [
     'claude mcp add --transport http handback \\',
     `  ${origin}/mcp \\`,
