@@ -4,6 +4,7 @@ import { createTRPCClient, httpBatchLink } from '@trpc/client'
 import { RouterProvider, createBrowserRouter } from 'react-router-dom'
 import App from './App'
 import { routes } from './app/routes'
+import { registerPwa } from './lib/pwa'
 import type { AppRouter } from '../server/router'
 
 declare global {
@@ -37,3 +38,5 @@ ReactDOM.hydrateRoot(
     <RouterProvider router={router} />
   </App>
 )
+
+registerPwa()

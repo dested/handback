@@ -26,6 +26,7 @@ const APP_PREFIXES = [
   '/team',
   '/projects',
   '/recorder',
+  '/phone',
   '/connect',
   '/admin',
 ]
@@ -101,18 +102,22 @@ function AppHeader({ email }: { email: string }) {
 
   const tab = ({ isActive }: { isActive: boolean }) =>
     cn(
-      'rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+      'rounded-md px-3 py-1.5 text-sm font-medium whitespace-nowrap transition-colors',
       isActive ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground'
     )
 
   return (
     <header className="border-border bg-card border-b">
-      <nav className="mx-auto flex max-w-6xl items-center gap-4 px-6 py-3">
-        <Link to="/app" aria-label="Handback inbox">
+      {/* One row on md+; on a phone the tab list takes `order-last w-full` and
+          wraps into its own swipeable second row. The tabs render ONCE — a
+          hidden duplicate would double every nav locator (e2e finds "Team"
+          twice) and ship two DOMs to keep in sync. */}
+      <nav className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 sm:px-6">
+        <Link to="/app" aria-label="Handback inbox" className="shrink-0">
           <Wordmark />
         </Link>
         <SpaceSwitcher />
-        <div className="ml-2 flex items-center gap-1">
+        <div className="order-last flex w-full items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:order-none md:ml-2 md:w-auto md:overflow-visible">
           <NavLink to="/app" className={tab} end>
             Inbox
           </NavLink>
@@ -136,7 +141,7 @@ function AppHeader({ email }: { email: string }) {
             </NavLink>
           )}
         </div>
-        <div className="ml-auto flex items-center gap-3 text-sm">
+        <div className="ml-auto flex shrink-0 items-center gap-3 text-sm">
           <span className="text-muted-foreground hidden sm:inline">{email}</span>
           <button
             type="button"
@@ -189,8 +194,8 @@ function SpaceSwitcher() {
         onClick={() => setOpen((o) => !o)}
         className="border-input bg-background text-foreground flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-sm font-medium">
         <span className="text-muted-foreground text-xs font-normal">Space</span>
-        {space.name}
-        <ChevronDown className="size-3.5" />
+        <span className="max-w-32 truncate">{space.name}</span>
+        <ChevronDown className="size-3.5 shrink-0" />
       </button>
 
       {open && (

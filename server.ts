@@ -81,6 +81,12 @@ async function createServer() {
     res.redirect(302, await presignGet(release.key))
   })
 
+  // The PWA share sheet POSTs here; the service worker intercepts and stashes
+  // the media. If no SW is in control (first run, registration blocked) the
+  // POST reaches Express instead — the file is lost, but the person must land
+  // on /phone with the picker, never on a 404.
+  app.post('/share-target', (_req, res) => res.redirect(303, '/phone?error=share'))
+
   // The hosted MCP server. Deliberately at the root and not under /api — this
   // URL is copy-pasted by hand into `claude mcp add`, and it has to be short
   // enough to read back over someone's shoulder. Must be mounted before the SSR

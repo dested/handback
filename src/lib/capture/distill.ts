@@ -1,0 +1,248 @@
+import { decodeMono } from './audio'
+import { containerFor } from './container'
+import { recDirName } from './format'
+import { extractFrames } from './frames'
+import { makeGrids, type GridFrame } from './grids'
+import { polishTranscript } from './polish'
+import { probeClip } from './probe'
+import {
+  buildManifestTxt,
+  buildRecordingJson,
+  buildReport,
+  buildTranscriptTxt,
+  sheetFile,
+} from './report'
+import { slugify } from './slug'
+import { transcribeInCloud } from './transcribe'
+import { contentTypeFor, uploadWalkthrough, type CaptureFile } from './upload'
+import type {
+  CaptureStage,
+  ClipInput,
+  DistillResult,
+  Recording,
+  RecordingFrame,
+  Session,
+  StageProgress,
+  TranscriptSegment,
+} from './types'
+
+/**
+ * The phone-side pipeline, end to end: already-recorded clips in, an uploaded
+ * walkthrough out. It produces exactly what the recorder extension produces —
+ * dedup'd keyframes, 3×3 contact sheets, a cloud transcript, the cleanup pass,
+ * report.md and MANIFEST.txt, declared and PUT and finalized — because the
+ * viewer, `cli/push.ts` and the MCP brief all read that one file set.
+ *
+ * One clip at a time, on purpose: a phone has a few hundred MB of headroom and
+ * a decoded minute of audio is ~2 MB of Float32 before the frames are counted.
+ */
+
+export interface DistillOptions {
+  token: string
+  /** null = the token owner's personal space. */
+  teamId: string | null
+  projectId: string | null
+  title: string
+  onProgress: (p: StageProgress) => void
+  signal?: AbortSignal
+}
+
+export async function distillAndUpload(
+  clips: ClipInput[],
+  opts: DistillOptions
+): Promise<DistillResult> {
+  if (!clips.length) throw new Error('pick a clip first')
+  const count = clips.length
+  const now = Date.now()
+
+  const stop = () => {
+    if (opts.signal?.aborted) throw new Error('cancelled')
+  }
+  /** Local progress within one clip, scaled onto the whole run. -1 stays -1. */
+  const report = (stage: CaptureStage, clipIdx: number, local: number, detail?: string) => {
+    const pct = local < 0 ? -1 : (clipIdx + Math.min(1, Math.max(0, local))) / count
+    opts.onProgress({ stage, pct, detail })
+  }
+  const text = (path: string, body: string): CaptureFile => {
+    const contentType = contentTypeFor(path)
+    return { path, blob: new Blob([body], { type: contentType }), contentType }
+  }
+
+  // Phones name clips unhelpfully but stamp them honestly, so recording order is
+  // the file's own mtime. Clips that carry none keep the order they were picked in.
+  const ordered = clips
+    .map((clip, position) => ({
+      file: clip.file,
+      position,
+      at: Number.isFinite(clip.file.lastModified) ? clip.file.lastModified : 0,
+    }))
+    .sort((a, b) => a.at - b.at || a.position - b.position)
+
+  const session: Session = {
+    id: crypto.randomUUID(),
+    name: opts.title,
+    slug: slugify(opts.title),
+    createdAt: now,
+    updatedAt: now,
+    origin: '',
+    recCount: clips.length,
+  }
+
+  const takes: Recording[] = []
+  const files: CaptureFile[] = []
+  let transcribed = false
+  let polished = false
+
+  for (const [i, entry] of ordered.entries()) {
+    stop()
+    const file = entry.file
+    const index = i + 1
+    const dir = recDirName(index)
+    const label = count > 1 ? `clip ${index} of ${count}` : file.name
+
+    report('probe', i, -1, label)
+    const probe = await probeClip(file)
+    // The poster is for a picker screen; nothing here shows one.
+    if (probe.posterUrl) URL.revokeObjectURL(probe.posterUrl)
+
+    let frames: RecordingFrame[] = []
+    let frameBlobs = new Map<number, Blob>()
+    let sampled = 0
+    if (probe.hasVideo) {
+      report('frames', i, 0, label)
+      const extracted = await extractFrames(file, probe.durationMs, {
+        signal: opts.signal,
+        onProgress: (fraction) => report('frames', i, fraction, label),
+      })
+      frames = extracted.frames
+      frameBlobs = extracted.blobs
+      sampled = extracted.sampled
+    }
+    stop()
+
+    // Only frames whose JPEG exists ship, and the take carries only those — the
+    // report's citations, the sheets and the declared counts then all describe
+    // what is actually in the upload.
+    const kept: RecordingFrame[] = []
+    const gridFrames: GridFrame[] = []
+    for (const frame of frames) {
+      const blob = frameBlobs.get(frame.index)
+      if (!blob) continue
+      files.push({ path: `${dir}/${frame.file}`, blob, contentType: contentTypeFor(frame.file) })
+      kept.push(frame)
+      gridFrames.push({ blob, label: frame.file.split('/').pop() ?? frame.file })
+    }
+
+    if (gridFrames.length) {
+      report('sheets', i, 0, label)
+      // Nine at a time in frame order — exactly how report.ts maps a frame to its sheet.
+      for (const [n, sheet] of (await makeGrids(gridFrames)).entries()) {
+        const path = sheetFile(n + 1, `${dir}/`)
+        files.push({ path, blob: sheet, contentType: contentTypeFor(path) })
+      }
+    }
+    stop()
+
+    report('audio', i, -1, label)
+    let audio = await decodeMono(file)
+    let transcript: TranscriptSegment[] = []
+    if (audio) {
+      report('transcribe', i, 0, label)
+      const heard = await transcribeInCloud(audio, {
+        token: opts.token,
+        signal: opts.signal,
+        onProgress: (fraction) => report('transcribe', i, fraction, label),
+      })
+      // Megabytes per minute of clip; the next one needs the room.
+      audio = null
+      if (heard) {
+        transcribed = true
+        transcript = heard
+      }
+    }
+    stop()
+
+    let takePolished = false
+    if (transcript.length) {
+      report('polish', i, -1, label)
+      const cleaned = await polishTranscript(transcript, {
+        token: opts.token,
+        signal: opts.signal,
+      })
+      if (cleaned) {
+        transcript = cleaned
+        takePolished = true
+        polished = true
+      }
+    }
+    stop()
+
+    const container = containerFor(file.type, probe.hasVideo)
+    const startedAt = entry.at || now
+    const take: Recording = {
+      id: crypto.randomUUID(),
+      sessionId: session.id,
+      index,
+      createdAt: startedAt,
+      state: 'done',
+      mime: file.type,
+      chunks: 0,
+      meta: {
+        startedAt,
+        durationMs: probe.durationMs,
+        sampled,
+        frames: kept,
+        transcript,
+        ...(transcript.length ? { transcriber: 'groq' as const } : {}),
+        ...(takePolished ? { polished: true } : {}),
+        events: [],
+        videoFile: container.videoFile,
+      },
+    }
+    takes.push(take)
+    // Both are written even when the take has neither frames nor words — the
+    // extension writes them unconditionally and a reader counts on them existing.
+    files.push(text(`${dir}/transcript.txt`, buildTranscriptTxt(take.meta)))
+    files.push(text(`${dir}/recording.json`, buildRecordingJson(session, take)))
+    files.push({
+      path: `${dir}/${container.videoFile}`,
+      blob: file,
+      contentType: container.contentType,
+    })
+  }
+
+  stop()
+  // The summaries describe the whole set, so they go last — written from the
+  // takes as shipped, not as recorded.
+  opts.onProgress({ stage: 'build', pct: -1 })
+  files.push(text('report.md', buildReport(session, takes)))
+  files.push(text('MANIFEST.txt', buildManifestTxt(session, takes)))
+
+  stop()
+  const result = await uploadWalkthrough(session, takes, files, {
+    token: opts.token,
+    teamId: opts.teamId,
+    projectId: opts.projectId,
+    onProgress: (p) => {
+      if (p.phase === 'upload') {
+        opts.onProgress({
+          stage: 'upload',
+          pct: p.bytesTotal ? p.bytesDone / p.bytesTotal : 0,
+          detail: `${p.done} of ${p.total} files`,
+        })
+        return
+      }
+      opts.onProgress({ stage: p.phase, pct: -1 })
+    },
+  })
+
+  return {
+    walkthroughId: result.walkthroughId,
+    url: result.url,
+    frameCount: takes.reduce((n, t) => n + t.meta.frames.length, 0),
+    lineCount: takes.reduce((n, t) => n + t.meta.transcript.length, 0),
+    durationMs: takes.reduce((n, t) => n + t.meta.durationMs, 0),
+    transcribed,
+    polished,
+  }
+}

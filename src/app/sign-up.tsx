@@ -5,6 +5,7 @@ import { ReturnMark } from '~/components/logo'
 import { authClient } from '~/lib/auth-client'
 import { clearIdentity } from '~/lib/space'
 import { useTRPC } from '~/lib/trpc'
+import { safeNext } from './sign-in'
 import { Button } from '~/components/ui/button'
 import { Input } from '~/components/ui/input'
 import { Label } from '~/components/ui/label'
@@ -19,6 +20,7 @@ export function SignUpPage() {
   // hand them straight back to it — otherwise the account exists and the
   // invitation is orphaned.
   const inviteId = search.get('invite') ?? ''
+  const next = safeNext(search.get('next'))
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -47,7 +49,7 @@ export function SignUpPage() {
     // Whatever was cached belongs to whoever was signed in before, if anyone.
     clearIdentity(queryClient)
     await revalidator.revalidate()
-    navigate(inviteId ? `/join/${encodeURIComponent(inviteId)}?accept=1` : '/dashboard')
+    navigate(inviteId ? `/join/${encodeURIComponent(inviteId)}?accept=1` : (next ?? '/dashboard'))
   }
 
   return (

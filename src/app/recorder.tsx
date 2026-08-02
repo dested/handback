@@ -569,6 +569,13 @@ function Recording() {
           </span>
         </li>
       </ul>
+      <p className="text-muted-foreground mt-5 text-sm leading-relaxed">
+        Not at a desk? Your phone records its own screen — open{' '}
+        <Link to="/phone" className="text-primary underline-offset-4 hover:underline">
+          handback.dev/phone
+        </Link>{' '}
+        there and hand walkthroughs back from anywhere.
+      </p>
     </section>
   )
 }

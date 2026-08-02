@@ -23,9 +23,10 @@ import { Layout } from './layout'
 import { ForgotPasswordPage } from './forgot-password'
 import { PrivacyPage } from './privacy'
 import { ResetPasswordPage } from './reset-password'
+import { PhonePage } from './phone'
 import { ProjectsPage } from './projects'
 import { RecorderPage } from './recorder'
-import { SignInPage } from './sign-in'
+import { SignInPage, safeNext } from './sign-in'
 import { SignUpPage } from './sign-up'
 import { TeamPage } from './team'
 import { TermsPage } from './terms'
@@ -69,6 +70,21 @@ async function appLoader({ context }: LoaderFunctionArgs): Promise<RootLoaderDat
   return { session }
 }
 
+// appLoader, but the bounce to /sign-in remembers where the person was going.
+async function phoneLoader(args: LoaderFunctionArgs): Promise<RootLoaderData> {
+  const url = new URL(args.request.url)
+  const next = `/sign-in?next=${encodeURIComponent(url.pathname + url.search)}`
+  if (typeof window === 'undefined') {
+    const ctx = args.context as SsrLoaderContext
+    if (!ctx.session) throw redirect(next)
+    await ctx.queryClient.prefetchQuery(ctx.trpc.teams.mine.queryOptions())
+    return { session: ctx.session }
+  }
+  const session = await fetchClientSession()
+  if (!session) throw redirect(next)
+  return { session }
+}
+
 async function redirectIfSignedIn({ context, request }: LoaderFunctionArgs) {
   const session =
     typeof window === 'undefined'
@@ -76,9 +92,12 @@ async function redirectIfSignedIn({ context, request }: LoaderFunctionArgs) {
       : await fetchClientSession()
   if (session) {
     // An already-signed-in visitor who followed an invite through /sign-up
-    // belongs back at the invite, not at their own inbox.
-    const invite = new URL(request.url).searchParams.get('invite')
-    throw redirect(invite ? `/join/${encodeURIComponent(invite)}?accept=1` : '/app')
+    // belongs back at the invite, not at their own inbox — and one carrying a
+    // ?next (a bounced share landing) belongs wherever they were headed.
+    const params = new URL(request.url).searchParams
+    const invite = params.get('invite')
+    if (invite) throw redirect(`/join/${encodeURIComponent(invite)}?accept=1`)
+    throw redirect(safeNext(params.get('next')) ?? '/app')
   }
   return null
 }
@@ -103,6 +122,10 @@ export const routes: RouteObject[] = [
       { path: 'walkthroughs/:walkthroughId', Component: WalkthroughPage, loader: appLoader },
       { path: 'connect', Component: ConnectPage, loader: appLoader },
       { path: 'recorder', Component: RecorderPage, loader: appLoader },
+      // /phone is where the OS share sheet lands. A signed-out share must come
+      // back here after auth or the stashed clip is orphaned — so this loader,
+      // alone, carries the full URL through sign-in as ?next=.
+      { path: 'phone', Component: PhonePage, loader: phoneLoader },
       { path: 'projects', Component: ProjectsPage, loader: appLoader },
       { path: 'team', Component: TeamPage, loader: appLoader },
       {

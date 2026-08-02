@@ -135,6 +135,10 @@ src/
                         a STORE_URL constant, zip/load-unpacked until then), live install ping,
                         one-click Link (token minted + handed over, nothing pasted). Two numbered
                         steps; "Then just record" is unnumbered
+    phone.tsx           /phone — Handback on the phone: guide (per-OS: Android install+share,
+                        iOS A2HS+Photos picker, desktop "open this on your phone") AND the
+                        share-target intake: clips → in-browser distill → upload. Mints its own
+                        hb_ token (localStorage handback.phone.token), silent re-mint on 401
     join.tsx            /join/:inviteId — peek + accept
     admin/              /admin — the platform-admin console, its own sidebar shell (nested routes):
                         layout.tsx (gate + sidebar frame), overview.tsx (counts, status mix,
@@ -160,6 +164,8 @@ src/
     legal.tsx           LegalPage/Section/Terms/Notice — shared chrome for /privacy + /terms
     ui/                 button, card, input, label, sidebar (shadcn new-york style, no asChild;
                         sidebar is hand-rolled — no radix — collapse persisted, mobile overlay)
+    phone/              guide, clip-list (+AddClips/voice note), destination (one grouped
+                        control), stages (distill progress rows) — /phone's pieces
     landing/            hero, how-it-works, distill, walkthrough-manifest, agent-view, pricing,
                         final-cta · demo-shot.tsx (a keyframe as SVG) + demo-data.ts (the one
                         demo walkthrough) + mock.tsx (Pane/ContactSheet/Filmstrip/PlayerStrip/
@@ -170,10 +176,21 @@ src/
   lib/
     space.tsx           SpaceProvider/useActiveSpace — Personal + teams; active space in
                         localStorage `handback.activeSpace` ('personal' | teamId); never null
+    pwa.ts              SW registration, deferred install prompt, share-stash pickup
+                        (takeSharedMedia — one-shot read of IDB 'handback-share')
+    capture/            THE phone distill pipeline — a deliberate PORT of the extension's
+                        (see decisions.md 2026-08-02): frames (dedup+budget), grids, audio→WAV,
+                        transcribe/polish clients, report/MANIFEST/recording.json builders,
+                        two-phase upload, distill.ts orchestrator. Public surface: types/probe/
+                        context/distill. Mirror any extension pipeline change here
     trpc.tsx / auth-client.ts / utils.ts
   styles/app.css        ALL design tokens (light only) + .rule/.stamp/.ink-underline utilities
+public/                 manifest.webmanifest (PWA: standalone, share_target, shortcut) · sw.js
+                        (share-POST stash ONLY — caches nothing, keep it that way) · icons/
+                        (return-mark PWA icons, regenerate via `node cli/make-pwa-icons.mjs`)
 e2e/                    smoke.spec.ts + committed screenshots (landing, sign-up, app flow)
-index.html              SSR template; Google Fonts (Fraunces/Libre Franklin/IBM Plex Mono)
+index.html              SSR template; Google Fonts (Fraunces/Libre Franklin/IBM Plex Mono);
+                        manifest + apple-touch-icon links
 Dockerfile              DRYDOCK-OWNED — regenerated on every wire/re-wire, never hand-edit
 drydock.yaml            DRYDOCK-OWNED — the deploy manifest (portal is source of truth)
 .github/workflows/
@@ -210,6 +227,8 @@ extension/              Handback Recorder — the Chrome MV3 extension (own npm 
 | `/projects` · `/team` | Projects (any space) · Members/Invites/seats (team spaces) | `src/app/{projects,team}.tsx` |
 | `/connect` | Connect a coding agent — one button mints a token and fills in `claude mcp add`; tokens/disconnect are reference below | `src/app/connect.tsx` |
 | `/recorder` | Install + one-click-link the extension (detects install, mints token, handshake) | `src/app/recorder.tsx` |
+| `/phone` | Phone guide + share-target intake — OS-recorded clips distilled in-browser and uploaded | `src/app/phone.tsx` |
+| `POST /share-target` | PWA share sheet target — SW intercepts + stashes; Express fallback 303s to /phone | `public/sw.js` · `server.ts` |
 | `/admin` (+ `/users[/:id]`, `/teams[/:id]`, `/walkthroughs`, `/usage`) | Platform-admin console — sidebar shell, overview stats, users + drill-down, teams + seat editor, platform feed, per-space usage (admins only; nav link hidden otherwise) | `src/app/admin/*` |
 | `/dashboard` | redirect → /app (legacy) | `routes.tsx` |
 | `/healthz` | DB probe | `server.ts` |
@@ -322,6 +341,15 @@ reaches the container on a plain push.
 
 - **ui.md is law**: light only, no dark mode, no orange. Status colors fixed (open=cobalt,
   in_review=violet, resolved=green).
+- **No mobile browser can capture the screen — settled, don't revisit.** `getDisplayMedia` is
+  `version_added: false` on Chrome Android / Safari iOS / everything mobile (checked 2026-08-02).
+  /phone therefore rides the OS screen recorders; any "record live in the PWA" idea is dead on
+  arrival. `src/lib/capture/` is a deliberate duplicated port of the extension pipeline —
+  **change the pipeline in either place, mirror it in the other** (decisions.md 2026-08-02).
+  The SW caches nothing and must stay that way (SSR staleness > offline); its share stash
+  (IDB `handback-share`/`pending`/`current`) is a contract between `public/sw.js` and
+  `src/lib/pwa.ts` — change both together. `externally_connectable` etc. are unaffected; the
+  phone token lives in `localStorage handback.phone.token` and re-mints itself on 401.
 - **The rename has two frozen edges.** S3 keys stay `orgs/<orgId>/gripes/<id>/…`
   (`server/storage.ts` — renaming the prefix orphans every uploaded object) and
   `/api/ingest/gripes*` aliases stay registered (Recorder ≤1.2.x posts them). MCP tools have NO
@@ -669,6 +697,12 @@ reaches the container on a plain push.
   per server, Personal/team destination picker). `cli/migrate-teams.ts` ran against prod (before
   the deploy, by accident — dev `.env` pointed at prod; ~15 min of signed-in 500s until the
   deploy rolled; zero data lost, audit in the Deploy section). e2e 4/4 re-verified.
+- **Done (2026-08-02, later)** — **Handback on the phone**: PWA (manifest + share_target +
+  no-cache SW + return-mark icons), `/phone` guide+intake, and `src/lib/capture/` — the
+  extension pipeline ported to distill OS-recorded clips in the browser and upload through the
+  unchanged ingest API (multi-clip → rec-NN, voice-note mode, iOS picker path). Live in-PWA
+  screen capture confirmed impossible on mobile; design + limitations in
+  `plans/2026-08-02-phone-pwa.md`. On-device QA still pending (needs a real phone).
 - **Next** — **deploy, then re-test the loop**: `/mcp` and `/connect` only exist locally until the
   next push to `main`, so the command `/connect` prints for handback.dev 404s until then. Sal's
   Drydock/DNS checklist in the rename plan (zone, project, S3 via
@@ -694,3 +728,6 @@ reaches the container on a plain push.
   decisions table + Sal's Drydock/DNS checklist (zone, S3, project recreate, SSM, cleanup).
 - `plans/2026-08-01-teams-restructure.md` — **done**. Workspaces removed: the target model,
   pinned contracts, migration steps, and wave plan for the Teams + Personal restructure.
+- `plans/2026-08-02-phone-pwa.md` — **done** (code); on-device QA outstanding. The platform
+  verdict (no mobile screen capture, ever), the OS-recorder + share-target design, and the
+  honest limitations list for /phone.

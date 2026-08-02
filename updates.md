@@ -2,6 +2,61 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-08-02 — app header works on a phone
+Asked: "the header doesnt work on mobile" (found while taking /phone live).
+Done: `AppHeader` was one non-wrapping flex row (wordmark + switcher + up to six tabs + sign
+out) that overflowed any phone viewport. The nav is now `flex-wrap`: on `md+` nothing changes;
+below it the tab list takes `order-last w-full` and becomes its own swipeable second row
+(`overflow-x-auto`, scrollbar hidden, `whitespace-nowrap` tabs). Tabs render ONCE — a hidden
+duplicate row would break the e2e "Team" locator and double the DOM. Space name in the switcher
+trigger truncates at `max-w-32`. Typecheck clean.
+Touched: src/app/layout.tsx
+
+## 2026-08-02 — Handback on the phone: PWA + share-target intake at /phone
+Asked: run Handback on the phone — install from mobile Chrome as a PWA, "turn on recording",
+narrate over any app, stop, upload a walkthrough; "go hard, PiP??".
+Done: live in-PWA screen capture is **impossible** (getDisplayMedia never shipped on any mobile
+browser — verified via MDN compat data; PiP dies with it), so the shipped design rides the OS
+recorder: Android/iOS screen recorders capture with mic, and Handback became an installable PWA
+that is an **Android share target** — record → Share → Handback → the browser itself distills the
+clip (extension-identical dedup keyframes + contact sheets → `/transcribe` → `/polish` →
+report.md/MANIFEST/recording.json) and two-phase-uploads it via the existing ingest API. Zero
+server API changes; the page mints an `hb_` token (`Phone — Android, Aug 2`) and re-mints
+silently on 401. New: `public/manifest.webmanifest` (standalone, maskable return-mark icons,
+"New walkthrough" shortcut, share_target) · `public/sw.js` (share-POST stash → IndexedDB
+`handback-share`, **caches nothing**) · `cli/make-pwa-icons.mjs` · `src/lib/pwa.ts` (register,
+install prompt, share pickup) · `src/lib/capture/*` (the ported pipeline, 17 modules) ·
+`src/app/phone.tsx` + `src/components/phone/*` (guide per platform / intake / staged distill /
+done / failed) · `POST /share-target` Express fallback · `/phone` route + APP_PREFIXES ·
+autoTokenName knows iPhone/iPad. Multi-clip = rec-NN takes (ordered by file mtime); voice-note
+mode records mic-only in page; iOS = A2HS + Photos picker (no share target there, ever). Client
+size guards mirror ingest (2 GB/file, 4 GB/walkthrough). Typecheck clean. Design + limitations:
+`plans/2026-08-02-phone-pwa.md`. Not yet done on purpose: on-device QA (needs a real phone),
+inbox/landing links to /phone.
+Touched: public/*, cli/make-pwa-icons.mjs, index.html, src/index.tsx, src/lib/pwa.ts,
+src/lib/capture/*, src/app/phone.tsx, src/components/phone/*, src/app/routes.tsx,
+src/app/layout.tsx, src/components/setup-step.tsx, server.ts, cliffnotes.md, decisions.md
+
+## 2026-08-02 — recorder mic/screen-picker moments as full-panel gates (1.6.2)
+Asked: the first-time microphone step and Chrome's "which window" screen-share dialog should take
+over the whole extension panel with an explanation instead of leaving it sitting "like a lump"; on
+mic-grant it should return to record on its own.
+Done: two new full-container takeovers in `App.tsx`. `micGate` — first-run mic: pressing Record with
+the mic ungranted now raises an in-panel screen ("First, turn on your microphone") with an *Enable
+the microphone* button (opens `micperm.html`) and a *skip — record without narration* link, instead
+of the old one-line flash + silent tab. A `useEffect` watches `navigator.permissions` mic state
+while the gate is up and, the moment it flips to `granted`, closes the gate and starts recording
+via a `startRef` (no second click). `picking` — the screen-share dialog: set `'choosing'` right
+before `getDisplayMedia` (panel says "Pick what to record" behind Chrome's popup), flipped to
+`'refused'` on cancel ("Nothing picked yet" + *Choose a screen* / *not now*), cleared on success
+after seeding a live-readout so Home never flashes between. Both gate the body via an `overlay`
+flag so Home/editor/footer don't render underneath. Dropped the old `micTabOpened` ref. New `.gate*`
+CSS block (reuses cobalt/paper tokens). Version 1.6.1 → 1.6.2. Typecheck clean, both bundles build,
+zip rebuilt (`extension/handback-recorder.zip`); MicGate + refused-PickGate verified in the preview
+harness (mode=home). **Needs republish** (`bun run publish:extension`) to reach installs.
+Touched: extension/src/sidepanel/App.tsx, extension/src/sidepanel/panel.css,
+extension/{package.json,public/manifest.json}
+
 ## 2026-08-02 — /connect: Windows-correct `claude mcp add` command
 Asked: make "Create my command" detect Windows and emit a command that actually runs there.
 Done: the `mcpCommand` builder used Unix `\` line-continuations, which cmd/PowerShell treat as

@@ -8,6 +8,12 @@ import { Button } from '~/components/ui/button'
 import { Input } from '~/components/ui/input'
 import { Label } from '~/components/ui/label'
 
+/** A next param is only ever a path on this site — anything else is an open redirect. */
+export function safeNext(raw: string | null): string | null {
+  if (!raw || !raw.startsWith('/') || raw.startsWith('//')) return null
+  return raw
+}
+
 export function SignInPage() {
   const navigate = useNavigate()
   const revalidator = useRevalidator()
@@ -15,6 +21,9 @@ export function SignInPage() {
   const [search] = useSearchParams()
   // Carried through from /join so an invite survives the round trip.
   const inviteId = search.get('invite') ?? ''
+  // Where to land after auth (e.g. /phone?shared=1 — a shared clip must not be
+  // orphaned by the sign-in bounce). Same-site paths only.
+  const next = safeNext(search.get('next'))
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -34,7 +43,7 @@ export function SignInPage() {
     // cached (teams, inbox, active space) is theirs, not this user's.
     clearIdentity(queryClient)
     await revalidator.revalidate()
-    navigate(inviteId ? `/join/${encodeURIComponent(inviteId)}?accept=1` : '/dashboard')
+    navigate(inviteId ? `/join/${encodeURIComponent(inviteId)}?accept=1` : (next ?? '/dashboard'))
   }
 
   return (
@@ -84,7 +93,13 @@ export function SignInPage() {
       <p className="text-muted-foreground mt-6 text-sm">
         No account?{' '}
         <Link
-          to={inviteId ? `/sign-up?invite=${encodeURIComponent(inviteId)}` : '/sign-up'}
+          to={
+            inviteId
+              ? `/sign-up?invite=${encodeURIComponent(inviteId)}`
+              : next
+                ? `/sign-up?next=${encodeURIComponent(next)}`
+                : '/sign-up'
+          }
           className="text-primary underline-offset-4 hover:underline">
           Create one
         </Link>

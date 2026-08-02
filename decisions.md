@@ -2,6 +2,27 @@
 
 > ADR-lite: what was decided, why, what was rejected. Append-only.
 
+## 2026-08-02 — The phone records with the OS recorder; the PWA is a share target, not a recorder
+**Why:** no mobile browser exposes screen capture — `getDisplayMedia` is `version_added: false`
+on Chrome Android (exposed 72–88 but always `NotAllowedError`, then hidden), Safari iOS, Firefox
+Android (MDN compat data, checked 2026-08-02). So "press record in the PWA" is physics, not
+product. The OS recorders are *better* at the wanted UX anyway (mic narration, app switching,
+notification-shade stop, no browser battery/tab-kill risk). Handback's half is everything after
+capture: `/phone` + `src/lib/capture/*` distill a shared/picked clip in the browser and upload
+through the unchanged ingest API with a page-minted `hb_` token.
+**Also decided:** `src/lib/capture/` is a **duplicated port** of the extension pipeline (dedup
+constants, report/MANIFEST/recording.json builders, WAV chunking, two-phase upload) — not a
+shared package. The extension is its own npm workspace; a cross-workspace shared lib costs more
+than the drift risk while there are exactly two clients. **A pipeline change in either place
+must be mirrored in the other** (extension/src/{sidepanel/recorder.ts,lib/report.ts,lib/upload.ts}
+↔ src/lib/capture/*). Revisit if a third client appears. The SW (`public/sw.js`) caches
+nothing, deliberately — SSR app, staleness would be worse than no offline; its only job is the
+share-target POST stash.
+**Rejected:** live capture in the PWA / PiP recorder chrome (platform-impossible, above);
+wasm Whisper fallback on the phone (battery + minutes of wait; a 503 just ships without a
+transcript); session-cookie auth on ingest (token mint reuses every existing limit/quota path);
+a `/phone`-specific upload API (the extension's declare/PUT/finalize already fits).
+
 ## 2026-08-02 — The recorder destination is ONE grouped control; "General" is the project-less row
 **Why:** the send-view "to [space] · [project]" was two native selects the owner disliked ("i
 dont liek the double drop down... just make it one and make it clean and cool"). It's now one

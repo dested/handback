@@ -40,15 +40,19 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
  * both differ between the SSR runtime and the browser.
  */
 export function autoTokenName(kind: string, userAgent: string, now: Date): string {
-  const os = /Windows/.test(userAgent)
-    ? 'Windows'
-    : /Macintosh|Mac OS X/.test(userAgent)
-      ? 'macOS'
-      : /Android/.test(userAgent)
-        ? 'Android'
-        : /Linux|X11/.test(userAgent)
-          ? 'Linux'
-          : null
+  const os = /iPhone|iPod/.test(userAgent)
+    ? 'iPhone'
+    : /iPad/.test(userAgent)
+      ? 'iPad'
+      : /Windows/.test(userAgent)
+        ? 'Windows'
+        : /Macintosh|Mac OS X/.test(userAgent)
+          ? 'macOS'
+          : /Android/.test(userAgent)
+            ? 'Android'
+            : /Linux|X11/.test(userAgent)
+              ? 'Linux'
+              : null
   const day = `${MONTHS[now.getMonth()]} ${now.getDate()}`
   return os ? `${kind} — ${os}, ${day}` : `${kind} — ${day}`
 }
