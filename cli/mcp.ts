@@ -8,9 +8,10 @@
 // contributors working against a local server and for anyone who'd rather their
 // agent talk to a process they can read.
 //
-// Three tools over the token-authed read API in server/ingest.ts: list the
-// team's walkthroughs, pull one walkthrough's full brief (report.md + presigned
-// URLs for video/keyframes/transcript), and move a walkthrough through review.
+// Three tools over the token-authed read API in server/ingest.ts: list every
+// walkthrough the token reaches (its owner's personal space plus every team
+// they're in), pull one walkthrough's full brief (report.md + presigned URLs for
+// video/keyframes/transcript), and move a walkthrough through review.
 //
 // stdout is the JSON-RPC channel — nothing but the protocol may be written to
 // it. Diagnostics go to stderr.
@@ -99,7 +100,7 @@ registerTool(
   {
     title: 'List walkthroughs',
     description:
-      "List the team's walkthroughs — narrated screen recordings made by a human in the running app: a bug, review feedback, or a change request — newest first.",
+      'List the walkthroughs in every space you can reach — narrated screen recordings made by a human in the running app: a bug, review feedback, or a change request — newest first. Each item names its space (your personal space, or a team).',
     inputSchema: { status: statusSchema.optional() },
   },
   async ({ status }) => {

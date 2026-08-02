@@ -1,19 +1,19 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
-import { inviteEmail, sendEmail } from './email'
-import { env } from './env'
-import { isPlatformAdmin, orgHasFeature, requireAdmin, userHasFeature } from './features'
-import { ORG_MAX_WALKTHROUGHS, ORG_QUOTA_BYTES } from './ingest'
-import { log } from './logger'
 import {
-  canSeeWalkthrough,
-  requireMembership,
-  requireOrgScope,
+  requireSpaceAccess,
+  requireTeamRole,
   requireViewAccess,
   slugify,
-} from './membership'
-import { createPersonalOrg } from './orgs'
+  spaceId,
+  type SpaceOwner,
+} from './access'
+import { inviteEmail, sendEmail } from './email'
+import { env } from './env'
+import { isPlatformAdmin, requireAdmin, teamHasFeature, userHasFeature } from './features'
+import { SPACE_MAX_WALKTHROUGHS, SPACE_QUOTA_BYTES } from './ingest'
+import { log } from './logger'
 import { prisma } from './prisma'
 import { latestRecorderRelease } from './releases'
 import {
@@ -32,35 +32,32 @@ const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000
 // post-hydration render produce identical markup.
 const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null)
 
-const orgsRouter = router({
-  /** Orgs the signed-in user belongs to, with their role. */
+// Space input convention: `teamId: null` means the caller's own personal space.
+// Nothing else identifies a personal space, so it can never be spoofed.
+const toSpace = (teamId: string | null, selfId: string): SpaceOwner =>
+  teamId ? { teamId, userId: null } : { teamId: null, userId: selfId }
+
+/** Prisma `where` fragment selecting exactly one space's rows. */
+const spaceWhere = (s: SpaceOwner) =>
+  s.teamId ? { teamId: s.teamId } : { teamId: null, userId: s.userId }
+
+const teamsRouter = router({
+  /** Teams the signed-in user belongs to, with their effective role. */
   mine: protectedProcedure.query(async ({ ctx }) => {
     const memberships = await prisma.membership.findMany({
       where: { userId: ctx.session.user.id },
-      include: { org: true },
+      include: { team: true },
       orderBy: { createdAt: 'asc' },
     })
-    // Entitlements live on the owner, so a workspace inherits whatever its
-    // owner has been granted.
-    const owners = await prisma.membership.findMany({
-      where: { orgId: { in: memberships.map((m) => m.orgId) }, role: 'owner' },
-      select: { orgId: true, user: { select: { email: true, isAdmin: true, features: true } } },
-    })
-    const teamByOrg = new Map(owners.map((o) => [o.orgId, userHasFeature(o.user, 'team')]))
     return memberships.map((m) => ({
-      id: m.org.id,
-      name: m.org.name,
-      slug: m.org.slug,
-      // Clamped like requireMembership: a guest's stored role never leaks as
-      // anything above member, so the client can't render admin controls.
-      role: m.scope === 'projects' ? 'member' : m.role,
-      scope: m.scope,
-      personal: m.org.personal,
-      teamEnabled: teamByOrg.get(m.org.id) ?? false,
+      id: m.team.id,
+      name: m.team.name,
+      slug: m.team.slug,
+      role: m.team.ownerId === ctx.session.user.id ? 'owner' : m.role,
     }))
   }),
 
-  /** What this account may do at the platform level, independent of any org. */
+  /** What this account may do at the platform level, independent of any team. */
   entitlements: protectedProcedure.query(async ({ ctx }) => {
     const u = await prisma.user.findUnique({
       where: { id: ctx.session.user.id },
@@ -69,15 +66,7 @@ const orgsRouter = router({
     return { canCreateTeams: u !== null && userHasFeature(u, 'team') }
   }),
 
-  /**
-   * The repair path for an account whose sign-up hook didn't land. Idempotent —
-   * a user who already has a workspace just gets its id back.
-   */
-  ensurePersonal: protectedProcedure.mutation(async ({ ctx }) => {
-    return await createPersonalOrg(ctx.session.user.id, ctx.session.user.name ?? '')
-  }),
-
-  /** Creating a workspace by hand means creating a team — a paid entitlement. */
+  /** Teams are the paid, explicit thing — personal costs nothing and just exists. */
   create: protectedProcedure
     .input(z.object({ name: z.string().trim().min(1).max(80) }))
     .mutation(async ({ ctx, input }) => {
@@ -92,43 +81,70 @@ const orgsRouter = router({
         })
       }
       const base = slugify(input.name)
-      // Suffix until free — org slugs are global.
+      // Suffix until free — team slugs are global.
       let slug = base
-      for (let n = 2; await prisma.org.findUnique({ where: { slug } }); n++) {
+      for (let n = 2; await prisma.team.findUnique({ where: { slug } }); n++) {
         slug = `${base}-${n}`
       }
-      const org = await prisma.org.create({
+      const team = await prisma.team.create({
         data: {
           name: input.name,
           slug,
-          memberships: { create: { userId: ctx.session.user.id, role: 'owner' } },
+          ownerId: ctx.session.user.id,
+          // The owner holds a membership too; their role reads as "owner" off
+          // Team.ownerId, and the stored 'admin' is what they fall back to if
+          // ownership is ever transferred away.
+          memberships: { create: { userId: ctx.session.user.id, role: 'admin' } },
         },
       })
-      return { id: org.id, name: org.name, slug: org.slug }
+      return { id: team.id, name: team.name, slug: team.slug }
     }),
 
   rename: protectedProcedure
-    .input(z.object({ orgId: z.string(), name: z.string().trim().min(1).max(80) }))
+    .input(z.object({ teamId: z.string(), name: z.string().trim().min(1).max(80) }))
     .mutation(async ({ ctx, input }) => {
-      await requireMembership(ctx.session.user.id, input.orgId, 'admin')
-      // The slug stays: it's the org's stable handle; only the display name moves.
-      await prisma.org.update({ where: { id: input.orgId }, data: { name: input.name } })
+      await requireTeamRole(ctx.session.user.id, input.teamId, 'admin')
+      // The slug stays: it's the team's stable handle; only the display name moves.
+      await prisma.team.update({ where: { id: input.teamId }, data: { name: input.name } })
       return { ok: true }
     }),
 
+  get: protectedProcedure.input(z.object({ teamId: z.string() })).query(async ({ ctx, input }) => {
+    await requireTeamRole(ctx.session.user.id, input.teamId)
+    const team = await prisma.team.findUnique({ where: { id: input.teamId } })
+    if (!team) throw new TRPCError({ code: 'NOT_FOUND' })
+    const [memberCount, pendingInvites] = await Promise.all([
+      prisma.membership.count({ where: { teamId: team.id } }),
+      prisma.invite.count({
+        where: { teamId: team.id, acceptedAt: null, expiresAt: { gt: new Date() } },
+      }),
+    ])
+    return {
+      id: team.id,
+      name: team.name,
+      slug: team.slug,
+      ownerId: team.ownerId,
+      seatLimit: team.seatLimit,
+      memberCount,
+      pendingInvites,
+    }
+  }),
+
   members: protectedProcedure
-    .input(z.object({ orgId: z.string() }))
+    .input(z.object({ teamId: z.string() }))
     .query(async ({ ctx, input }) => {
-      await requireMembership(ctx.session.user.id, input.orgId, 'admin')
+      // The roster is the owner's business: who else is in a team, and at what
+      // address, isn't something a member needs. Members get FORBIDDEN here,
+      // and the Team page never calls this for them.
+      await requireTeamRole(ctx.session.user.id, input.teamId, 'admin')
+      const team = await prisma.team.findUnique({
+        where: { id: input.teamId },
+        select: { ownerId: true },
+      })
+      if (!team) throw new TRPCError({ code: 'NOT_FOUND' })
       const rows = await prisma.membership.findMany({
-        // The roster is the owner's business: who else is in a workspace, and
-        // at what address, isn't something a member needs. Members and guests
-        // get FORBIDDEN here, and the Team page never calls this for them.
-        where: { orgId: input.orgId },
-        include: {
-          user: { select: { id: true, name: true, email: true } },
-          projectAccess: { select: { project: { select: { id: true, name: true } } } },
-        },
+        where: { teamId: input.teamId },
+        include: { user: { select: { id: true, name: true, email: true } } },
         orderBy: { createdAt: 'asc' },
       })
       return rows.map((m) => ({
@@ -136,9 +152,7 @@ const orgsRouter = router({
         userId: m.user.id,
         name: m.user.name,
         email: m.user.email,
-        role: m.role,
-        scope: m.scope,
-        projects: m.projectAccess.map((a) => a.project),
+        role: team.ownerId === m.user.id ? 'owner' : m.role,
         joinedAt: m.createdAt.toISOString(),
       }))
     }),
@@ -146,116 +160,79 @@ const orgsRouter = router({
   setRole: protectedProcedure
     .input(
       z.object({
-        orgId: z.string(),
+        teamId: z.string(),
         membershipId: z.string(),
         role: z.enum(['admin', 'member']),
       })
     )
     .mutation(async ({ ctx, input }) => {
-      await requireMembership(ctx.session.user.id, input.orgId, 'owner')
-      const target = await prisma.membership.findUnique({ where: { id: input.membershipId } })
-      if (!target || target.orgId !== input.orgId) throw new TRPCError({ code: 'NOT_FOUND' })
-      if (target.role === 'owner') {
-        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Owners cannot be demoted here' })
-      }
-      if (target.scope === 'projects') {
-        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Project guests are always members' })
+      await requireTeamRole(ctx.session.user.id, input.teamId, 'owner')
+      const target = await prisma.membership.findUnique({
+        where: { id: input.membershipId },
+        include: { team: { select: { ownerId: true } } },
+      })
+      if (!target || target.teamId !== input.teamId) throw new TRPCError({ code: 'NOT_FOUND' })
+      if (target.userId === target.team.ownerId) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: "The owner's role is fixed — transfer ownership instead",
+        })
       }
       await prisma.membership.update({ where: { id: target.id }, data: { role: input.role } })
       return { ok: true }
     }),
 
-  setAccess: protectedProcedure
-    .input(
-      z.object({
-        orgId: z.string(),
-        membershipId: z.string(),
-        // null = entire workspace; ids = guest scoped to exactly these projects
-        projectIds: z.array(z.string()).nullable(),
-      })
-    )
-    .mutation(async ({ ctx, input }) => {
-      const actor = await requireMembership(ctx.session.user.id, input.orgId, 'admin')
-      const target = await prisma.membership.findUnique({ where: { id: input.membershipId } })
-      if (!target || target.orgId !== input.orgId) throw new TRPCError({ code: 'NOT_FOUND' })
-      if (target.role === 'owner') {
-        throw new TRPCError({ code: 'BAD_REQUEST', message: 'The owner always has full access' })
-      }
-      if (target.role === 'admin' && input.projectIds && actor.role !== 'owner') {
-        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only the owner can restrict an admin' })
-      }
-      const ids = input.projectIds
-      if (ids) {
-        const count = await prisma.project.count({
-          where: { orgId: input.orgId, id: { in: ids } },
-        })
-        if (count !== ids.length) {
-          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Unknown project' })
-        }
-      }
-      await prisma.$transaction(async (tx) => {
-        if (ids) {
-          // Restricting an admin demotes them — guests are always members.
-          await tx.membership.update({
-            where: { id: target.id },
-            data: { scope: 'projects', role: 'member' },
-          })
-          await tx.projectAccess.deleteMany({
-            where: { membershipId: target.id, projectId: { notIn: ids } },
-          })
-          await tx.projectAccess.createMany({
-            data: ids.map((projectId) => ({ membershipId: target.id, projectId })),
-            skipDuplicates: true,
-          })
-        } else {
-          await tx.membership.update({ where: { id: target.id }, data: { scope: 'org' } })
-          await tx.projectAccess.deleteMany({ where: { membershipId: target.id } })
-        }
-      })
-      // Restriction closes the org-wide side door too: their hb_ tokens read
-      // the whole org through /api/ingest.
-      if (ids) {
-        await prisma.apiToken.updateMany({
-          where: { orgId: input.orgId, userId: target.userId, revokedAt: null },
-          data: { revokedAt: new Date() },
-        })
-      }
-      return { ok: true }
-    }),
-
   removeMember: protectedProcedure
-    .input(z.object({ orgId: z.string(), membershipId: z.string() }))
+    .input(z.object({ teamId: z.string(), membershipId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      await requireMembership(ctx.session.user.id, input.orgId, 'admin')
-      const target = await prisma.membership.findUnique({ where: { id: input.membershipId } })
-      if (!target || target.orgId !== input.orgId) throw new TRPCError({ code: 'NOT_FOUND' })
-      if (target.role === 'owner') {
+      await requireTeamRole(ctx.session.user.id, input.teamId, 'admin')
+      const target = await prisma.membership.findUnique({
+        where: { id: input.membershipId },
+        include: { team: { select: { ownerId: true } } },
+      })
+      if (!target || target.teamId !== input.teamId) throw new TRPCError({ code: 'NOT_FOUND' })
+      if (target.userId === target.team.ownerId) {
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'The owner cannot be removed' })
       }
       await prisma.membership.delete({ where: { id: target.id } })
-      // Their org tokens die with the membership — a live token would keep
-      // reading the whole org through /api/ingest.
-      await prisma.apiToken.updateMany({
-        where: { orgId: input.orgId, userId: target.userId, revokedAt: null },
-        data: { revokedAt: new Date() },
+      // No token revocation: tokens are the user, not the team, and a token's
+      // reach is recomputed from live memberships on every call — losing the
+      // membership loses the team's content by itself.
+      return { ok: true }
+    }),
+
+  /**
+   * Ownership is a single field, not a role, so handing it over is one update.
+   * The outgoing owner keeps their membership row (role 'admin'), which is what
+   * leaves them with continued access instead of locking them out of their own
+   * team.
+   */
+  transferOwnership: protectedProcedure
+    .input(z.object({ teamId: z.string(), userId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      await requireTeamRole(ctx.session.user.id, input.teamId, 'owner')
+      const target = await prisma.membership.findUnique({
+        where: { teamId_userId: { teamId: input.teamId, userId: input.userId } },
       })
+      if (!target) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'They must join the team first' })
+      }
+      await prisma.team.update({ where: { id: input.teamId }, data: { ownerId: input.userId } })
       return { ok: true }
     }),
 })
 
 const invitesRouter = router({
-  list: protectedProcedure.input(z.object({ orgId: z.string() })).query(async ({ ctx, input }) => {
-    await requireMembership(ctx.session.user.id, input.orgId, 'admin')
+  list: protectedProcedure.input(z.object({ teamId: z.string() })).query(async ({ ctx, input }) => {
+    await requireTeamRole(ctx.session.user.id, input.teamId, 'admin')
     const rows = await prisma.invite.findMany({
-      where: { orgId: input.orgId, acceptedAt: null, expiresAt: { gt: new Date() } },
-      include: { project: { select: { name: true } } },
+      where: { teamId: input.teamId, acceptedAt: null, expiresAt: { gt: new Date() } },
       orderBy: { createdAt: 'desc' },
     })
     return rows.map((i) => ({
       id: i.id,
       email: i.email,
       role: i.role,
-      projectName: i.project?.name ?? null,
       createdAt: i.createdAt.toISOString(),
       expiresAt: i.expiresAt.toISOString(),
     }))
@@ -264,42 +241,43 @@ const invitesRouter = router({
   create: protectedProcedure
     .input(
       z.object({
-        orgId: z.string(),
+        teamId: z.string(),
         email: z.string().email().optional(),
         role: z.enum(['admin', 'member']).default('member'),
-        projectId: z.string().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
-      await requireMembership(ctx.session.user.id, input.orgId, 'admin')
-      const target = await prisma.org.findUnique({
-        where: { id: input.orgId },
-        select: { personal: true },
-      })
-      if (target?.personal) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: 'This is a personal workspace — create a team to invite people.',
-        })
-      }
-      if (!(await orgHasFeature(input.orgId, 'team'))) {
+      await requireTeamRole(ctx.session.user.id, input.teamId, 'admin')
+      if (!(await teamHasFeature(input.teamId, 'team'))) {
         throw new TRPCError({
           code: 'FORBIDDEN',
-          message: "Team is a paid feature and isn't enabled for this workspace yet.",
+          message: "Team is a paid feature and isn't enabled for this team yet.",
         })
       }
-      if (input.projectId) {
-        const p = await prisma.project.findUnique({ where: { id: input.projectId } })
-        if (!p || p.orgId !== input.orgId) {
-          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Unknown project' })
-        }
+      const team = await prisma.team.findUnique({
+        where: { id: input.teamId },
+        select: { name: true, seatLimit: true },
+      })
+      if (!team) throw new TRPCError({ code: 'NOT_FOUND' })
+      // A pending invite holds a seat: otherwise a team could invite twenty
+      // people onto five seats and only discover it at accept time.
+      const [members, pending] = await Promise.all([
+        prisma.membership.count({ where: { teamId: input.teamId } }),
+        prisma.invite.count({
+          where: { teamId: input.teamId, acceptedAt: null, expiresAt: { gt: new Date() } },
+        }),
+      ])
+      if (members + pending >= team.seatLimit) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: `This team's ${team.seatLimit} seats are full.`,
+        })
       }
       const invite = await prisma.invite.create({
         data: {
-          orgId: input.orgId,
+          teamId: input.teamId,
           email: input.email ?? null,
-          role: input.projectId ? 'member' : input.role,
-          projectId: input.projectId ?? null,
+          role: input.role,
           createdById: ctx.session.user.id,
           expiresAt: new Date(Date.now() + INVITE_TTL_MS),
         },
@@ -311,14 +289,10 @@ const invitesRouter = router({
       // lose an invitation that already exists.
       let emailed = false
       if (input.email) {
-        const org = await prisma.org.findUnique({
-          where: { id: input.orgId },
-          select: { name: true },
-        })
         emailed = await sendEmail({
           to: input.email,
           ...inviteEmail({
-            org: org?.name ?? 'a workspace',
+            team: team.name,
             inviter: ctx.session.user.name || ctx.session.user.email,
             url: `${env.BETTER_AUTH_URL}/join/${invite.id}`,
           }),
@@ -328,10 +302,10 @@ const invitesRouter = router({
     }),
 
   revoke: protectedProcedure
-    .input(z.object({ orgId: z.string(), inviteId: z.string() }))
+    .input(z.object({ teamId: z.string(), inviteId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      await requireMembership(ctx.session.user.id, input.orgId, 'admin')
-      await prisma.invite.deleteMany({ where: { id: input.inviteId, orgId: input.orgId } })
+      await requireTeamRole(ctx.session.user.id, input.teamId, 'admin')
+      await prisma.invite.deleteMany({ where: { id: input.inviteId, teamId: input.teamId } })
       return { ok: true }
     }),
 
@@ -339,14 +313,10 @@ const invitesRouter = router({
   peek: publicProcedure.input(z.object({ inviteId: z.string() })).query(async ({ input }) => {
     const invite = await prisma.invite.findUnique({
       where: { id: input.inviteId },
-      include: { org: { select: { name: true } }, project: { select: { name: true } } },
+      include: { team: { select: { name: true } } },
     })
     if (!invite || invite.acceptedAt || invite.expiresAt < new Date()) return null
-    return {
-      orgName: invite.org.name,
-      email: invite.email,
-      projectName: invite.project?.name ?? null,
-    }
+    return { teamName: invite.team.name, email: invite.email }
   }),
 
   accept: protectedProcedure
@@ -357,9 +327,9 @@ const invitesRouter = router({
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Invite is gone or expired' })
       }
       // An addressed invite is bound to that address: invitation emails get
-      // forwarded, and the link alone shouldn't hand a workspace to whoever
-      // received the forward. A link with no address is still open by design —
-      // that's the "copy a link and pass it around" invite.
+      // forwarded, and the link alone shouldn't hand a team to whoever received
+      // the forward. A link with no address is still open by design — that's the
+      // "copy a link and pass it around" invite.
       if (invite.email && invite.email.toLowerCase() !== ctx.session.user.email.toLowerCase()) {
         throw new TRPCError({
           code: 'FORBIDDEN',
@@ -367,51 +337,38 @@ const invitesRouter = router({
         })
       }
       const existing = await prisma.membership.findUnique({
-        where: { orgId_userId: { orgId: invite.orgId, userId: ctx.session.user.id } },
+        where: { teamId_userId: { teamId: invite.teamId, userId: ctx.session.user.id } },
       })
+      // Idempotent: re-following a link you already used just re-lands you on
+      // the team rather than erroring or duplicating the membership.
       if (!existing) {
-        await prisma.membership.create({
-          data: {
-            orgId: invite.orgId,
-            userId: ctx.session.user.id,
-            role: invite.projectId ? 'member' : invite.role,
-            scope: invite.projectId ? 'projects' : 'org',
-            ...(invite.projectId
-              ? { projectAccess: { create: { projectId: invite.projectId } } }
-              : {}),
-          },
+        const team = await prisma.team.findUnique({
+          where: { id: invite.teamId },
+          select: { seatLimit: true },
         })
-      } else if (invite.projectId) {
-        // Org-wide members already see the project; extend a fellow guest.
-        if (existing.scope === 'projects') {
-          await prisma.projectAccess.upsert({
-            where: {
-              membershipId_projectId: { membershipId: existing.id, projectId: invite.projectId },
-            },
-            create: { membershipId: existing.id, projectId: invite.projectId },
-            update: {},
-          })
+        if (!team) throw new TRPCError({ code: 'NOT_FOUND' })
+        // Checked again here, not just at create: an open link can outlive the
+        // seat that was reserved for it.
+        const members = await prisma.membership.count({ where: { teamId: invite.teamId } })
+        if (members >= team.seatLimit) {
+          throw new TRPCError({ code: 'FORBIDDEN', message: 'This team is out of seats.' })
         }
-      } else if (existing.scope === 'projects') {
-        // An org-wide invite upgrades a guest to full membership.
-        await prisma.membership.update({
-          where: { id: existing.id },
-          data: { role: invite.role, scope: 'org', projectAccess: { deleteMany: {} } },
+        await prisma.membership.create({
+          data: { teamId: invite.teamId, userId: ctx.session.user.id, role: invite.role },
         })
       }
       await prisma.invite.update({
         where: { id: invite.id },
         data: { acceptedAt: new Date(), acceptedById: ctx.session.user.id },
       })
-      return { orgId: invite.orgId }
+      return { teamId: invite.teamId }
     }),
 })
 
 const tokensRouter = router({
-  list: protectedProcedure.input(z.object({ orgId: z.string() })).query(async ({ ctx, input }) => {
-    await requireMembership(ctx.session.user.id, input.orgId)
+  list: protectedProcedure.query(async ({ ctx }) => {
     const rows = await prisma.apiToken.findMany({
-      where: { orgId: input.orgId, userId: ctx.session.user.id, revokedAt: null },
+      where: { userId: ctx.session.user.id, revokedAt: null },
       orderBy: { createdAt: 'desc' },
     })
     return rows.map((t) => ({
@@ -427,24 +384,19 @@ const tokensRouter = router({
    * "Has an agent actually reached us yet?" — what /connect polls and what
    * decides whether the inbox still nags you to connect one. `lastUsedAt` is
    * stamped by `authenticateToken` on every ingest and MCP call, so a non-null
-   * value here means a real agent completed a real request. Never throws for a
-   * guest; they can't hold tokens, they just get `canConnect: false`.
+   * value here means a real agent completed a real request.
    */
-  connection: protectedProcedure
-    .input(z.object({ orgId: z.string() }))
-    .query(async ({ ctx, input }) => {
-      const access = await requireMembership(ctx.session.user.id, input.orgId)
-      if (access.projectIds) return { canConnect: false, tokenCount: 0, lastUsedAt: null }
-      const rows = await prisma.apiToken.findMany({
-        where: { orgId: input.orgId, userId: ctx.session.user.id, revokedAt: null },
-        select: { lastUsedAt: true },
-      })
-      const lastUsed = rows.reduce<Date | null>(
-        (latest, r) => (r.lastUsedAt && (!latest || r.lastUsedAt > latest) ? r.lastUsedAt : latest),
-        null
-      )
-      return { canConnect: true, tokenCount: rows.length, lastUsedAt: iso(lastUsed) }
-    }),
+  connection: protectedProcedure.query(async ({ ctx }) => {
+    const rows = await prisma.apiToken.findMany({
+      where: { userId: ctx.session.user.id, revokedAt: null },
+      select: { lastUsedAt: true },
+    })
+    const lastUsed = rows.reduce<Date | null>(
+      (latest, r) => (r.lastUsedAt && (!latest || r.lastUsedAt > latest) ? r.lastUsedAt : latest),
+      null
+    )
+    return { tokenCount: rows.length, lastUsedAt: iso(lastUsed) }
+  }),
 
   /**
    * The raw token is returned exactly once, at creation. The row's `id` and
@@ -453,15 +405,11 @@ const tokensRouter = router({
    * lets you correct it afterwards rather than demanding one up front.
    */
   create: protectedProcedure
-    .input(z.object({ orgId: z.string(), name: z.string().trim().min(1).max(80) }))
+    .input(z.object({ name: z.string().trim().min(1).max(80) }))
     .mutation(async ({ ctx, input }) => {
-      const access = await requireMembership(ctx.session.user.id, input.orgId)
-      // A token reads the whole org through /api/ingest — guests get none.
-      requireOrgScope(access)
       const raw = `hb_${randomBytes(24).toString('base64url')}`
       const created = await prisma.apiToken.create({
         data: {
-          orgId: input.orgId,
           userId: ctx.session.user.id,
           name: input.name,
           tokenHash: createHash('sha256').update(raw).digest('hex'),
@@ -473,28 +421,20 @@ const tokensRouter = router({
 
   /** Label only — renaming can't change what a token reaches. */
   rename: protectedProcedure
-    .input(
-      z.object({
-        orgId: z.string(),
-        tokenId: z.string(),
-        name: z.string().trim().min(1).max(80),
-      })
-    )
+    .input(z.object({ tokenId: z.string(), name: z.string().trim().min(1).max(80) }))
     .mutation(async ({ ctx, input }) => {
-      await requireMembership(ctx.session.user.id, input.orgId)
       await prisma.apiToken.updateMany({
-        where: { id: input.tokenId, orgId: input.orgId, userId: ctx.session.user.id },
+        where: { id: input.tokenId, userId: ctx.session.user.id },
         data: { name: input.name },
       })
       return { ok: true }
     }),
 
   revoke: protectedProcedure
-    .input(z.object({ orgId: z.string(), tokenId: z.string() }))
+    .input(z.object({ tokenId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      await requireMembership(ctx.session.user.id, input.orgId)
       await prisma.apiToken.updateMany({
-        where: { id: input.tokenId, orgId: input.orgId, userId: ctx.session.user.id },
+        where: { id: input.tokenId, userId: ctx.session.user.id },
         data: { revokedAt: new Date() },
       })
       return { ok: true }
@@ -502,49 +442,55 @@ const tokensRouter = router({
 })
 
 const projectsRouter = router({
-  list: protectedProcedure.input(z.object({ orgId: z.string() })).query(async ({ ctx, input }) => {
-    const access = await requireMembership(ctx.session.user.id, input.orgId)
-    const rows = await prisma.project.findMany({
-      where: {
-        orgId: input.orgId,
-        ...(access.projectIds ? { id: { in: access.projectIds } } : {}),
-      },
-      orderBy: { createdAt: 'asc' },
-      include: { _count: { select: { walkthroughs: true } } },
-    })
-    return rows.map((p) => ({
-      id: p.id,
-      name: p.name,
-      slug: p.slug,
-      originHints: p.originHints,
-      walkthroughCount: p._count.walkthroughs,
-    }))
-  }),
+  list: protectedProcedure
+    .input(z.object({ teamId: z.string().nullable() }))
+    .query(async ({ ctx, input }) => {
+      const space = toSpace(input.teamId, ctx.session.user.id)
+      await requireSpaceAccess(ctx.session.user.id, space)
+      const rows = await prisma.project.findMany({
+        where: spaceWhere(space),
+        orderBy: { createdAt: 'asc' },
+        include: { _count: { select: { walkthroughs: true } } },
+      })
+      return rows.map((p) => ({
+        id: p.id,
+        name: p.name,
+        slug: p.slug,
+        originHints: p.originHints,
+        walkthroughCount: p._count.walkthroughs,
+      }))
+    }),
 
   create: protectedProcedure
     .input(
       z.object({
-        orgId: z.string(),
+        teamId: z.string().nullable(),
         name: z.string().trim().min(1).max(80),
         originHints: z.array(z.string().trim().max(200)).max(20).default([]),
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const access = await requireMembership(ctx.session.user.id, input.orgId)
-      requireOrgScope(access)
+      const space = toSpace(input.teamId, ctx.session.user.id)
+      await requireSpaceAccess(ctx.session.user.id, space)
       const base = slugify(input.name)
+      // Slug uniqueness is per space and code-enforced — the ownership pair is
+      // nullable, so the database can't hold the unique for us.
       let slug = base
       for (
         let n = 2;
-        await prisma.project.findUnique({
-          where: { orgId_slug: { orgId: input.orgId, slug } },
-        });
+        await prisma.project.findFirst({ where: { ...spaceWhere(space), slug } });
         n++
       ) {
         slug = `${base}-${n}`
       }
       const p = await prisma.project.create({
-        data: { orgId: input.orgId, name: input.name, slug, originHints: input.originHints },
+        data: {
+          teamId: space.teamId,
+          userId: space.userId,
+          name: input.name,
+          slug,
+          originHints: input.originHints,
+        },
       })
       return { id: p.id, slug: p.slug }
     }),
@@ -552,7 +498,7 @@ const projectsRouter = router({
   update: protectedProcedure
     .input(
       z.object({
-        orgId: z.string(),
+        teamId: z.string().nullable(),
         projectId: z.string(),
         name: z.string().trim().min(1).max(80),
         // Optional, not defaulted: the UI no longer edits hints, and a rename
@@ -561,11 +507,13 @@ const projectsRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const access = await requireMembership(ctx.session.user.id, input.orgId)
-      requireOrgScope(access)
+      const space = toSpace(input.teamId, ctx.session.user.id)
+      await requireSpaceAccess(ctx.session.user.id, space)
       const p = await prisma.project.findUnique({ where: { id: input.projectId } })
-      if (!p || p.orgId !== input.orgId) throw new TRPCError({ code: 'NOT_FOUND' })
-      // Slug stays for the same reason an org's does.
+      if (!p || p.teamId !== space.teamId || p.userId !== space.userId) {
+        throw new TRPCError({ code: 'NOT_FOUND' })
+      }
+      // Slug stays for the same reason a team's does.
       await prisma.project.update({
         where: { id: p.id },
         data: {
@@ -600,25 +548,19 @@ const walkthroughsRouter = router({
   list: protectedProcedure
     .input(
       z.object({
-        orgId: z.string(),
+        teamId: z.string().nullable(),
         projectId: z.string().optional(),
         status: z.enum(['open', 'in_review', 'resolved']).optional(),
       })
     )
     .query(async ({ ctx, input }) => {
-      const access = await requireMembership(ctx.session.user.id, input.orgId)
-      if (input.projectId && !canSeeWalkthrough(access, input.projectId)) {
-        throw new TRPCError({ code: 'FORBIDDEN' })
-      }
+      const space = toSpace(input.teamId, ctx.session.user.id)
+      await requireSpaceAccess(ctx.session.user.id, space)
       const rows = await prisma.walkthrough.findMany({
         where: {
-          orgId: input.orgId,
+          ...spaceWhere(space),
           finalizedAt: { not: null },
-          ...(input.projectId
-            ? { projectId: input.projectId }
-            : access.projectIds
-              ? { projectId: { in: access.projectIds } }
-              : {}),
+          ...(input.projectId ? { projectId: input.projectId } : {}),
           ...(input.status ? { status: input.status } : {}),
         },
         orderBy: { recordedAt: 'desc' },
@@ -658,11 +600,11 @@ const walkthroughsRouter = router({
         },
       })
       if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
-      const { access, isMember } = await requireViewAccess(ctx.session.user.id, g.orgId)
-      if (!canSeeWalkthrough(access, g.projectId)) throw new TRPCError({ code: 'NOT_FOUND' })
+      const space: SpaceOwner = { teamId: g.teamId, userId: g.userId }
+      const { isMember } = await requireViewAccess(ctx.session.user.id, space)
       return {
         id: g.id,
-        orgId: g.orgId,
+        teamId: g.teamId,
         // False when a platform admin is looking in from /admin — the viewer
         // hides every control, because the mutations would 403 anyway.
         viewerIsMember: isMember,
@@ -697,7 +639,7 @@ const walkthroughsRouter = router({
             path: f.path,
             size: f.size,
             contentType: f.contentType,
-            url: await presignGet(walkthroughKey(g.orgId, g.id, f.path)),
+            url: await presignGet(walkthroughKey(spaceId(space), g.id, f.path)),
           }))
         ),
       }
@@ -713,16 +655,15 @@ const walkthroughsRouter = router({
       if (!isSafePath(input.path)) throw new TRPCError({ code: 'BAD_REQUEST' })
       const g = await prisma.walkthrough.findUnique({
         where: { id: input.walkthroughId },
-        select: { orgId: true, projectId: true },
+        select: { teamId: true, userId: true },
       })
       if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
-      const { access } = await requireViewAccess(ctx.session.user.id, g.orgId)
-      if (!canSeeWalkthrough(access, g.projectId)) throw new TRPCError({ code: 'NOT_FOUND' })
+      await requireViewAccess(ctx.session.user.id, g)
       const file = await prisma.walkthroughFile.findUnique({
         where: { walkthroughId_path: { walkthroughId: input.walkthroughId, path: input.path } },
       })
       if (!file || file.status !== 'uploaded') throw new TRPCError({ code: 'NOT_FOUND' })
-      return { url: await presignGet(walkthroughKey(g.orgId, input.walkthroughId, input.path)) }
+      return { url: await presignGet(walkthroughKey(spaceId(g), input.walkthroughId, input.path)) }
     }),
 
   setStatus: protectedProcedure
@@ -732,11 +673,10 @@ const walkthroughsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const g = await prisma.walkthrough.findUnique({
         where: { id: input.walkthroughId },
-        select: { orgId: true, projectId: true },
+        select: { teamId: true, userId: true },
       })
       if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
-      const access = await requireMembership(ctx.session.user.id, g.orgId)
-      if (!canSeeWalkthrough(access, g.projectId)) throw new TRPCError({ code: 'NOT_FOUND' })
+      await requireSpaceAccess(ctx.session.user.id, g)
       await prisma.walkthrough.update({
         where: { id: input.walkthroughId },
         data: {
@@ -753,11 +693,10 @@ const walkthroughsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const g = await prisma.walkthrough.findUnique({
         where: { id: input.walkthroughId },
-        select: { orgId: true, projectId: true },
+        select: { teamId: true, userId: true },
       })
       if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
-      const access = await requireMembership(ctx.session.user.id, g.orgId)
-      if (!canSeeWalkthrough(access, g.projectId)) throw new TRPCError({ code: 'NOT_FOUND' })
+      await requireSpaceAccess(ctx.session.user.id, g)
       await prisma.walkthrough.update({
         where: { id: input.walkthroughId },
         data: { title: input.title },
@@ -770,14 +709,17 @@ const walkthroughsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const g = await prisma.walkthrough.findUnique({
         where: { id: input.walkthroughId },
-        select: { orgId: true },
+        select: { teamId: true, userId: true },
       })
       if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
-      const access = await requireMembership(ctx.session.user.id, g.orgId)
-      requireOrgScope(access)
+      await requireSpaceAccess(ctx.session.user.id, g)
       if (input.projectId) {
         const p = await prisma.project.findUnique({ where: { id: input.projectId } })
-        if (!p || p.orgId !== g.orgId) throw new TRPCError({ code: 'BAD_REQUEST' })
+        // Projects belong to one space; a walkthrough can only be filed under
+        // one that shares its owner.
+        if (!p || p.teamId !== g.teamId || p.userId !== g.userId) {
+          throw new TRPCError({ code: 'BAD_REQUEST' })
+        }
       }
       await prisma.walkthrough.update({
         where: { id: input.walkthroughId },
@@ -787,7 +729,8 @@ const walkthroughsRouter = router({
     }),
 
   /**
-   * Move a walkthrough to another workspace the caller also holds in full.
+   * Move a walkthrough to another space the caller can reach — a team they
+   * belong to, or their own personal space (`teamId: null`).
    *
    * Order matters: copy the objects, flip the row, then delete the originals.
    * A crash mid-copy leaves the walkthrough untouched where it was; a crash after the
@@ -798,8 +741,8 @@ const walkthroughsRouter = router({
    * Presigned URLs handed out before the move keep pointing at the old keys and
    * die with them — by design; the viewer re-signs against the new prefix.
    */
-  moveToOrg: protectedProcedure
-    .input(z.object({ walkthroughId: z.string(), orgId: z.string() }))
+  move: protectedProcedure
+    .input(z.object({ walkthroughId: z.string(), teamId: z.string().nullable() }))
     .mutation(async ({ ctx, input }) => {
       const walkthrough = await prisma.walkthrough.findUnique({
         where: { id: input.walkthroughId },
@@ -808,31 +751,30 @@ const walkthroughsRouter = router({
         include: { files: { select: { path: true }, where: { status: 'uploaded' } } },
       })
       if (!walkthrough) throw new TRPCError({ code: 'NOT_FOUND' })
-      // Both ends have to be whole-workspace access: a guest must not be able
-      // to walk a project's walkthrough out into an org of their own.
-      requireOrgScope(await requireMembership(ctx.session.user.id, walkthrough.orgId))
-      requireOrgScope(await requireMembership(ctx.session.user.id, input.orgId))
-      if (input.orgId === walkthrough.orgId) {
-        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Already in that workspace' })
+      const source: SpaceOwner = { teamId: walkthrough.teamId, userId: walkthrough.userId }
+      const dest = toSpace(input.teamId, ctx.session.user.id)
+      // Both ends have to admit the caller: a move must not be a way to walk
+      // content out of a space they only half belong to.
+      await requireSpaceAccess(ctx.session.user.id, source)
+      await requireSpaceAccess(ctx.session.user.id, dest)
+      if (source.teamId === dest.teamId && source.userId === dest.userId) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Already there' })
       }
 
       // The destination's quota is the same one ingest enforces — a move is
-      // another way to put bytes in a workspace.
-      const dest = await prisma.walkthrough.aggregate({
-        where: { orgId: input.orgId },
+      // another way to put bytes in a space.
+      const destTotals = await prisma.walkthrough.aggregate({
+        where: spaceWhere(dest),
         _sum: { bytes: true },
         _count: true,
       })
-      if ((dest._sum.bytes ?? 0n) + walkthrough.bytes > BigInt(ORG_QUOTA_BYTES)) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: 'That workspace is at its storage quota',
-        })
+      if ((destTotals._sum.bytes ?? 0n) + walkthrough.bytes > BigInt(SPACE_QUOTA_BYTES)) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'That space is at its storage quota' })
       }
-      if (dest._count >= ORG_MAX_WALKTHROUGHS) {
+      if (destTotals._count >= SPACE_MAX_WALKTHROUGHS) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
-          message: 'That workspace is at its walkthrough limit',
+          message: 'That space is at its walkthrough limit',
         })
       }
 
@@ -840,9 +782,7 @@ const walkthroughsRouter = router({
       let slug = walkthrough.slug
       for (
         let n = 2;
-        await prisma.walkthrough.findUnique({
-          where: { orgId_slug: { orgId: input.orgId, slug } },
-        });
+        await prisma.walkthrough.findFirst({ where: { ...spaceWhere(dest), slug } });
         n++
       ) {
         slug = `${walkthrough.slug}-${n}`
@@ -856,8 +796,8 @@ const walkthroughsRouter = router({
             .slice(i, i + 8)
             .map((path) =>
               copyObject(
-                walkthroughKey(walkthrough.orgId, walkthrough.id, path),
-                walkthroughKey(input.orgId, walkthrough.id, path)
+                walkthroughKey(spaceId(source), walkthrough.id, path),
+                walkthroughKey(spaceId(dest), walkthrough.id, path)
               )
             )
         )
@@ -865,20 +805,20 @@ const walkthroughsRouter = router({
 
       await prisma.walkthrough.update({
         where: { id: walkthrough.id },
-        // Projects are per-org, so the assignment cannot survive the move.
-        data: { orgId: input.orgId, projectId: null, slug },
+        // Projects are per-space, so the assignment cannot survive the move.
+        data: { teamId: dest.teamId, userId: dest.userId, projectId: null, slug },
       })
 
       try {
-        await deletePrefix(walkthroughPrefix(walkthrough.orgId, walkthrough.id))
+        await deletePrefix(walkthroughPrefix(spaceId(source), walkthrough.id))
       } catch (err) {
         log.warn('move: source cleanup failed', {
           walkthroughId: walkthrough.id,
-          orgId: walkthrough.orgId,
+          spaceId: spaceId(source),
           err,
         })
       }
-      return { ok: true, orgId: input.orgId, slug }
+      return { ok: true, teamId: dest.teamId, slug }
     }),
 
   delete: protectedProcedure
@@ -886,11 +826,14 @@ const walkthroughsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const g = await prisma.walkthrough.findUnique({
         where: { id: input.walkthroughId },
-        select: { orgId: true },
+        select: { teamId: true, userId: true },
       })
       if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
-      await requireMembership(ctx.session.user.id, g.orgId, 'admin')
-      await deletePrefix(walkthroughPrefix(g.orgId, input.walkthroughId))
+      // Deleting a team's recording is an admin act; deleting your own from
+      // your personal space is not — there is nobody else to answer to.
+      if (g.teamId) await requireTeamRole(ctx.session.user.id, g.teamId, 'admin')
+      else await requireSpaceAccess(ctx.session.user.id, g)
+      await deletePrefix(walkthroughPrefix(spaceId(g), input.walkthroughId))
       await prisma.walkthrough.delete({ where: { id: input.walkthroughId } })
       return { ok: true }
     }),
@@ -908,13 +851,13 @@ const adminRouter = router({
 
   stats: protectedProcedure.query(async ({ ctx }) => {
     await requireAdmin(ctx.session.user.id)
-    const [users, orgs, walkthroughs, bytes] = await Promise.all([
+    const [users, teams, walkthroughs, bytes] = await Promise.all([
       prisma.user.count(),
-      prisma.org.count(),
+      prisma.team.count(),
       prisma.walkthrough.count(),
       prisma.walkthrough.aggregate({ _sum: { bytes: true } }),
     ])
-    return { users, orgs, walkthroughs, bytes: Number(bytes._sum.bytes ?? 0) }
+    return { users, teams, walkthroughs, bytes: Number(bytes._sum.bytes ?? 0) }
   }),
 
   users: protectedProcedure
@@ -934,7 +877,7 @@ const adminRouter = router({
         take: 100,
         include: {
           memberships: {
-            include: { org: { select: { name: true } } },
+            include: { team: { select: { name: true, ownerId: true } } },
             orderBy: { createdAt: 'asc' },
           },
         },
@@ -949,17 +892,20 @@ const adminRouter = router({
         isAdmin: isPlatformAdmin(u),
         features: u.features,
         createdAt: u.createdAt.toISOString(),
-        orgs: u.memberships.map((m) => ({ name: m.org.name, role: m.role })),
+        teams: u.memberships.map((m) => ({
+          name: m.team.name,
+          role: m.team.ownerId === u.id ? 'owner' : m.role,
+        })),
       }))
     }),
 
   /**
-   * Every walkthrough one account can see, grouped by workspace — the drill-down
-   * behind a row on /admin. A guest's slice is honoured (only their granted
-   * projects), so this is genuinely "what this user sees", not "what their
-   * workspaces hold. Unfinalized walkthroughs are included and flagged: a declare
-   * that never finalized is invisible in the product and is exactly the kind
-   * of stuck upload an admin is looking for.
+   * Every walkthrough one account can see, grouped by space — the drill-down
+   * behind a row on /admin. Personal always comes first and always exists, even
+   * when it's empty, because it's the one space nobody can be removed from.
+   * Unfinalized walkthroughs are included and flagged: a declare that never
+   * finalized is invisible in the product and is exactly the kind of stuck
+   * upload an admin is looking for.
    */
   userWalkthroughs: protectedProcedure
     .input(z.object({ userId: z.string() }))
@@ -967,23 +913,13 @@ const adminRouter = router({
       await requireAdmin(ctx.session.user.id)
       const memberships = await prisma.membership.findMany({
         where: { userId: input.userId },
-        select: {
-          role: true,
-          scope: true,
-          org: { select: { id: true, name: true, slug: true } },
-          projectAccess: { select: { projectId: true } },
-        },
+        select: { role: true, team: { select: { id: true, name: true, ownerId: true } } },
         orderBy: { createdAt: 'asc' },
       })
-      if (memberships.length === 0) return []
 
       const walkthroughs = await prisma.walkthrough.findMany({
         where: {
-          OR: memberships.map((m) =>
-            m.scope === 'projects'
-              ? { orgId: m.org.id, projectId: { in: m.projectAccess.map((a) => a.projectId) } }
-              : { orgId: m.org.id }
-          ),
+          OR: [{ userId: input.userId }, ...memberships.map((m) => ({ teamId: m.team.id }))],
         },
         orderBy: { uploadedAt: 'desc' },
         take: 500,
@@ -993,28 +929,34 @@ const adminRouter = router({
         },
       })
 
-      return memberships.map((m) => ({
-        org: m.org,
-        role: m.scope === 'projects' ? 'member' : m.role,
-        scoped: m.scope === 'projects',
-        walkthroughs: walkthroughs
-          .filter((g) => g.orgId === m.org.id)
-          .map((g) => ({
-            id: g.id,
-            slug: g.slug,
-            title: g.title,
-            status: g.status,
-            origin: g.origin,
-            uploadedAt: g.uploadedAt.toISOString(),
-            durationMs: g.durationMs,
-            bytes: Number(g.bytes),
-            finalized: g.finalizedAt !== null,
-            projectName: g.project?.name ?? null,
-            uploadedByName: g.uploadedBy?.name ?? null,
-            // Their own recording vs. one a workspace-mate uploaded.
-            uploadedByThem: g.uploadedById === input.userId,
-          })),
-      }))
+      const item = (g: (typeof walkthroughs)[number]) => ({
+        id: g.id,
+        slug: g.slug,
+        title: g.title,
+        status: g.status,
+        origin: g.origin,
+        uploadedAt: g.uploadedAt.toISOString(),
+        durationMs: g.durationMs,
+        bytes: Number(g.bytes),
+        finalized: g.finalizedAt !== null,
+        projectName: g.project?.name ?? null,
+        uploadedByName: g.uploadedBy?.name ?? null,
+        // Their own recording vs. one a teammate uploaded.
+        uploadedByThem: g.uploadedById === input.userId,
+      })
+
+      return [
+        {
+          space: { teamId: null as string | null, name: 'Personal' },
+          role: 'owner',
+          walkthroughs: walkthroughs.filter((g) => g.userId === input.userId).map(item),
+        },
+        ...memberships.map((m) => ({
+          space: { teamId: m.team.id as string | null, name: m.team.name },
+          role: m.team.ownerId === input.userId ? 'owner' : m.role,
+          walkthroughs: walkthroughs.filter((g) => g.teamId === m.team.id).map(item),
+        })),
+      ]
     }),
 
   setFeature: protectedProcedure
@@ -1061,7 +1003,7 @@ const recorderRouter = router({
 export const appRouter = router({
   me: protectedProcedure.query(({ ctx }) => ctx.session.user),
   recorder: recorderRouter,
-  orgs: orgsRouter,
+  teams: teamsRouter,
   invites: invitesRouter,
   tokens: tokensRouter,
   projects: projectsRouter,

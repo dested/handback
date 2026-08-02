@@ -82,6 +82,7 @@ function declaration(
   recordings: Recording[],
   files: GripeFile[],
   projectId?: string,
+  teamId?: string,
 ) {
   const paths = new Set(files.map((f) => f.path));
   const takes = [...recordings]
@@ -107,6 +108,8 @@ function declaration(
     title: session.name || session.slug,
     origin: session.origin || undefined,
     ...(projectId ? { projectId } : {}),
+    // Which space this lands in: absent = the token owner's personal one.
+    ...(teamId ? { teamId } : {}),
     recordedAt: new Date(session.createdAt).toISOString(),
     durationMs: takes.reduce((sum, t) => sum + t.durationMs, 0),
     frameCount: takes.reduce((sum, t) => sum + t.frameCount, 0),
@@ -137,7 +140,7 @@ export async function pushGripe(
   session: Session,
   recordings: Recording[],
   files: GripeFile[],
-  opts?: { projectId?: string; onProgress?: (p: UploadProgress) => void },
+  opts?: { projectId?: string; teamId?: string; onProgress?: (p: UploadProgress) => void },
 ): Promise<UploadResult> {
   const onProgress = opts?.onProgress;
   const server = normalizeServer(target.serverUrl);
@@ -156,7 +159,7 @@ export async function pushGripe(
   const declareRes = await fetch(`${server}/api/ingest/gripes`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-    body: JSON.stringify(declaration(session, recordings, files, opts?.projectId)),
+    body: JSON.stringify(declaration(session, recordings, files, opts?.projectId, opts?.teamId)),
   });
   if (!declareRes.ok) throw await explain('declare', declareRes);
   const { gripeId, uploads } = (await declareRes.json()) as {

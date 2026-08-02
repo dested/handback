@@ -1,27 +1,27 @@
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
-import type { Session, SessionSummary, Settings, WorkspaceLink } from '../lib/types';
-import type { WorkspaceContext } from '../lib/context';
+import type { ServerLink, Session, SessionSummary, Settings } from '../lib/types';
+import { spaceName, spaceProjects, type ServerContext } from '../lib/context';
 import { send } from '../lib/messages';
 import { ago, hostOf, mmss, plural } from '../lib/format';
 import {
   fetchWalkthroughs,
   inboxUrl,
   walkthroughUrl,
+  type SpaceWalkthrough,
   type WalkthroughStatus,
-  type WorkspaceWalkthrough,
 } from '../lib/walkthroughs';
 
 /**
  * The panel with nothing open. It used to be one button and a lot of paper —
  * which said, accurately, that this window was empty, and nothing else. This is
  * the same button over the answer to "where does it go, and what happened to the
- * last ten?": the workspace it uploads to and the ones it could, that workspace's
- * queue with the status somebody put each one in, its projects, and the sessions
- * still sitting in this browser.
+ * last ten?": the space it uploads to and the ones it could, that space's queue
+ * with the status somebody put each one in, its projects, and the sessions still
+ * sitting in this browser.
  *
  * Everything below the Record button is a read. Nothing here can lose work, so
- * every failure degrades to a line of text — an unreachable workspace still
- * leaves a recorder you can record with.
+ * every failure degrades to a line of text — an unreachable server still leaves
+ * a recorder you can record with.
  */
 
 const STATUS_LABEL: Record<WalkthroughStatus, string> = {
@@ -41,16 +41,17 @@ interface HomeProps {
    */
   openSessionId: string | null;
   settings: Settings;
-  /** Where uploads go — null when this recorder holds no workspace key at all. */
-  link: WorkspaceLink | null;
-  ctx: WorkspaceContext | null;
+  /** Where uploads go — null when this recorder holds no server key at all. */
+  link: ServerLink | null;
+  ctx: ServerContext | null;
   ctxFailed: boolean;
   /** The just-handed-over card, when a session closed a moment ago. */
   shipped: ReactNode;
   onRecord: () => void;
   onOpenSession: (id: string) => void;
   onDeleteSession: (id: string) => void;
-  onPickLink: (id: string) => void;
+  /** Both halves of the destination at once: which server, and which space on it. */
+  onPickSpace: (serverUrl: string, teamId: string) => void;
   onOpenRecorder: () => void;
   onOpenSettings: () => void;
 }
@@ -68,11 +69,11 @@ export function Home({
   onRecord,
   onOpenSession,
   onDeleteSession,
-  onPickLink,
+  onPickSpace,
   onOpenRecorder,
   onOpenSettings,
 }: HomeProps) {
-  const [feed, setFeed] = useState<WorkspaceWalkthrough[] | null>(null);
+  const [feed, setFeed] = useState<SpaceWalkthrough[] | null>(null);
   const [feedFailed, setFeedFailed] = useState(false);
   /** Bumped by the retry link — the effect below is the only thing that fetches. */
   const [reloads, setReloads] = useState(0);
@@ -83,6 +84,8 @@ export function Home({
   const [showAll, setShowAll] = useState(false);
 
   const serverUrl = link?.serverUrl ?? '';
+  /** The queue is the active space's, not the whole account's. */
+  const teamId = settings.activeTeamId;
 
   useEffect(() => {
     if (!link) {
@@ -92,7 +95,7 @@ export function Home({
     const control = new AbortController();
     setFeed(null);
     setFeedFailed(false);
-    void fetchWalkthroughs(link, control.signal).then(
+    void fetchWalkthroughs(link, teamId, control.signal).then(
       (rows) => setFeed(rows),
       () => {
         // An aborted fetch is this effect being torn down, not a failure worth
@@ -101,7 +104,7 @@ export function Home({
       },
     );
     return () => control.abort();
-  }, [link?.id, link?.apiToken, reloads]);
+  }, [link?.id, link?.apiToken, teamId, reloads]);
 
   // Takes and durations for every session, not just the open one — the summaries
   // are metadata only, so this is cheap next to what `state:get` already carries.
@@ -124,12 +127,12 @@ export function Home({
     return by;
   }, [feed]);
 
-  /** Projects the workspace named, and any the queue mentions that it didn't. */
+  /** Projects the space named, and any the queue mentions that it didn't. */
   const projects = useMemo(() => {
-    const names = new Set((ctx?.projects ?? []).map((p) => p.name));
+    const names = new Set(spaceProjects(ctx, teamId).map((p) => p.name));
     for (const w of feed ?? []) if (w.projectName) names.add(w.projectName);
     return [...names];
-  }, [ctx?.projects, feed]);
+  }, [ctx, teamId, feed]);
 
   const filtered = useMemo(() => {
     return (feed ?? []).filter(
@@ -157,7 +160,25 @@ export function Home({
       ),
     [sessions, openSessionId],
   );
-  const orgName = ctx?.org.name || link?.orgName || (link ? hostOf(link.serverUrl) : '');
+  /**
+   * The space this recorder is pointed at. Only the active server's teams are
+   * known — the context fetch follows the active link — so every other server
+   * offers its personal space here and grows its teams once it is picked.
+   */
+  const activeSpace = spaceName(ctx, teamId) || (link ? hostOf(link.serverUrl) : '');
+  const spaces = settings.links.flatMap((l) =>
+    l.id === link?.id
+      ? [
+          { key: `${l.serverUrl}::`, serverUrl: l.serverUrl, teamId: '', name: 'Personal' },
+          ...(ctx?.teams ?? []).map((t) => ({
+            key: `${l.serverUrl}::${t.id}`,
+            serverUrl: l.serverUrl,
+            teamId: t.id,
+            name: t.name,
+          })),
+        ]
+      : [{ key: `${l.serverUrl}::`, serverUrl: l.serverUrl, teamId: '', name: 'Personal' }],
+  );
 
   return (
     <div className="home">
@@ -178,39 +199,39 @@ export function Home({
       {link ? (
         <>
           {/* Where the next recording lands, said before it is recorded rather than
-              only at the send button. Clicking it is also how a second workspace
-              gets added, so the switcher is the whole workspace story in one row. */}
+              only at the send button. Clicking it is also how a second server
+              gets added, so the switcher is the whole destination story in one row. */}
           <section className="wsbar">
             <button
               className={`wsbar-main${switching ? ' on' : ''}`}
               aria-expanded={switching}
-              title="The workspace this recorder uploads to"
+              title="The space this recorder uploads to"
               onClick={() => setSwitching((v) => !v)}
             >
               <span className="wsbar-dot" />
               <span className="wsbar-text">
-                <span className="wsbar-name">{orgName}</span>
+                <span className="wsbar-name">{activeSpace}</span>
                 <span className="wsbar-meta">
                   {hostOf(serverUrl)}
-                  {ctx ? ` · ${plural(ctx.projects.length, 'project')}` : ''}
+                  {ctx ? ` · ${plural(spaceProjects(ctx, teamId).length, 'project')}` : ''}
                 </span>
               </span>
               <span className="chev">{switching ? '▴' : '▾'}</span>
             </button>
             {switching && (
               <div className="wspick">
-                {settings.links.map((l) => (
+                {spaces.map((s) => (
                   <button
-                    key={l.id}
-                    className={`wspick-row${l.id === link.id ? ' on' : ''}`}
+                    key={s.key}
+                    className={`wspick-row${s.serverUrl === link.serverUrl && s.teamId === teamId ? ' on' : ''}`}
                     onClick={() => {
-                      onPickLink(l.id);
+                      onPickSpace(s.serverUrl, s.teamId);
                       setSwitching(false);
                     }}
                   >
                     <i className="wsdot" />
-                    <span className="wsname">{l.orgName || hostOf(l.serverUrl)}</span>
-                    <span className="wshost">{hostOf(l.serverUrl)}</span>
+                    <span className="wsname">{s.name}</span>
+                    <span className="wshost">{hostOf(s.serverUrl)}</span>
                   </button>
                 ))}
                 <button
@@ -220,7 +241,7 @@ export function Home({
                     setSwitching(false);
                   }}
                 >
-                  + link another workspace…
+                  + link another server…
                 </button>
               </div>
             )}
@@ -228,13 +249,13 @@ export function Home({
 
           <section className="feed">
             <div className="sec-head">
-              <span>In {orgName}</span>
+              <span>In {activeSpace}</span>
               <button className="link" onClick={() => openTab(inboxUrl(serverUrl))}>
                 open inbox →
               </button>
             </div>
 
-            {/* The three statuses are the workspace's whole vocabulary, so they are
+            {/* The three statuses are Handback's whole vocabulary, so they are
                 the filter — and their counts are the only summary anyone wants. */}
             {feed && feed.length > 0 && (
               <div className="chips">
@@ -296,7 +317,7 @@ export function Home({
               <button
                 key={w.id}
                 className="wtrow"
-                title={`Open ${w.slug} in the workspace`}
+                title={`Open ${w.slug} in Handback`}
                 onClick={() => openTab(walkthroughUrl(serverUrl, w.id))}
               >
                 <span className={`sdot ${w.status}`} />
@@ -332,13 +353,13 @@ export function Home({
       ) : (
         <section className="feed">
           <div className="linkcard">
-            <strong>Link a workspace</strong>
+            <strong>Link Handback</strong>
             <p>
-              Recordings stay on this machine until this recorder holds a workspace key. One click on
-              the workspace page connects it — nothing to paste.
+              Recordings stay on this machine until this recorder holds a key. One click on the
+              recorder page connects it — nothing to paste.
             </p>
             <button className="primary" onClick={onOpenRecorder}>
-              link workspace →
+              link handback →
             </button>
             <button className="link" onClick={onOpenSettings}>
               or paste a token by hand
@@ -394,7 +415,7 @@ export function Home({
                 {s.uploadedUrl && (
                   <button
                     className="lrow-open"
-                    title="Open it in the workspace"
+                    title="Open it in Handback"
                     onClick={() => openTab(s.uploadedUrl ?? '')}
                   >
                     ↗
@@ -402,7 +423,7 @@ export function Home({
                 )}
                 <button
                   className="kill"
-                  title="Forget this walkthrough here (anything already uploaded stays in the workspace)"
+                  title="Forget this walkthrough here (anything already uploaded stays in Handback)"
                   onClick={() => onDeleteSession(s.id)}
                 >
                   ×

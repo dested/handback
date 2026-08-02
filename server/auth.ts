@@ -3,8 +3,6 @@ import { prismaAdapter } from 'better-auth/adapters/prisma'
 import { prisma } from './prisma'
 import { env } from './env'
 import { resetPasswordEmail, sendEmail, verifyEmail } from './email'
-import { createPersonalOrg } from './orgs'
-import { log } from './logger'
 
 export const auth = betterAuth({
   baseURL: env.BETTER_AUTH_URL,
@@ -32,24 +30,11 @@ export const auth = betterAuth({
   },
   // Deliberately NOT `requireEmailVerification`. Verification proves the address
   // is real, but gating sign-in on it means a bounced or slow email locks someone
-  // out of a workspace they already created — a worse failure than an unverified
+  // out of an account they already created — a worse failure than an unverified
   // address while we're this early. Revisit before opening public sign-up.
-  databaseHooks: {
-    user: {
-      create: {
-        after: async (user) => {
-          // A fresh account must land in a workspace, not a naming screen.
-          // Swallowed on purpose: sign-up succeeding matters more than this,
-          // and orgs.ensurePersonal repairs the account on first load.
-          try {
-            await createPersonalOrg(user.id, user.name ?? '')
-          } catch (err) {
-            log.error('personal workspace create failed', err)
-          }
-        },
-      },
-    },
-  },
+  //
+  // No sign-up provisioning hook: a personal space is the absence of a team, so
+  // a fresh account already has somewhere to land.
   rateLimit: {
     // better-auth's own limiter, on by default in production but stated here so
     // the numbers are visible and reviewable. Applies per IP across auth routes;

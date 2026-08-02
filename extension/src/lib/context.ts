@@ -1,33 +1,38 @@
-import type { WorkspaceLink } from './types';
+import type { ServerLink } from './types';
 
 /**
- * What one token can see: who it belongs to, and the projects a gripe may be
- * pinned to. The panel asks once per link and uses the answer for two things —
- * naming the workspace in the destination row, and filling the project picker.
- * Nothing here is load-bearing: a failed fetch just leaves the gripe to the
- * workspace's own origin routing.
+ * What one token can see: who it belongs to, the personal space it always has,
+ * and every team it reaches — each with the projects a gripe may be pinned to.
+ * The panel asks once per link and uses the answer for two things: naming the
+ * space in the destination row, and filling the project picker. Nothing here is
+ * load-bearing: a failed fetch just leaves the gripe to the server's own origin
+ * routing.
  */
 
+/** The projects of one space, in the shape the picker renders. */
+export type SpaceProjects = { id: string; name: string; slug: string; originHints: string[] }[];
+
 /** What GET /api/ingest/context says a token can see. */
-export interface WorkspaceContext {
-  org: { id: string; name: string; slug: string };
-  projects: { id: string; name: string; slug: string; originHints: string[] }[];
+export interface ServerContext {
+  user: { id: string; name: string; email: string };
+  personal: { projects: SpaceProjects };
+  teams: { id: string; name: string; slug: string; projects: SpaceProjects }[];
 }
 
 function str(value: unknown): string | null {
   return typeof value === 'string' ? value : null;
 }
 
-function readOrg(value: unknown): WorkspaceContext['org'] | null {
+function readUser(value: unknown): ServerContext['user'] | null {
   if (typeof value !== 'object' || value === null) return null;
-  const { id, name, slug } = value as { id?: unknown; name?: unknown; slug?: unknown };
-  const [i, n, s] = [str(id), str(name), str(slug)];
-  return i !== null && n !== null && s !== null ? { id: i, name: n, slug: s } : null;
+  const { id, name, email } = value as { id?: unknown; name?: unknown; email?: unknown };
+  const [i, n, e] = [str(id), str(name), str(email)];
+  return i !== null && n !== null && e !== null ? { id: i, name: n, email: e } : null;
 }
 
-function readProjects(value: unknown): WorkspaceContext['projects'] | null {
+function readProjects(value: unknown): SpaceProjects | null {
   if (!Array.isArray(value)) return null;
-  const out: WorkspaceContext['projects'] = [];
+  const out: SpaceProjects = [];
   for (const raw of value) {
     if (typeof raw !== 'object' || raw === null) return null;
     const { id, name, slug, originHints } = raw as {
@@ -46,9 +51,34 @@ function readProjects(value: unknown): WorkspaceContext['projects'] | null {
   return out;
 }
 
+function readPersonal(value: unknown): ServerContext['personal'] | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const projects = readProjects((value as { projects?: unknown }).projects);
+  return projects ? { projects } : null;
+}
+
+function readTeams(value: unknown): ServerContext['teams'] | null {
+  if (!Array.isArray(value)) return null;
+  const out: ServerContext['teams'] = [];
+  for (const raw of value) {
+    if (typeof raw !== 'object' || raw === null) return null;
+    const { id, name, slug, projects } = raw as {
+      id?: unknown;
+      name?: unknown;
+      slug?: unknown;
+      projects?: unknown;
+    };
+    const [i, n, s] = [str(id), str(name), str(slug)];
+    const p = readProjects(projects);
+    if (i === null || n === null || s === null || !p) return null;
+    out.push({ id: i, name: n, slug: s, projects: p });
+  }
+  return out;
+}
+
 export async function fetchContext(
-  link: Pick<WorkspaceLink, 'serverUrl' | 'apiToken'>,
-): Promise<WorkspaceContext> {
+  link: Pick<ServerLink, 'serverUrl' | 'apiToken'>,
+): Promise<ServerContext> {
   const server = link.serverUrl.trim().replace(/\/+$/, '');
   const res = await fetch(`${server}/api/ingest/context`, {
     headers: { authorization: `Bearer ${link.apiToken.trim()}` },
@@ -56,9 +86,29 @@ export async function fetchContext(
   if (!res.ok) throw new Error(`context failed (${res.status})`);
   const payload: unknown = await res.json();
   if (typeof payload !== 'object' || payload === null) throw new Error('context: not an object');
-  const { org, projects } = payload as { org?: unknown; projects?: unknown };
-  const readOrgResult = readOrg(org);
-  const readProjectsResult = readProjects(projects);
-  if (!readOrgResult || !readProjectsResult) throw new Error('context: unexpected shape');
-  return { org: readOrgResult, projects: readProjectsResult };
+  const { user, personal, teams } = payload as {
+    user?: unknown;
+    personal?: unknown;
+    teams?: unknown;
+  };
+  const readUserResult = readUser(user);
+  const readPersonalResult = readPersonal(personal);
+  const readTeamsResult = readTeams(teams);
+  if (!readUserResult || !readPersonalResult || !readTeamsResult) {
+    throw new Error('context: unexpected shape');
+  }
+  return { user: readUserResult, personal: readPersonalResult, teams: readTeamsResult };
+}
+
+/** What to call the space uploads go to. '' is the token owner's own space. */
+export function spaceName(ctx: ServerContext | null, teamId: string): string {
+  if (!teamId) return 'Personal';
+  return ctx?.teams.find((t) => t.id === teamId)?.name ?? '';
+}
+
+/** The projects of that space — a project belongs to exactly one. */
+export function spaceProjects(ctx: ServerContext | null, teamId: string): SpaceProjects {
+  if (!ctx) return [];
+  if (!teamId) return ctx.personal.projects;
+  return ctx.teams.find((t) => t.id === teamId)?.projects ?? [];
 }

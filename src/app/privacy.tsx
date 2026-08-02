@@ -10,8 +10,8 @@ export function PrivacyPage() {
         <p>
           Handback is operated by Sal Aiello. This policy covers the Handback web app at
           handback.dev, the Handback Recorder Chrome extension, and the command-line and MCP tools
-          that talk to the same API. Handback is a workspace for teams: almost everything you put
-          into it is visible to the other members of your organization, by design.
+          that talk to the same API. In a Handback team, almost everything you put in is visible to
+          the other members, by design. Your personal space is visible only to you.
         </p>
       </Section>
 

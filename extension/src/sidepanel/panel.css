@@ -146,7 +146,7 @@
 }
 
 /* ── Home ───────────────────────────────────────────────────────────────── */
-/* With no walkthrough open the panel is not empty — it is the workspace seen from
+/* With no walkthrough open the panel is not empty — it is the space seen from
  * the recorder: where the next recording goes, what already went there and what
  * state somebody put it in, and what is still sitting in this browser. Record
  * stays the loudest thing on it; everything below is a quiet read, divided by
@@ -193,7 +193,7 @@
 }
 
 /* The destination, said before the recording rather than only at the send button.
- * It is also the door to a second workspace, so the whole row opens the picker. */
+ * It is also the door to a second server, so the whole row opens the picker. */
 .wsbar {
   padding: 10px 12px;
 }
@@ -278,7 +278,7 @@
   color: var(--cobalt);
 }
 
-/* ── The workspace's queue ──────────────────────────────────────────────── */
+/* ── The space's queue ──────────────────────────────────────────────────── */
 
 .feed,
 .local {
@@ -901,7 +901,7 @@ button.ticker.warn:hover {
   color: var(--muted);
   font-size: var(--fs-1);
 }
-/* A workspace is a row you click, not a field you edit — the whole row is the
+/* A server is a row you click, not a field you edit — the whole row is the
  * radio, and the × is the only other thing in it that does anything. */
 .wsrow {
   position: relative;
@@ -1005,7 +1005,7 @@ button.ticker.warn:hover {
   padding: 0 14px;
   font-size: var(--fs-3);
 }
-/* Where it lands, one line under the send: workspace · project, both changeable.
+/* Where it lands, one line under the send: space · project, both changeable.
  * Both controls are always here — one that hides is one nobody believes exists. */
 .dest {
   display: flex;

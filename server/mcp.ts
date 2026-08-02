@@ -15,8 +15,9 @@
 // re-registering three tools per request, which is object allocation.
 //
 // Auth is the same `hb_` bearer token as /api/ingest, read off the standard
-// Authorization header, so a token pins the org exactly like it does there —
-// and, exactly like there, a platform admin's token spans every workspace.
+// Authorization header, so a token reaches its owner's personal space and every
+// team they belong to, exactly like it does there — and, exactly like there, a
+// platform admin's token spans every space.
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
@@ -70,21 +71,21 @@ function registerTool<S extends Record<string, z.ZodTypeAny>>(
 }
 
 /**
- * One MCP server bound to one token's org, for the life of one request — except
- * for a platform admin's token, which spans every workspace on this Handback.
+ * One MCP server bound to one token's spaces, for the life of one request —
+ * except for a platform admin's token, which spans every space on this Handback.
  * The tool descriptions say which, because an agent decides how to read the
- * results from them: `workspace` on each row is noise in the org-pinned case and
- * the whole point in the admin one.
+ * results from them: `space` on each row tells one team's walkthroughs from
+ * another's, and is the whole point in the admin case.
  */
 function buildServer(auth: TokenAuth): McpServer {
   const mcp = new McpServer({ name: 'handback', version: '1.0.0' })
   const scope = auth.isAdmin
-    ? ' This is a platform-admin token: it spans EVERY workspace on this Handback, not just one — read the `workspace` field on each walkthrough before acting.'
+    ? ' This is a platform-admin token: it spans EVERY space on this Handback, not just its owner’s — read the `space` field on each walkthrough before acting.'
     : ''
   const notFound = (walkthroughId: string) =>
     auth.isAdmin
       ? `No walkthrough ${walkthroughId} on this Handback.`
-      : `No walkthrough ${walkthroughId} in this workspace.`
+      : `No walkthrough ${walkthroughId} in any space this token reaches.`
 
   registerTool(
     mcp,
@@ -92,7 +93,7 @@ function buildServer(auth: TokenAuth): McpServer {
     {
       title: 'List walkthroughs',
       description:
-        "List the team's walkthroughs — narrated screen recordings made by a human in the running app: a bug, review feedback, or a change request — newest first." +
+        'Lists walkthroughs across your personal space and every team your token’s owner belongs to; each item carries `space`. A walkthrough is a narrated screen recording made by a human in the running app: a bug, review feedback, or a change request. Newest first.' +
         scope,
       inputSchema: { status: statusSchema.optional() },
     },

@@ -22,8 +22,8 @@ export type Request =
   // until the next recording opens a fresh one. `uploadedUrl` is set when the
   // close followed a successful push to Handback.
   | { type: 'session:close'; id: string; uploadedUrl?: string }
-  // Pin this gripe to one project in the active workspace. '' clears both fields
-  // and hands routing back to the workspace's origin hints.
+  // Pin this gripe to one project in the active space. '' clears both fields
+  // and hands routing back to the server's origin hints.
   | { type: 'session:project'; id: string; projectId: string; projectName: string }
   | { type: 'state:get' }
   // sessionId → SessionSummary for every session on this machine. Its own message
@@ -54,7 +54,7 @@ export type Request =
       id: string;
       transcript: TranscriptSegment[];
       engine: TranscriberId;
-      /** The workspace's cleanup pass rewrote the wording (timings untouched). */
+      /** The server's cleanup pass rewrote the wording (timings untouched). */
       polished: boolean;
     }
   // Content script → panel, relayed while a recording is live. `origin` is the
@@ -81,7 +81,12 @@ export type ContentCommand =
 /** Background → side panel broadcast. */
 export type Broadcast = { type: 'state:changed' };
 
-/** What a Handback web page may send via chrome.runtime.sendMessage(EXTENSION_ID, …). */
+/**
+ * What a Handback web page may send via chrome.runtime.sendMessage(EXTENSION_ID, …).
+ * A token is the user's — it reaches their personal space and every team — so
+ * linking carries nothing but the token. Pages cached from 1.2.x may still send
+ * `orgId`/`orgName`; they are accepted and ignored.
+ */
 export type ExternalRequest =
   | { type: 'handback:ping' }
   | { type: 'handback:link'; apiToken: string; orgId?: string; orgName?: string };
@@ -91,10 +96,10 @@ export interface ExternalPong {
   ok: true;
   version: string;
   linked: boolean;
-  /** The workspace this extension currently uploads to. */
+  /** The server this extension currently uploads to. */
   serverUrl: string;
-  /** Links held for the asking page's origin — the orgs that page already knows this recorder can reach. */
-  orgs: { id: string; name: string }[];
+  /** Every server this recorder holds a key to, so the asking page can see itself in the list. */
+  linkedOrigins: string[];
 }
 
 export interface ExternalLinkResult {

@@ -135,25 +135,25 @@ export function verifyEmail(url: string): Omit<Message, 'to'> {
 }
 
 export function inviteEmail(opts: {
-  org: string
+  team: string
   inviter: string
   url: string
 }): Omit<Message, 'to'> {
-  const { org, inviter, url } = opts
+  const { team, inviter, url } = opts
   return {
-    subject: `${inviter} invited you to ${org} on Handback`,
-    text: `${inviter} invited you to join ${org} on Handback — the workspace where recorded walkthroughs of software problems get reviewed and handed to coding agents.\n\nJoin here:\n${url}\n\nThe invitation expires in seven days. Anyone with this link can join, so keep it to yourself.`,
+    subject: `${inviter} invited you to the ${team} team on Handback`,
+    text: `${inviter} invited you to join the ${team} team on Handback — where recorded walkthroughs of software problems get reviewed and handed to coding agents.\n\nJoin here:\n${url}\n\nThe invitation expires in seven days. Anyone with this link can join, so keep it to yourself.`,
     html: shell(`<p style="font-size:15px;line-height:1.6;margin:0 0 8px">
-      <strong>${esc(inviter)}</strong> invited you to join <strong>${esc(org)}</strong> on Handback.
+      <strong>${esc(inviter)}</strong> invited you to join the <strong>${esc(team)}</strong> team on Handback.
     </p>
     <p style="font-size:14px;color:${MUTED};line-height:1.6;margin:0 0 20px">
-      It's the workspace where recorded walkthroughs of software problems get reviewed
+      It's where recorded walkthroughs of software problems get reviewed
       and handed to coding agents.
     </p>
-    ${button(url, `Join ${esc(org)}`)}
+    ${button(url, `Join ${esc(team)}`)}
     <p style="font-size:13px;color:${MUTED};line-height:1.6;margin:20px 0 0">
       The invitation expires in seven days. Anyone holding this link can join the
-      workspace, so keep it to yourself.
+      team, so keep it to yourself.
     </p>
     ${fallbackLine(url)}`),
   }

@@ -1,15 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   PageEvent,
   PointerSample,
   Recording,
   RecordingFrame,
+  ServerLink,
   Session,
   Settings,
-  WorkspaceLink,
 } from '../lib/types';
 import { DEFAULT_SERVER, DEFAULT_SETTINGS, activeLink, linkId } from '../lib/types';
-import { fetchContext, type WorkspaceContext } from '../lib/context';
+import { fetchContext, spaceProjects, type ServerContext } from '../lib/context';
 import { send } from '../lib/messages';
 import { blobs } from '../lib/db';
 import { hostOf, mmss, plural, recDirName } from '../lib/format';
@@ -41,7 +41,7 @@ import './panel.css';
  *
  * There is no folder. Where the original wrote a gripe through to disk as each take
  * finished, this builds the same file set in memory at `done` and pushes it to the
- * Handback workspace — so nothing lands anywhere until the human says the gripe is
+ * Handback server — so nothing lands anywhere until the human says the gripe is
  * finished, and what lands is exactly what the timeline showed them.
  */
 
@@ -96,7 +96,7 @@ function reason(error: unknown): string {
 interface UploadExplanation {
   line: string;
   detail?: string;
-  /** The token itself is the problem — the panel offers the workspace page, not a retry. */
+  /** The token itself is the problem — the panel offers the recorder page, not a retry. */
   relink?: boolean;
 }
 
@@ -116,18 +116,18 @@ function explainUpload(raw: string, host: string): UploadExplanation {
   const says = (line: string) => (stripped && stripped !== line ? stripped : undefined);
 
   if (status === 401 || status === 403) {
-    return { line: 'the workspace turned the token away — re-link and try again', relink: true };
+    return { line: 'the server turned the token away — re-link and try again', relink: true };
   }
   if (status === 413 || /quota|too large|limit/i.test(raw)) {
-    const line = "the workspace refused the upload — it's over a size limit";
+    const line = "the server refused the upload — it's over a size limit";
     return { line, detail: says(line) };
   }
   if (status >= 500) {
-    const line = `the workspace hit an error (${status}). nothing is lost — the walkthrough is still here`;
+    const line = `the server hit an error (${status}). nothing is lost — the walkthrough is still here`;
     return { line, detail: says(line) };
   }
   if (status >= 400) {
-    const line = `the workspace said no (${status})`;
+    const line = `the server said no (${status})`;
     return { line, detail: says(line) };
   }
   return { line: `couldn't reach ${host} — check the connection and try again` };
@@ -163,8 +163,8 @@ export function App() {
   /** The server's own words, folded away until someone asks for them. */
   const [showErrDetail, setShowErrDetail] = useState(false);
   const [shipped, setShipped] = useState<Shipped | null>(null);
-  /** What the active token can see — the workspace's own name and its projects. Null until fetched, or when it failed. */
-  const [ctx, setCtx] = useState<WorkspaceContext | null>(null);
+  /** What the active token can see — the spaces it reaches and their projects. Null until fetched, or when it failed. */
+  const [ctx, setCtx] = useState<ServerContext | null>(null);
   /** The context fetch failed. The picker stays on screen and offers a retry — a
    *  control that vanishes is why "I can't set the project" was true. */
   const [ctxFailed, setCtxFailed] = useState(false);
@@ -196,17 +196,21 @@ export function App() {
   );
 
   /**
-   * The workspace uploads go to. A recorder can hold keys to several; everything
+   * The server uploads go to. A recorder can hold keys to several; everything
    * that used to read `settings.serverUrl` / `settings.apiToken` reads this.
    */
   const link = activeLink(state.settings);
+  /** The space on that server: '' is the token owner's own, anything else a team. */
+  const teamId = state.settings.activeTeamId;
   /**
    * A token is the whole of "linked": without one the recorder still records, it
-   * just has nowhere to hand anything to. The workspace's /recorder page is where
+   * just has nowhere to hand anything to. Handback's /recorder page is where
    * that gets fixed in one click, so every dead end in the panel points at it.
    */
   const linked = Boolean(link);
   const serverUrl = link?.serverUrl ?? DEFAULT_SERVER;
+  /** The projects of the active space — a project belongs to exactly one. */
+  const projects = useMemo(() => spaceProjects(ctx, teamId), [ctx, teamId]);
 
   const refresh = useCallback(async () => {
     const next = await send<PanelState>({ type: 'state:get' });
@@ -250,10 +254,10 @@ export function App() {
   }, [session?.id, session?.name]);
 
   /**
-   * What the active token can see: the workspace's real name, and the projects a
-   * gripe may be pinned to. It also self-heals the stored link — a token pasted by
-   * hand, or migrated from 1.1.x, has no org id until the workspace says so.
-   * A failure is not an error state: without it the gripe still routes by origin.
+   * What the active token can see: the spaces it reaches — the owner's personal
+   * one and every team — and the projects a gripe may be pinned to in each. It
+   * feeds both pickers in the destination row. A failure is not an error state:
+   * without it the gripe still routes by origin.
    */
   useEffect(() => {
     let live = true;
@@ -269,19 +273,6 @@ export function App() {
         return;
       }
       setCtx(answer);
-      if (answer.org.id === current.orgId && answer.org.name === current.orgName) return;
-      const corrected: WorkspaceLink = {
-        ...current,
-        orgId: answer.org.id,
-        orgName: answer.org.name,
-        id: linkId(current.serverUrl, answer.org.id),
-      };
-      // The corrected id may already be taken by a link added under the real org —
-      // one slot per (server, org), so that one is absorbed.
-      const links = settingsRef.current.links
-        .filter((l) => l.id !== current.id && l.id !== corrected.id)
-        .concat(corrected);
-      await send({ type: 'settings:set', patch: { links, activeLinkId: corrected.id } });
     })();
     return () => {
       live = false;
@@ -485,7 +476,7 @@ export function App() {
   /**
    * The gripe's whole file set, built in memory at exactly the paths the original
    * wrote to disk: `report.md` and `MANIFEST.txt` at the root, one `rec-NN/` per
-   * take. Those paths are the keys in the workspace, so a downloaded gripe is a
+   * take. Those paths are the keys in the cloud, so a downloaded gripe is a
    * folder `cli/push.ts` can push straight back up.
    *
    * The frame blobs are resolved *before* any prose is written, and the takes handed
@@ -545,13 +536,13 @@ export function App() {
   );
 
   /**
-   * Closing a gripe: build every byte, push it to the workspace, hand over the
+   * Closing a gripe: build every byte, push it to the active space, hand over the
    * brief, then let go of the session. The next recording opens a fresh one — takes
    * only ever accumulate in the open gripe, so this is the only way to start clean.
    *
    * The clipboard write goes first: it needs this click's user activation and the
    * upload burns straight through it. That first copy can't name the gripe's URL —
-   * the workspace mints the id during the declare — so a second copy is attempted
+   * the server mints the id during the declare — so a second copy is attempted
    * once there is an address, and the card offers it again if that was refused.
    *
    * Any failure leaves the gripe open and says what broke. Re-declaring the same
@@ -567,13 +558,13 @@ export function App() {
     }
     if (!link?.apiToken.trim()) {
       setShowSettings(true);
-      say('link a workspace first');
+      say('link handback first');
       return;
     }
-    // A project picked under another workspace, or one this token never confirmed,
-    // would 400 the declare. Let the workspace route by origin instead.
+    // A project picked in another space, or one this token never confirmed, would
+    // 400 the declare. Let the server route by origin instead.
     const projectId =
-      target.projectId && ctx?.projects.some((p) => p.id === target.projectId)
+      target.projectId && projects.some((p) => p.id === target.projectId)
         ? target.projectId
         : undefined;
     await navigator.clipboard
@@ -594,7 +585,7 @@ export function App() {
         target,
         bundle.takes,
         bundle.files,
-        { projectId, onProgress: setProgress },
+        { projectId, teamId: teamId || undefined, onProgress: setProgress },
       );
       const brief = agentPrompt(target, url, bundle.takes.length);
       const copied = await navigator.clipboard
@@ -623,7 +614,7 @@ export function App() {
   /**
    * Throw this walkthrough away: the session, its takes, and their blobs. The only
    * destructive button in the panel, so it arms first and says how much it is about
-   * to lose. Anything already uploaded stays in the workspace — this is local.
+   * to lose. Anything already uploaded stays in Handback — this is local.
    */
   const discardSession = async () => {
     if (!session || recording || uploading) return;
@@ -676,11 +667,49 @@ export function App() {
   const serverHost = hostOf(serverUrl);
   const appUrl = (path: string) => `${serverUrl.replace(/\/+$/, '')}${path}`;
   const openRecorderUrl = () => void chrome.tabs.create({ url: appUrl('/recorder') });
-  /** The workspace's projects page — the only place a project can actually be made. */
+  /** Handback's projects page — the only place a project can actually be made. */
   const openProjectsUrl = () => void chrome.tabs.create({ url: appUrl('/projects') });
 
-  /** Where the workspace would file this gripe on its own, from the recorded origin. */
-  const autoProject = ctx?.projects.find((p) => session && p.originHints.includes(session.origin));
+  /**
+   * The destination is one choice — which space on which server — so it is one
+   * value: `${serverUrl}::${teamId}`, empty team id meaning the token owner's own
+   * space. Only the active server's teams are known (the context fetch follows
+   * the active link), so every other server offers its personal space and grows
+   * its teams the moment it is picked.
+   */
+  const spaceValue = `${link?.serverUrl ?? ''}::${teamId}`;
+  const spaceOptions = (l: ServerLink | undefined) => {
+    if (!l) return [];
+    const options = [{ value: `${l.serverUrl}::`, label: 'Personal' }];
+    if (l.id !== link?.id) return options;
+    for (const t of ctx?.teams ?? []) options.push({ value: `${l.serverUrl}::${t.id}`, label: t.name });
+    // Whatever is selected has to be in the list, or the row reads as unset while
+    // the context is still in flight — or after a team went away.
+    if (teamId && !options.some((o) => o.value === spaceValue)) {
+      options.push({ value: spaceValue, label: ctxFailed ? 'your team' : ctx ? 'a team you left' : 'loading…' });
+    }
+    return options;
+  };
+  const onPickSpace = (e: ChangeEvent<HTMLSelectElement>) => {
+    const value = e.target.value;
+    if (value === '__add') {
+      openRecorderUrl();
+      return;
+    }
+    const cut = value.indexOf('::');
+    if (cut < 0) return;
+    void (async () => {
+      await patchSettings({ activeLinkId: value.slice(0, cut), activeTeamId: value.slice(cut + 2) });
+      // A project belongs to one space, so it can't survive the move.
+      if (session?.projectId) {
+        await send({ type: 'session:project', id: session.id, projectId: '', projectName: '' });
+        await refresh();
+      }
+    })();
+  };
+
+  /** Where Handback would file this gripe on its own, from the recorded origin. */
+  const autoProject = projects.find((p) => session && p.originHints.includes(session.origin));
   const autoLabel = `auto${autoProject ? ` → ${autoProject.name}` : ''}`;
 
   const summary = [
@@ -693,7 +722,7 @@ export function App() {
 
   const uploadLine = progress
     ? progress.phase === 'declare'
-      ? 'opening the walkthrough in your workspace…'
+      ? 'opening the walkthrough in Handback…'
       : progress.phase === 'finalize'
         ? 'finishing up…'
         : `uploading ${progress.done}/${progress.total} · ${mb(progress.bytesDone)} of ${mb(progress.bytesTotal)}`
@@ -773,11 +802,11 @@ export function App() {
         <span className="wordmark">handback</span>
         {/* The gripe's own line below says the duration; up here it would only repeat it. */}
         <span className="spacer" />
-        {/* A bare glyph here read as decoration — nobody guessed the workspace
+        {/* A bare glyph here read as decoration — nobody guessed the settings
             lived behind it. It says what it is, and says when it is open. */}
         <button
           className={`icon labelled${showSettings ? ' on' : ''}`}
-          title="Workspace, transcription and language"
+          title="Server, transcription and language"
           aria-expanded={showSettings}
           onClick={() => setShowSettings((v) => !v)}
         >
@@ -856,7 +885,9 @@ export function App() {
               await refresh();
             })()
           }
-          onPickLink={(id) => void patchSettings({ activeLinkId: id })}
+          onPickSpace={(nextServer, nextTeam) =>
+            void patchSettings({ activeLinkId: nextServer, activeTeamId: nextTeam })
+          }
           onOpenRecorder={openRecorderUrl}
           onOpenSettings={() => setShowSettings(true)}
         />
@@ -939,34 +970,37 @@ export function App() {
           {statusRow}
           {linked && hasContent && (
             <>
-              {/* Where it lands, said as a sentence you can change: workspace · project.
+              {/* Where it lands, said as a sentence you can change: space · project.
                   Above the button — the destination is read before the trigger is pulled. */}
               <div className="dest">
                 <span className="dest-to">to</span>
-                <select
-                  className="dest-sel"
-                  value={link?.id ?? ''}
-                  onChange={(e) => {
-                    if (e.target.value === '__add') {
-                      openRecorderUrl();
-                      return;
-                    }
-                    void patchSettings({ activeLinkId: e.target.value });
-                  }}
-                >
-                  {state.settings.links.map((l) => (
-                    <option key={l.id} value={l.id}>
-                      {l.orgName || hostOf(l.serverUrl)}
-                    </option>
-                  ))}
-                  <option value="__add">+ link another workspace…</option>
+                <select className="dest-sel" value={spaceValue} onChange={onPickSpace}>
+                  {/* One token reaches the owner's personal space and every team,
+                      so the choice is a space, not a key. With keys to more than
+                      one server the spaces group under the host they live on. */}
+                  {state.settings.links.length > 1
+                    ? state.settings.links.map((l) => (
+                        <optgroup key={l.id} label={hostOf(l.serverUrl)}>
+                          {spaceOptions(l).map((o) => (
+                            <option key={o.value} value={o.value}>
+                              {o.label}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ))
+                    : spaceOptions(state.settings.links[0]).map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                  <option value="__add">+ link another server…</option>
                 </select>
                 <span className="dest-dot">·</span>
                 {/* The project control is ALWAYS here. It used to hide itself
-                    whenever the fetch failed or the workspace had no projects,
+                    whenever the fetch failed or the space had no projects,
                     which read as "this recorder can't pick a project" — so both
                     of those are now states of the control, each with the way out
-                    of them. The workspace still routes by origin either way. */}
+                    of them. Handback still routes by origin either way. */}
                 {ctxFailed ? (
                   <>
                     <select className="dest-sel" value="" disabled>
@@ -980,10 +1014,7 @@ export function App() {
                   <select
                     className="dest-sel"
                     value={
-                      session &&
-                      ctx &&
-                      session.projectId &&
-                      ctx.projects.some((p) => p.id === session.projectId)
+                      session && session.projectId && projects.some((p) => p.id === session.projectId)
                         ? session.projectId
                         : ''
                     }
@@ -1000,26 +1031,26 @@ export function App() {
                           type: 'session:project',
                           id: session.id,
                           projectId,
-                          projectName: ctx?.projects.find((p) => p.id === projectId)?.name ?? '',
+                          projectName: projects.find((p) => p.id === projectId)?.name ?? '',
                         });
                         await refresh();
                       })();
                     }}
                   >
                     {/* Loading reads as loading, not as a decision already made;
-                        an empty workspace says it has no projects rather than
-                        offering an empty list. */}
+                        a space with nothing in it says it has no projects rather
+                        than offering an empty list. */}
                     <option value="">
-                      {!ctx ? 'loading projects…' : ctx.projects.length ? autoLabel : 'no project'}
+                      {!ctx ? 'loading projects…' : projects.length ? autoLabel : 'no project'}
                     </option>
-                    {(ctx?.projects ?? []).map((p) => (
+                    {projects.map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.name}
                       </option>
                     ))}
                     {ctx && (
                       <option value="__projects">
-                        {ctx.projects.length ? 'manage projects…' : '+ make one…'}
+                        {projects.length ? 'manage projects…' : '+ make one…'}
                       </option>
                     )}
                   </select>
@@ -1028,7 +1059,7 @@ export function App() {
               <button
                 className="primary send"
                 disabled={recording || uploading}
-                title="Upload this walkthrough to your workspace, copy the brief, and close it"
+                title="Upload this walkthrough, copy the brief, and close it"
                 onClick={() => void finish()}
               >
                 {uploading ? 'sending…' : 'send to Handback'}
@@ -1038,10 +1069,10 @@ export function App() {
           )}
           {!linked && (
             <div className="linkcard">
-              <strong>Link your workspace to send</strong>
-              <p>One click on the workspace page connects this recorder — no keys to paste.</p>
+              <strong>Link Handback to send</strong>
+              <p>One click on the recorder page connects this — no keys to paste.</p>
               <button className="primary" onClick={openRecorderUrl}>
-                link workspace →
+                link handback →
               </button>
               <button className="link" onClick={() => setShowSettings(true)}>
                 or paste a token by hand
@@ -1087,12 +1118,12 @@ function Mark() {
 }
 
 /**
- * Everything optional, in sentences. The workspaces lead: a recorder can hold
- * keys to several, one of them is where the next gripe goes, and clicking a row
- * is how that changes. The tokens live in this browser's IndexedDB and nowhere
+ * Everything optional, in sentences. The servers lead: a recorder can hold keys
+ * to several, one of them is where the next gripe goes, and clicking a row is
+ * how that changes. The tokens live in this browser's IndexedDB and nowhere
  * else — worth saying out loud next to a password field. The fields at the
- * bottom are the manual way round; a hand-pasted token has no workspace name
- * until the panel asks the server for one.
+ * bottom are the manual way round; a hand-pasted token doesn't know its spaces
+ * until the panel asks the server for them.
  */
 function SettingsBlock({
   settings,
@@ -1114,26 +1145,29 @@ function SettingsBlock({
 
   const unlink = (id: string) => {
     const links = settings.links.filter((l) => l.id !== id);
-    // Losing the active workspace falls to whatever is left, never to nothing
-    // while a link still exists.
-    const activeLinkId =
-      settings.activeLinkId === id ? (links[0]?.id ?? '') : settings.activeLinkId;
-    commit({ links, activeLinkId });
+    // Losing the active server falls to whatever is left, never to nothing while
+    // a link still exists — and the space it was pointing at goes with it.
+    const moved = settings.activeLinkId === id;
+    const activeLinkId = moved ? (links[0]?.id ?? '') : settings.activeLinkId;
+    commit({ links, activeLinkId, ...(moved ? { activeTeamId: '' } : {}) });
   };
 
   const addByHand = () => {
     const serverUrl = server.trim().replace(/\/+$/, '');
     const apiToken = token.trim();
-    const added: WorkspaceLink = {
-      id: linkId(serverUrl, ''),
+    const added: ServerLink = {
+      id: linkId(serverUrl),
       serverUrl,
-      orgId: '',
-      orgName: '',
       apiToken,
       addedAt: Date.now(),
     };
+    const known = settings.links.some((l) => l.id === added.id);
     const links = settings.links.filter((l) => l.id !== added.id).concat(added);
-    commit({ links, activeLinkId: added.id });
+    commit({
+      links,
+      activeLinkId: added.id,
+      ...(known ? {} : { activeTeamId: '' }),
+    });
     setToken('');
   };
 
@@ -1141,7 +1175,7 @@ function SettingsBlock({
     <div className="fields">
       {settings.links.length > 0 ? (
         <>
-          <span className="field-head">Workspaces</span>
+          <span className="field-head">Servers</span>
           {settings.links.map((l) => {
             const on = l.id === (activeLink(settings)?.id ?? '');
             return (
@@ -1151,13 +1185,11 @@ function SettingsBlock({
                 onClick={() => commit({ activeLinkId: l.id })}
               >
                 <i className="wsdot" />
-                <span className="wsname">{l.orgName || hostOf(l.serverUrl)}</span>
-                <span className="wshost">
-                  {hostOf(l.serverUrl)} · …{l.apiToken.slice(-4)}
-                </span>
+                <span className="wsname">{hostOf(l.serverUrl)}</span>
+                <span className="wshost">…{l.apiToken.slice(-4)}</span>
                 <button
                   className="kill"
-                  title="Forget this workspace's token"
+                  title="Forget this server's token"
                   onClick={(e) => {
                     e.stopPropagation();
                     unlink(l.id);
@@ -1169,13 +1201,13 @@ function SettingsBlock({
             );
           })}
           <button className="link" onClick={onOpenRecorder}>
-            link another workspace →
+            link another server →
           </button>
         </>
       ) : (
         <>
           <button className="primary linkcta" onClick={onOpenRecorder}>
-            link your workspace →
+            link your server →
           </button>
           <em>Or paste a server and token by hand below.</em>
         </>
@@ -1201,12 +1233,11 @@ function SettingsBlock({
           onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
         />
         <em>
-          It stays in this browser on this machine — the panel checks it and fills in the workspace
-          name.
+          It stays in this browser on this machine — the panel checks it and fills in your spaces.
         </em>
       </label>
       <button className="link" disabled={!token.trim().startsWith('hb_')} onClick={addByHand}>
-        add workspace
+        add server
       </button>
       <button
         className={`toggle ${settings.drawStart ? 'on' : ''}`}
@@ -1223,8 +1254,8 @@ function SettingsBlock({
         Transcribe on this device
       </button>
       <em>
-        Off, your narration is transcribed by your workspace in seconds. On, it never leaves this
-        machine — but expect minutes and a warm laptop.
+        Off, your narration is transcribed by your Handback server in seconds. On, it never leaves
+        this machine — but expect minutes and a warm laptop.
       </em>
       <label className="field">
         <span>The language you narrate in, if it isn't the browser's</span>

@@ -242,7 +242,7 @@ export function RecorderPanelMock({ className }: { className?: string }) {
         </div>
 
         <p className="text-muted-foreground font-mono text-[0.65rem]">
-          to Sal&apos;s workspace · Storefront
+          to Northwind · Storefront
         </p>
 
         {/* Button-shaped, not a button: nothing on the landing page records. */}

@@ -1,6 +1,9 @@
-// handback push — upload a recorded walkthrough folder to the Handback workspace.
+// handback push — upload a recorded walkthrough folder to Handback.
 //
 //   bun cli/push.ts <walkthrough-folder> [--server http://localhost:3995] [--token hb_...]
+//                                        [--team <teamId>]
+//
+// Uploads to your personal space by default; --team <id> targets a team.
 //
 // The folder is what the recorder wrote: report.md + MANIFEST.txt at the root,
 // one rec-NN/ per take (recording.json, transcript.txt, frames/, grids/,
@@ -55,13 +58,20 @@ const flag = (name: string) => {
   return i >= 0 ? args[i + 1] : undefined
 }
 
-if (!folder) fail('usage: bun cli/push.ts <walkthrough-folder> [--server url] [--token hb_...]')
+if (!folder) {
+  fail(
+    'usage: bun cli/push.ts <walkthrough-folder> [--server url] [--token hb_...] [--team <teamId>]\n' +
+      '       uploads to your personal space by default; --team <id> targets a team'
+  )
+}
 const server = (flag('server') ?? process.env.HANDBACK_SERVER ?? 'http://localhost:3995').replace(
   /\/+$/,
   ''
 )
 const token = flag('token') ?? process.env.HANDBACK_TOKEN
 if (!token) fail('no API token — pass --token or set HANDBACK_TOKEN')
+// Absent = the token owner's personal space.
+const teamId = flag('team')
 
 const files = walk(folder)
 if (files.length === 0) fail(`${folder} is empty`)
@@ -106,6 +116,7 @@ const takes = parsed.map(({ recording: r }) => ({
 }))
 
 const declare = {
+  ...(teamId ? { teamId } : {}),
   slug: session.slug || basename(folder),
   title: session.name || basename(folder),
   origin: session.origin || undefined,
@@ -120,7 +131,7 @@ const declare = {
 
 const totalBytes = files.reduce((sum, f) => sum + f.size, 0)
 console.log(
-  `pushing ${declare.slug} — ${takes.length} take(s), ${files.length} files, ${(totalBytes / 1024 / 1024).toFixed(1)} MB → ${server}`
+  `pushing ${declare.slug} — ${takes.length} take(s), ${files.length} files, ${(totalBytes / 1024 / 1024).toFixed(1)} MB → ${server} (${teamId ? `team ${teamId}` : 'personal'})`
 )
 
 const declareRes = await fetch(`${server}/api/ingest/walkthroughs`, {

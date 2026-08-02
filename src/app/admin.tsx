@@ -96,9 +96,9 @@ function AdminBody() {
             </p>
           </div>
           <div>
-            <p className="font-mono text-2xl">{stats.data.orgs}</p>
+            <p className="font-mono text-2xl">{stats.data.teams}</p>
             <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-              Workspaces
+              Teams
             </p>
           </div>
           <div>
@@ -144,7 +144,7 @@ function AdminBody() {
             <div className="border-border text-muted-foreground flex items-center gap-4 border-b pb-2 text-xs font-medium tracking-wide uppercase">
               <span className="min-w-0 flex-1">Member</span>
               <span className="w-28 shrink-0">Joined</span>
-              <span className="w-64 shrink-0">Workspaces</span>
+              <span className="w-64 shrink-0">Teams</span>
               <span className="w-24 shrink-0">Team</span>
               <span className="w-24 shrink-0">Admin</span>
               <span className="w-20 shrink-0">Walkthroughs</span>
@@ -172,14 +172,14 @@ function AdminBody() {
                         {fmtDate(u.createdAt)}
                       </span>
                       <div className="flex w-64 shrink-0 flex-wrap gap-1">
-                        {u.orgs.length === 0 ? (
+                        {u.teams.length === 0 ? (
                           <span className="text-muted-foreground text-xs">—</span>
                         ) : (
-                          u.orgs.map((o, i) => (
+                          u.teams.map((t, i) => (
                             <span
                               key={i}
                               className="border-border text-muted-foreground rounded border px-1.5 py-0.5 text-xs">
-                              {o.name} · {o.role}
+                              {t.name} · {t.role}
                             </span>
                           ))
                         )}
@@ -256,10 +256,10 @@ function AdminBody() {
 }
 
 /**
- * Everything one account can see, workspace by workspace. Reading another
- * workspace's walkthrough works because platform admins bypass membership on the
- * read side (`requireViewAccess`) — the viewer opens read-only, with no
- * status, project, move or delete controls.
+ * Everything one account can see, space by space — their personal space first,
+ * then each team. Reading a space they aren't in works because platform admins
+ * bypass membership on the read side (`requireViewAccess`) — the viewer opens
+ * read-only, with no status, project, move or delete controls.
  */
 function UserWalkthroughs({ userId }: { userId: string }) {
   const trpc = useTRPC()
@@ -270,18 +270,15 @@ function UserWalkthroughs({ userId }: { userId: string }) {
   if (groups.isError)
     return <p className="text-destructive py-3 pl-4 text-sm">{groups.error.message}</p>
   if (!groups.data || groups.data.length === 0)
-    return <p className="text-muted-foreground py-3 pl-4 text-sm">No workspaces.</p>
+    return <p className="text-muted-foreground py-3 pl-4 text-sm">No teams.</p>
 
   return (
     <div className="border-cobalt/25 mt-3 ml-4 space-y-5 border-l pl-4">
       {groups.data.map((group) => (
-        <div key={group.org.id} className="space-y-2">
+        <div key={group.space.teamId ?? 'personal'} className="space-y-2">
           <div className="flex flex-wrap items-baseline gap-2">
-            <p className="text-sm font-medium">{group.org.name}</p>
-            <span className="text-muted-foreground font-mono text-xs">
-              {group.org.slug} · {group.role}
-              {group.scoped && ' · guest'}
-            </span>
+            <p className="text-sm font-medium">{group.space.name}</p>
+            <span className="text-muted-foreground font-mono text-xs">{group.role}</span>
             <span className="text-muted-foreground ml-auto font-mono text-xs">
               {group.walkthroughs.length}{' '}
               {group.walkthroughs.length === 1 ? 'walkthrough' : 'walkthroughs'}
@@ -289,9 +286,7 @@ function UserWalkthroughs({ userId }: { userId: string }) {
           </div>
 
           {group.walkthroughs.length === 0 ? (
-            <p className="text-muted-foreground text-sm">
-              {group.scoped ? 'Nothing in the projects they can see.' : 'No walkthroughs yet.'}
-            </p>
+            <p className="text-muted-foreground text-sm">No walkthroughs yet.</p>
           ) : (
             <div className="divide-border/70 divide-y">
               {group.walkthroughs.map((g) => (

@@ -24,13 +24,13 @@ export function userHasFeature(
   return isPlatformAdmin(user) || user.features.includes(feature)
 }
 
-/** A workspace has a feature when its owner does. */
-export async function orgHasFeature(orgId: string, feature: Feature): Promise<boolean> {
-  const owner = await prisma.membership.findFirst({
-    where: { orgId, role: 'owner' },
-    select: { user: { select: { email: true, isAdmin: true, features: true } } },
+/** A team has a feature when its owner does. */
+export async function teamHasFeature(teamId: string, feature: Feature): Promise<boolean> {
+  const team = await prisma.team.findUnique({
+    where: { id: teamId },
+    select: { owner: { select: { email: true, isAdmin: true, features: true } } },
   })
-  return owner !== null && userHasFeature(owner.user, feature)
+  return team !== null && userHasFeature(team.owner, feature)
 }
 
 export async function requireAdmin(userId: string): Promise<void> {

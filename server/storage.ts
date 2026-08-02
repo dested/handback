@@ -1,6 +1,7 @@
 // S3 storage for walkthrough payloads. The DB never holds file bytes — every object
-// lives under orgs/<orgId>/gripes/<walkthroughId>/<path>, where <path> mirrors the
+// lives under orgs/<spaceId>/gripes/<walkthroughId>/<path>, where <path> mirrors the
 // walkthrough folder the recorder wrote (report.md, rec-01/frames/03-0125.jpg, …).
+// `spaceId` is the team id or, for a personal walkthrough, the owner's user id.
 // The server only ever hands out short-lived presigned URLs; the bucket blocks
 // all public access.
 
@@ -26,14 +27,16 @@ const s3 = new S3Client({
 const PUT_TTL_SECONDS = 60 * 60 // uploads of a long webm on slow links need room
 const GET_TTL_SECONDS = 60 * 60
 
-// The `gripes/` segment is frozen at the old product noun: every object already
-// uploaded lives under it, and changing the path would orphan every one of them.
-export function walkthroughPrefix(orgId: string, walkthroughId: string): string {
-  return `orgs/${orgId}/gripes/${walkthroughId}/`
+// The `orgs/` and `gripes/` segments are frozen at the old product nouns: every
+// object already uploaded lives under them, and changing the path would orphan
+// every one of them. `spaceId` is the team id, or the owner's user id for a
+// personal walkthrough.
+export function walkthroughPrefix(spaceId: string, walkthroughId: string): string {
+  return `orgs/${spaceId}/gripes/${walkthroughId}/`
 }
 
-export function walkthroughKey(orgId: string, walkthroughId: string, path: string): string {
-  return walkthroughPrefix(orgId, walkthroughId) + path
+export function walkthroughKey(spaceId: string, walkthroughId: string, path: string): string {
+  return walkthroughPrefix(spaceId, walkthroughId) + path
 }
 
 /**
@@ -79,7 +82,7 @@ export async function presignGet(key: string): Promise<string> {
 }
 
 /**
- * Server-side copy of one object — the move of a walkthrough between workspaces
+ * Server-side copy of one object — the move of a walkthrough between spaces
  * never pulls the bytes through the container. CopySource is a URL path, so
  * each segment is encoded; the slashes have to survive.
  */

@@ -1,11 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '~/components/ui/button'
-import { useActiveOrg } from '~/lib/org'
+import { useActiveSpace } from '~/lib/space'
 import { useTRPC } from '~/lib/trpc'
 import { StatusControl } from './status-control'
 import type { Walkthrough } from './types'
 import { useCopy } from './use-copy'
+
+/** Stands in for Personal in the move menu, whose real value is `null`. */
+const PERSONAL_OPTION = 'personal'
 
 /** What the agent needs to find this walkthrough and report back when it's done. */
 function agentBrief(walkthrough: Walkthrough): string {
@@ -22,7 +25,7 @@ export function WalkthroughControls({ walkthrough }: { walkthrough: Walkthrough 
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const navigate = useNavigate()
-  const { orgs, org, setActiveOrgId } = useActiveOrg()
+  const { spaces, setActiveSpace } = useActiveSpace()
   const { copied, copy } = useCopy()
 
   const walkthroughQueryKey = trpc.walkthroughs.get.queryKey({ walkthroughId: walkthrough.id })
@@ -49,22 +52,22 @@ export function WalkthroughControls({ walkthrough }: { walkthrough: Walkthrough 
   )
 
   const move = useMutation(
-    trpc.walkthroughs.moveToOrg.mutationOptions({
+    trpc.walkthroughs.move.mutationOptions({
       onSuccess: (_result, variables) => {
-        // The URL doesn't change; following the walkthrough into its new workspace is
+        // The URL doesn't change; following the walkthrough into its new space is
         // what keeps walkthroughs.get answering for the caller after the refetch.
-        setActiveOrgId(variables.orgId)
+        setActiveSpace(variables.teamId)
         invalidate()
       },
     })
   )
 
-  // Keyed off the walkthrough's own org, not the active one — reaching this page
-  // already proved membership, and the two can differ mid-switch. Guests only
-  // hold a slice of the workspace, so filing a walkthrough elsewhere isn't theirs to do.
-  const canAssign = org?.id === walkthrough.orgId && org?.scope === 'org'
+  // `viewerIsMember` is the whole gate: the server already decided whether this
+  // caller belongs to the walkthrough's space, and the active space can differ
+  // from it mid-switch.
+  const canAssign = walkthrough.viewerIsMember
   const projects = useQuery({
-    ...trpc.projects.list.queryOptions({ orgId: walkthrough.orgId }),
+    ...trpc.projects.list.queryOptions({ teamId: walkthrough.teamId }),
     enabled: canAssign,
   })
 
@@ -77,14 +80,17 @@ export function WalkthroughControls({ walkthrough }: { walkthrough: Walkthrough 
     ? (assignProject.variables?.projectId ?? '')
     : (walkthrough.project?.id ?? '')
 
-  // Deleting is admin-only server-side, and role only means anything when the
-  // active workspace is this walkthrough's workspace.
+  // Deleting a team's walkthrough is admin-only server-side; your own personal
+  // space is always yours to delete from.
   const canDelete =
-    org?.id === walkthrough.orgId && (org?.role === 'owner' || org?.role === 'admin')
+    walkthrough.viewerIsMember &&
+    (walkthrough.teamId === null ||
+      ['owner', 'admin'].includes(
+        spaces.find((s) => s.teamId === walkthrough.teamId)?.role ?? 'member'
+      ))
 
-  // Only whole-workspace members on both ends may move a walkthrough, and the source
-  // side of that is exactly the guard project assignment already needs.
-  const destinations = orgs.filter((o) => o.scope === 'org' && o.id !== walkthrough.orgId)
+  // Every space you're in except the one it already sits in — Personal included.
+  const destinations = spaces.filter((s) => s.teamId !== walkthrough.teamId)
 
   function confirmDelete() {
     if (!window.confirm(`Delete "${walkthrough.title}"? The recording and report go with it.`))
@@ -92,18 +98,21 @@ export function WalkthroughControls({ walkthrough }: { walkthrough: Walkthrough 
     remove.mutate({ walkthroughId: walkthrough.id })
   }
 
-  function confirmMove(orgId: string) {
-    const dest = destinations.find((o) => o.id === orgId)
-    if (!dest || !org) return
+  function confirmMove(value: string) {
+    // '' is the placeholder option, so Personal rides under its own sentinel.
+    const dest = destinations.find((s) => (s.teamId ?? PERSONAL_OPTION) === value)
+    if (!dest) return
+    const sourceLoses = walkthrough.teamId === null ? '' : ' The team loses access to it.'
     const warning =
-      `Move "${walkthrough.title}" to ${dest.name}? Everyone in ${org.name} loses access to it, ` +
-      `and its project assignment is cleared.`
+      dest.teamId === null
+        ? `Move "${walkthrough.title}" to your personal space? The team loses access to it, and its project assignment is cleared.`
+        : `Move "${walkthrough.title}" to ${dest.name}?${sourceLoses} Its project assignment is cleared.`
     if (!window.confirm(warning)) return
-    move.mutate({ walkthroughId: walkthrough.id, orgId: dest.id })
+    move.mutate({ walkthroughId: walkthrough.id, teamId: dest.teamId })
   }
 
   // A platform admin reached this walkthrough from /admin without belonging to its
-  // workspace: the read side lets them look, every mutation still 403s. Show
+  // space: the read side lets them look, every mutation still 403s. Show
   // nothing they can't actually do.
   if (!walkthrough.viewerIsMember) {
     return (
@@ -150,16 +159,16 @@ export function WalkthroughControls({ walkthrough }: { walkthrough: Walkthrough 
 
         {canAssign && destinations.length > 0 && (
           <select
-            aria-label="Move to workspace"
+            aria-label="Move to space"
             className="border-input bg-background text-foreground rounded-md border px-2 py-1.5 text-sm disabled:opacity-60"
             value=""
             disabled={move.isPending}
             onChange={(e) => confirmMove(e.target.value)}>
             <option value="" disabled>
-              {move.isPending ? 'Moving…' : 'Move to workspace…'}
+              {move.isPending ? 'Moving…' : 'Move to space…'}
             </option>
             {destinations.map((dest) => (
-              <option key={dest.id} value={dest.id}>
+              <option key={dest.teamId ?? PERSONAL_OPTION} value={dest.teamId ?? PERSONAL_OPTION}>
                 {dest.name}
               </option>
             ))}

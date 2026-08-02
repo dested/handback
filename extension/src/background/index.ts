@@ -5,13 +5,7 @@ import type {
   ExternalRequest,
   Request,
 } from '../lib/messages';
-import type {
-  RecordingMeta,
-  Session,
-  SessionSummary,
-  Settings,
-  WorkspaceLink,
-} from '../lib/types';
+import type { RecordingMeta, ServerLink, Session, SessionSummary, Settings } from '../lib/types';
 import { COBALT, DEFAULT_SERVER, DEFAULT_SETTINGS, activeLink, linkId } from '../lib/types';
 import {
   blobs,
@@ -48,35 +42,86 @@ chrome.runtime.onInstalled.addListener((details) => {
   }
 });
 
+/** A 1.2.x row: one link per workspace, `${serverUrl}::${orgId}`. */
+type LegacyLink = ServerLink & { orgId?: string; orgName?: string };
+
+/** Everything this recorder has ever written under `settings`, in one shape. */
+type StoredSettings = Partial<Omit<Settings, 'links'>> & {
+  links?: LegacyLink[];
+  /** 1.1.x kept its single workspace in three flat fields. */
+  serverUrl?: string;
+  apiToken?: string;
+  orgName?: string;
+};
+
+/**
+ * Settings, with every shipped shape folded into today's. A token is the user's
+ * now — it reaches their personal space and every team — so the recorder holds
+ * one link per server rather than one per workspace, and the fold is where the
+ * old rows collapse. It persists once, so nobody's setup unlinks on update.
+ */
 async function getSettings(): Promise<Settings> {
-  const stored =
-    (await kv.get<Partial<Settings> & { serverUrl?: string; apiToken?: string; orgName?: string }>(
-      SETTINGS,
-    )) ?? {};
-  if (!Array.isArray(stored.links) && stored.apiToken) {
-    // 1.1.x stored exactly one workspace in three flat fields. Fold it into a
-    // link once and persist, so nobody's existing setup unlinks on update.
+  const stored = (await kv.get<StoredSettings>(SETTINGS)) ?? {};
+  const base: Settings = {
+    ...DEFAULT_SETTINGS,
+    drawStart: stored.drawStart ?? DEFAULT_SETTINGS.drawStart,
+    lang: stored.lang ?? '',
+    onDeviceTranscription: stored.onDeviceTranscription ?? false,
+    links: [],
+    activeLinkId: '',
+    // Personal is the safe default: which workspace an old link uploaded to
+    // can't be mapped to a team without asking the server first.
+    activeTeamId: stored.activeTeamId ?? '',
+  };
+
+  if (!Array.isArray(stored.links)) {
+    // 1.1.x: three flat fields, one workspace.
+    if (!stored.apiToken) return base;
     const serverUrl = stored.serverUrl || DEFAULT_SERVER;
-    const link: WorkspaceLink = {
-      id: linkId(serverUrl, ''),
-      serverUrl,
-      orgId: '',
-      orgName: stored.orgName ?? '',
-      apiToken: stored.apiToken,
-      addedAt: Date.now(),
-    };
     const next: Settings = {
-      ...DEFAULT_SETTINGS,
-      drawStart: stored.drawStart ?? DEFAULT_SETTINGS.drawStart,
-      lang: stored.lang ?? '',
-      onDeviceTranscription: stored.onDeviceTranscription ?? false,
-      links: [link],
-      activeLinkId: link.id,
+      ...base,
+      links: [{ id: linkId(serverUrl), serverUrl, apiToken: stored.apiToken, addedAt: Date.now() }],
+      activeLinkId: linkId(serverUrl),
     };
     await kv.set(SETTINGS, next);
     return next;
   }
-  return { ...DEFAULT_SETTINGS, ...stored, links: Array.isArray(stored.links) ? stored.links : [] };
+
+  // 1.2.x: one row per (server, workspace). Several rows can name the same
+  // server, and any of their tokens now reaches all of it — so keep the one that
+  // was active, else the newest, and throw the duplicates away.
+  const survivors = new Map<string, LegacyLink>();
+  for (const row of stored.links) {
+    if (!row?.serverUrl || !row.apiToken) continue;
+    const kept = survivors.get(row.serverUrl);
+    if (!kept) {
+      survivors.set(row.serverUrl, row);
+      continue;
+    }
+    if (kept.id === stored.activeLinkId) continue;
+    if (row.id === stored.activeLinkId || row.addedAt > kept.addedAt) {
+      survivors.set(row.serverUrl, row);
+    }
+  }
+  const links: ServerLink[] = [...survivors.values()].map((row) => ({
+    id: linkId(row.serverUrl),
+    serverUrl: row.serverUrl,
+    apiToken: row.apiToken,
+    addedAt: row.addedAt,
+  }));
+  const wasActive = stored.links.find((row) => row?.id === stored.activeLinkId);
+  const activeServer = wasActive?.serverUrl ?? stored.activeLinkId ?? '';
+  const activeLinkId = links.some((l) => l.id === activeServer)
+    ? activeServer
+    : (links[0]?.id ?? '');
+  const next: Settings = { ...base, links, activeLinkId };
+  const folded =
+    links.length !== stored.links.length ||
+    stored.links.some((row) => row?.id !== row?.serverUrl || row?.orgId !== undefined) ||
+    stored.activeTeamId === undefined ||
+    activeLinkId !== stored.activeLinkId;
+  if (folded) await kv.set(SETTINGS, next);
+  return next;
 }
 
 async function broadcast() {
@@ -462,7 +507,7 @@ function isExternalRequest(message: unknown): message is ExternalRequest {
 
 /**
  * A Handback page (the manifest says which ones) can ask whether the extension is
- * installed and hand it a token for its own workspace. The workspace linked is
+ * installed and hand it a token for its own server. The server linked is
  * `sender.origin` and never a URL from the payload — a matched page could
  * otherwise point every future upload at a server the human never chose.
  */
@@ -482,27 +527,31 @@ chrome.runtime.onMessageExternal.addListener((message: unknown, sender, sendResp
           version: chrome.runtime.getManifest().version,
           linked: settings.links.length > 0,
           serverUrl: active?.serverUrl ?? DEFAULT_SERVER,
-          orgs: settings.links
-            .filter((l) => l.serverUrl === origin && l.orgId)
-            .map((l) => ({ id: l.orgId, name: l.orgName })),
+          linkedOrigins: settings.links.map((l) => l.serverUrl),
         };
       }
       case 'handback:link': {
+        // A page cached from 1.2.x may still send orgId/orgName. There is no org
+        // to link to any more, so they are ignored: the token reaches the whole
+        // account, and the panel picks the space.
         const apiToken = message.apiToken;
         if (!apiToken.startsWith('hb_') || apiToken.length > 200) {
           return { ok: false, error: 'that is not a Handback token' };
         }
-        const orgId = (message.orgId ?? '').slice(0, 60);
-        const orgName = (message.orgName ?? '').slice(0, 80);
         const settings = await getSettings();
-        const id = linkId(origin, orgId);
-        // One slot per (server, org). A link that finally learned its org id absorbs
-        // the anonymous slot the same server held before.
-        const links = settings.links.filter(
-          (l) => l.id !== id && !(orgId && l.serverUrl === origin && !l.orgId),
-        );
-        links.push({ id, serverUrl: origin, orgId, orgName, apiToken, addedAt: Date.now() });
-        await kv.set(SETTINGS, { ...settings, links, activeLinkId: id });
+        const id = linkId(origin);
+        // One slot per server, and this token is the newer key for it.
+        const known = settings.links.some((l) => l.id === id);
+        const links = settings.links.filter((l) => l.id !== id);
+        links.push({ id, serverUrl: origin, apiToken, addedAt: Date.now() });
+        await kv.set(SETTINGS, {
+          ...settings,
+          links,
+          activeLinkId: id,
+          // Re-linking a server keeps the space it was uploading to; a server
+          // this recorder has never seen starts on the owner's personal space.
+          activeTeamId: known ? settings.activeTeamId : '',
+        });
         await broadcast();
         return { ok: true };
       }

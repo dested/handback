@@ -34,8 +34,8 @@
       const mode = q.get('mode') || 'rec';
       const height = Number(q.get('h')) || Math.max(560, window.innerHeight - 70);
 
-      // `home` and `home+unlinked` are the same screen with and without a workspace
-      // key — the second is what a fresh install sees, and it has to hold up too.
+      // `home` and `home+unlinked` are the same screen with and without a linked
+      // server — the second is what a fresh install sees, and it has to hold up too.
       // `fresh` is a walkthrough seconds old: the empty timeline has to be one line.
       for (const m of [
         'rec',

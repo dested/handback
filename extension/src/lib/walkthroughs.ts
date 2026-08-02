@@ -1,7 +1,7 @@
-import type { WorkspaceLink } from './types';
+import type { ServerLink } from './types';
 
 /**
- * The workspace's own queue, read back into the recorder.
+ * The active space's own queue, read back into the recorder.
  *
  * `GET /api/ingest/walkthroughs` is the agent-facing list (the same call MCP's
  * `list_walkthroughs` makes), and the panel's home screen shows the top of it:
@@ -13,8 +13,8 @@ import type { WorkspaceLink } from './types';
 export const WALKTHROUGH_STATUSES = ['open', 'in_review', 'resolved'] as const;
 export type WalkthroughStatus = (typeof WALKTHROUGH_STATUSES)[number];
 
-/** One row of the workspace's queue, in the shapes the panel actually renders. */
-export interface WorkspaceWalkthrough {
+/** One row of the space's queue, in the shapes the panel actually renders. */
+export interface SpaceWalkthrough {
   id: string;
   slug: string;
   title: string;
@@ -27,7 +27,8 @@ export interface WorkspaceWalkthrough {
   errorCount: number;
   takeCount: number;
   projectName: string | null;
-  workspace: string;
+  /** The space it lives in — 'Personal' or a team's name, as the server names it. */
+  space: string;
 }
 
 function str(value: unknown): string | null {
@@ -49,7 +50,7 @@ function isStatus(value: unknown): value is WalkthroughStatus {
  * worth showing. A status the panel doesn't know is one of those (there are
  * exactly three, and ui.md forbids a fourth).
  */
-function readRow(value: unknown): WorkspaceWalkthrough | null {
+function readRow(value: unknown): SpaceWalkthrough | null {
   if (typeof value !== 'object' || value === null) return null;
   const row = value as Record<string, unknown>;
   const id = str(row.id);
@@ -69,23 +70,29 @@ function readRow(value: unknown): WorkspaceWalkthrough | null {
     errorCount: num(row.errorCount),
     takeCount: num(row.takeCount),
     projectName: str(row.projectName),
-    workspace: str(row.workspace) ?? '',
+    space: str(row.space) ?? '',
   };
 }
 
+/**
+ * The queue of one space. A user token reaches several, so the caller always
+ * says which: '' is the token owner's personal space, anything else a team id.
+ */
 export async function fetchWalkthroughs(
-  link: Pick<WorkspaceLink, 'serverUrl' | 'apiToken'>,
+  link: Pick<ServerLink, 'serverUrl' | 'apiToken'>,
+  teamId: string,
   signal?: AbortSignal,
-): Promise<WorkspaceWalkthrough[]> {
+): Promise<SpaceWalkthrough[]> {
   const server = link.serverUrl.trim().replace(/\/+$/, '');
-  const res = await fetch(`${server}/api/ingest/walkthroughs`, {
+  const team = teamId ? encodeURIComponent(teamId) : 'personal';
+  const res = await fetch(`${server}/api/ingest/walkthroughs?team=${team}`, {
     headers: { authorization: `Bearer ${link.apiToken.trim()}` },
     signal,
   });
   if (!res.ok) throw new Error(`walkthroughs failed (${res.status})`);
   const payload: unknown = await res.json();
   if (!Array.isArray(payload)) throw new Error('walkthroughs: not a list');
-  const rows: WorkspaceWalkthrough[] = [];
+  const rows: SpaceWalkthrough[] = [];
   for (const raw of payload) {
     const row = readRow(raw);
     if (row) rows.push(row);
@@ -93,12 +100,12 @@ export async function fetchWalkthroughs(
   return rows;
 }
 
-/** Where the workspace shows one — the viewer the recorder hands people off to. */
+/** Where Handback shows one — the viewer the recorder hands people off to. */
 export function walkthroughUrl(serverUrl: string, id: string): string {
   return `${serverUrl.replace(/\/+$/, '')}/walkthroughs/${id}`;
 }
 
-/** The workspace's inbox — every walkthrough, not just the ten the panel lists. */
+/** Handback's inbox — every walkthrough, not just the ten the panel lists. */
 export function inboxUrl(serverUrl: string): string {
   return `${serverUrl.replace(/\/+$/, '')}/app`;
 }

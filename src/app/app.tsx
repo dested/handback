@@ -1,14 +1,14 @@
-// The inbox — the main workspace list. Three states live here: provisioning (no
-// org yet), the filtered walkthrough list, and the empty "nothing here yet" guide.
+// The inbox — the active space's walkthrough list. Two states live here: the
+// filtered list, and the empty "nothing here yet" guide. There is no
+// provisioning state: a space always exists.
 // Status colors are fixed by ui.md: open = cobalt, in_review = violet,
 // resolved = green.
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { ArrowRight, X } from 'lucide-react'
-import { Button } from '~/components/ui/button'
-import { useActiveOrg } from '~/lib/org'
+import { useActiveSpace, type Space } from '~/lib/space'
 import { useTRPC } from '~/lib/trpc'
 import { cn } from '~/lib/utils'
 
@@ -45,34 +45,32 @@ function formatDuration(ms: number): string {
 }
 
 export function InboxPage() {
-  const { org, orgsLoaded } = useActiveOrg()
-
-  // SSR and the first client paint land here: orgs unknown, show the shape.
-  if (!orgsLoaded && !org) return <InboxSkeleton />
-  if (!org) return <ProvisioningWorkspace />
-  return <Inbox orgId={org.id} />
+  const { space } = useActiveSpace()
+  // Keyed on the space so switching resets the filters rather than carrying one
+  // space's project selection into another's list.
+  return <Inbox key={space.teamId ?? 'personal'} space={space} />
 }
 
-function Inbox({ orgId }: { orgId: string }) {
+function Inbox({ space }: { space: Space }) {
   const trpc = useTRPC()
   const [status, setStatus] = useState<StatusFilter>(null)
   const [projectId, setProjectId] = useState<string | null>(null)
 
   const walkthroughs = useQuery(
     trpc.walkthroughs.list.queryOptions({
-      orgId,
+      teamId: space.teamId,
       ...(status ? { status } : {}),
       ...(projectId ? { projectId } : {}),
     })
   )
-  const projects = useQuery(trpc.projects.list.queryOptions({ orgId }))
+  const projects = useQuery(trpc.projects.list.queryOptions({ teamId: space.teamId }))
 
   const rows = walkthroughs.data ?? []
   const unfiltered = status === null && projectId === null
 
   return (
     <div>
-      <ConnectBanner orgId={orgId} />
+      <ConnectBanner />
       <div className="mb-6 flex flex-wrap items-center gap-4">
         <h1 className="font-display text-3xl font-semibold">Inbox</h1>
         <div className="ml-auto flex flex-wrap items-center gap-2">
@@ -173,70 +171,24 @@ function Inbox({ orgId }: { orgId: string }) {
 }
 
 /**
- * Signed in, but no workspace — an account whose sign-up hook didn't land.
- * Repair it silently rather than asking someone to name something; the skeleton
- * is the whole story a healthy account should ever see here.
- */
-function ProvisioningWorkspace() {
-  const trpc = useTRPC()
-  const { refreshOrgs, setActiveOrgId } = useActiveOrg()
-  const fired = useRef(false)
-
-  const ensure = useMutation(
-    trpc.orgs.ensurePersonal.mutationOptions({
-      onSuccess: (result) => {
-        refreshOrgs()
-        setActiveOrgId(result.id)
-      },
-    })
-  )
-
-  const { mutate } = ensure
-  useEffect(() => {
-    if (fired.current) return
-    fired.current = true
-    mutate()
-  }, [mutate])
-
-  if (ensure.isError) {
-    return (
-      <div className="max-w-xl space-y-3 py-10">
-        <p className="text-destructive text-sm">
-          Couldn't set up your workspace. {ensure.error.message}
-        </p>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => mutate()}
-          disabled={ensure.isPending}>
-          {ensure.isPending ? 'Retrying…' : 'Try again'}
-        </Button>
-      </div>
-    )
-  }
-
-  return <InboxSkeleton />
-}
-
-/**
  * The one thing worth interrupting the inbox for: an inbox full of walkthroughs is
  * useless if the person who fixes them can't reach it. Shown until an agent has
  * actually called in (`lastUsedAt`), then gone for good — and dismissible in
  * the meantime, because a banner you can't close is a banner people learn to
- * hate. Guests can't hold tokens, so they never see it.
+ * hate. Tokens are account-wide, so this reads the same in every space.
  */
 const DISMISS_KEY = 'handback.connectBannerDismissed'
 
-function ConnectBanner({ orgId }: { orgId: string }) {
+function ConnectBanner() {
   const trpc = useTRPC()
-  const connection = useQuery(trpc.tokens.connection.queryOptions({ orgId }))
+  const connection = useQuery(trpc.tokens.connection.queryOptions())
   // localStorage is unavailable during SSR; assume not-dismissed and correct on
   // mount, so the server and first client render agree.
   const [dismissed, setDismissed] = useState(false)
   useEffect(() => setDismissed(localStorage.getItem(DISMISS_KEY) === '1'), [])
 
   const data = connection.data
-  if (!data || !data.canConnect || data.lastUsedAt || dismissed) return null
+  if (!data || data.lastUsedAt || dismissed) return null
 
   return (
     <div className="border-cobalt/30 bg-cobalt-wash mb-6 flex flex-wrap items-center gap-x-6 gap-y-3 rounded-xl border p-5">
@@ -269,7 +221,7 @@ function ConnectBanner({ orgId }: { orgId: string }) {
   )
 }
 
-/** Org exists, inbox is genuinely empty: the two halves of getting one here. */
+/** The space's inbox is genuinely empty: the two halves of getting one here. */
 function FirstWalkthroughGuide() {
   return (
     <div className="bg-card border-border max-w-2xl rounded-xl border p-8 shadow-sm">
@@ -307,17 +259,6 @@ function FirstWalkthroughGuide() {
           </Link>
         </section>
       </div>
-    </div>
-  )
-}
-
-function InboxSkeleton() {
-  return (
-    <div>
-      <div className="mb-6 flex items-center gap-4">
-        <h1 className="font-display text-3xl font-semibold">Inbox</h1>
-      </div>
-      <SkeletonRows />
     </div>
   )
 }

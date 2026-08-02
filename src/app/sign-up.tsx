@@ -54,7 +54,7 @@ export function SignUpPage() {
       </h1>
       <p className="text-muted-foreground mt-2 text-sm">
         {inviteQuery.data
-          ? `Then you'll join ${inviteQuery.data.orgName}.`
+          ? `Then you'll join ${inviteQuery.data.teamName}.`
           : 'Record a walkthrough, hand it to your agent, sign off on the fix.'}
       </p>
       <div className="bg-card mt-8 rounded-lg border p-6">

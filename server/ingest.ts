@@ -8,13 +8,15 @@
 // Every walkthrough route is also registered under its old `/gripes` spelling —
 // see the DECLARE / FINALIZE / DETAIL / STATUS path lists below.
 //
-// Re-declaring the same (org, slug) replaces the previous upload wholesale:
+// Re-declaring the same (space, slug) replaces the previous upload wholesale:
 // old rows cascade away and the old S3 prefix is deleted. Auth is a bearer
-// ApiToken (`hb_...`); the token pins the org.
+// ApiToken (`hb_...`); the token is its owner, and reaches their personal space
+// plus every team they belong to. A declare names its destination with
+// `teamId` — absent means personal.
 //
 // The read side is what an agent pulls through `cli/mcp.ts`:
 //
-//   GET  /api/ingest/walkthroughs            the org's finalized walkthroughs, newest first
+//   GET  /api/ingest/walkthroughs            finalized walkthroughs the token reaches, newest first
 //   GET  /api/ingest/walkthroughs/:id        one walkthrough's full brief (report.md + presigned files)
 //   POST /api/ingest/walkthroughs/:id/status open | in_review | resolved
 //
@@ -34,6 +36,7 @@ import {
   type WalkthroughStatus,
   type TokenAuth,
 } from './walkthroughs-api'
+import { memberTeamIds, spaceId } from './access'
 import { log } from './logger'
 import { polishConfigured, polishTranscript } from './polish'
 import { prisma } from './prisma'
@@ -57,13 +60,14 @@ const GB = 1024 * 1024 * 1024
 // The per-file cap has to clear a real walkthrough's webm: a 20-minute
 // screen recording runs past 512 MB at capture bitrates, and it arrives as ONE
 // file (2026-07-31: a 20-minute session hit exactly this wall in the field).
-// 2 GB per file / 4 GB per walkthrough keeps hour-plus recordings shippable; the org
-// quota below is the actual backstop — raise it per customer when someone
-// legitimately needs it.
+// 2 GB per file / 4 GB per walkthrough keeps hour-plus recordings shippable; the
+// space quota below is the actual backstop — raise it per customer when someone
+// legitimately needs it. Quota is per space: a user's personal space and each of
+// their teams each get their own allowance.
 const MAX_FILE_BYTES = 2 * GB
 const MAX_WALKTHROUGH_BYTES = 4 * GB
-export const ORG_QUOTA_BYTES = 20 * GB
-export const ORG_MAX_WALKTHROUGHS = 500
+export const SPACE_QUOTA_BYTES = 20 * GB
+export const SPACE_MAX_WALKTHROUGHS = 500
 
 const gb = (bytes: number | bigint) => `${(Number(bytes) / GB).toFixed(1)} GB`
 
@@ -89,6 +93,9 @@ const declareSchema = z.object({
   droppedCount: z.number().int().min(0).default(0),
   /** Pin the walkthrough to this project; absent = auto-route by originHints. */
   projectId: z.string().max(60).optional(),
+  /** Destination space; absent = the token owner's personal space. The
+   *  recorder's destination picker sends it. */
+  teamId: z.string().max(60).optional(),
   /** @deprecated Recorder ≤1.1.0 called `errorCount` this. Read when it's the only one sent. */
   eventCount: z.number().int().min(0).optional(),
   takes: z.array(takeSchema).min(1).max(200),
@@ -174,27 +181,52 @@ ingestRouter.use(async (req, res, next) => {
   next()
 })
 
-// GET /api/ingest/context — who this token speaks for. The recorder panel
-// calls it to show the workspace's real name and offer its projects as
-// upload destinations; the token already pins the org.
+// GET /api/ingest/context — every space this token can upload into: the owner's
+// personal space and each of their teams, each with its projects. The recorder
+// panel's destination picker reads this, then sends the chosen `teamId` (or none
+// for personal) on declare.
 ingestRouter.get('/context', readLimit, async (req, res) => {
   const auth = getAuth(req)
-  const [org, projects] = await Promise.all([
-    prisma.org.findUnique({
-      where: { id: auth.orgId },
-      select: { id: true, name: true, slug: true },
+  const projectSelect = { id: true, name: true, slug: true, originHints: true } as const
+  const [user, personalProjects, memberships] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: auth.userId },
+      select: { id: true, name: true, email: true },
     }),
     prisma.project.findMany({
-      where: { orgId: auth.orgId },
+      where: { userId: auth.userId, teamId: null },
       orderBy: { createdAt: 'asc' },
-      select: { id: true, name: true, slug: true, originHints: true },
+      select: projectSelect,
+    }),
+    prisma.membership.findMany({
+      where: { userId: auth.userId },
+      orderBy: { createdAt: 'asc' },
+      include: {
+        team: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            projects: { orderBy: { createdAt: 'asc' }, select: projectSelect },
+          },
+        },
+      },
     }),
   ])
-  if (!org) {
-    fail(res, 404, 'Unknown org')
+  if (!user) {
+    fail(res, 404, 'Unknown user')
     return
   }
-  res.json({ org, projects })
+  res.json({
+    user,
+    personal: { projects: personalProjects },
+    teams: memberships.map((m) => ({
+      id: m.team.id,
+      name: m.team.name,
+      slug: m.team.slug,
+      projects: m.team.projects,
+    })),
+  })
 })
 
 ingestRouter.post(DECLARE, declareLimit, async (req, res) => {
@@ -222,6 +254,17 @@ ingestRouter.post(DECLARE, declareLimit, async (req, res) => {
     return
   }
 
+  // Where this lands. A declare may name a team, but never a space its sender
+  // isn't in — an upload is never cross-space, platform admins included.
+  if (body.teamId && !(await memberTeamIds(auth.userId)).includes(body.teamId)) {
+    fail(res, 400, 'Unknown team')
+    return
+  }
+  const space = body.teamId
+    ? { teamId: body.teamId, userId: null }
+    : { teamId: null, userId: auth.userId }
+  const spaceWhere = body.teamId ? { teamId: body.teamId } : { teamId: null, userId: auth.userId }
+
   // Route to a project. A project the sender named outranks the origin hint —
   // the hint is a guess, an explicit choice isn't. Validated before the
   // replace below: a bad projectId must reject the declare, not first destroy
@@ -230,61 +273,64 @@ ingestRouter.post(DECLARE, declareLimit, async (req, res) => {
   if (body.projectId) {
     const project = await prisma.project.findUnique({
       where: { id: body.projectId },
-      select: { id: true, orgId: true },
+      select: { id: true, teamId: true, userId: true },
     })
-    if (!project || project.orgId !== auth.orgId) {
+    // Same space, both sides of the pair — a project of another space is as
+    // unknown as one that doesn't exist.
+    if (!project || project.teamId !== space.teamId || project.userId !== space.userId) {
       fail(res, 400, 'Unknown project')
       return
     }
     projectId = project.id
   } else if (body.origin) {
     const projects = await prisma.project.findMany({
-      where: { orgId: auth.orgId },
+      where: spaceWhere,
       select: { id: true, originHints: true },
     })
     projectId = projects.find((p) => p.originHints.includes(body.origin!))?.id ?? null
   }
 
   // Same folder pushed again → the new upload replaces the old one entirely.
-  const existing = await prisma.walkthrough.findUnique({
-    where: { orgId_slug: { orgId: auth.orgId, slug: body.slug } },
+  // Slug uniqueness is per space and code-enforced, so this is a findFirst.
+  const existing = await prisma.walkthrough.findFirst({
+    where: { ...spaceWhere, slug: body.slug },
     select: { id: true, bytes: true },
   })
 
-  // Quota is checked against what the org will hold *after* this write, so a
+  // Quota is checked against what the space will hold *after* this write, so a
   // re-push of the same slug doesn't count its own predecessor twice.
   const stored = await prisma.walkthrough.aggregate({
-    where: { orgId: auth.orgId },
+    where: spaceWhere,
     _sum: { bytes: true },
     _count: true,
   })
   const otherBytes = (stored._sum.bytes ?? 0n) - (existing?.bytes ?? 0n)
   const otherCount = stored._count - (existing ? 1 : 0)
-  if (otherBytes + BigInt(walkthroughBytes) > BigInt(ORG_QUOTA_BYTES)) {
+  if (otherBytes + BigInt(walkthroughBytes) > BigInt(SPACE_QUOTA_BYTES)) {
     fail(
       res,
       413,
-      `Storage quota reached: this org holds ${gb(otherBytes)} of ${gb(ORG_QUOTA_BYTES)}. Delete some walkthroughs, or ask us to raise it.`
+      `Storage quota reached: this space holds ${gb(otherBytes)} of ${gb(SPACE_QUOTA_BYTES)}. Delete some walkthroughs, or ask us to raise it.`
     )
     return
   }
-  if (otherCount >= ORG_MAX_WALKTHROUGHS) {
+  if (otherCount >= SPACE_MAX_WALKTHROUGHS) {
     fail(
       res,
       413,
-      `This org is at its limit of ${ORG_MAX_WALKTHROUGHS} walkthroughs. Delete some first.`
+      `This space is at its limit of ${SPACE_MAX_WALKTHROUGHS} walkthroughs. Delete some first.`
     )
     return
   }
 
   if (existing) {
-    await deletePrefix(walkthroughPrefix(auth.orgId, existing.id))
+    await deletePrefix(walkthroughPrefix(spaceId(space), existing.id))
     await prisma.walkthrough.delete({ where: { id: existing.id } })
   }
 
   const walkthrough = await prisma.walkthrough.create({
     data: {
-      orgId: auth.orgId,
+      ...space,
       projectId,
       slug: body.slug,
       title: body.title,
@@ -324,7 +370,7 @@ ingestRouter.post(DECLARE, declareLimit, async (req, res) => {
     body.files.map(async (f) => ({
       path: f.path,
       url: await presignPut(
-        walkthroughKey(auth.orgId, walkthrough.id, f.path),
+        walkthroughKey(spaceId(space), walkthrough.id, f.path),
         f.contentType,
         f.size
       ),
@@ -333,7 +379,7 @@ ingestRouter.post(DECLARE, declareLimit, async (req, res) => {
   )
 
   log.info(
-    `[ingest] declared walkthrough ${body.slug} (${body.files.length} files) for org ${auth.orgId}`
+    `[ingest] declared walkthrough ${body.slug} (${body.files.length} files) for ${body.teamId ? `team ${body.teamId}` : `personal ${auth.userId}`}`
   )
   res.json({ walkthroughId: walkthrough.id, uploads })
 })
@@ -341,7 +387,14 @@ ingestRouter.post(DECLARE, declareLimit, async (req, res) => {
 ingestRouter.post(FINALIZE, finalizeLimit, async (req, res) => {
   const auth = getAuth(req)
   const walkthrough = await prisma.walkthrough.findUnique({ where: { id: pathId(req) } })
-  if (!walkthrough || walkthrough.orgId !== auth.orgId) {
+  // Write path: no platform-admin bypass. Whoever finalizes an upload has to be
+  // in the space it landed in.
+  const owned =
+    walkthrough !== null &&
+    (walkthrough.userId === auth.userId ||
+      (walkthrough.teamId !== null &&
+        (await memberTeamIds(auth.userId)).includes(walkthrough.teamId)))
+  if (!walkthrough || !owned) {
     fail(res, 404, 'Unknown walkthrough')
     return
   }
@@ -369,7 +422,25 @@ ingestRouter.get(DECLARE, readLimit, async (req, res) => {
     fail(res, 400, `status must be one of ${statusSchema.options.join(', ')}`)
     return
   }
-  res.json(await listWalkthroughs(auth, parsed?.data))
+
+  // ?team=personal | <teamId>; absent lists every space the token reaches.
+  const teamParam = req.query.team
+  if (teamParam !== undefined && typeof teamParam !== 'string') {
+    fail(res, 400, 'team must be "personal" or a team id')
+    return
+  }
+  let space: { teamId: string | null } | undefined
+  if (teamParam === 'personal') {
+    space = { teamId: null }
+  } else if (teamParam !== undefined) {
+    if (!auth.isAdmin && !(await memberTeamIds(auth.userId)).includes(teamParam)) {
+      fail(res, 403, 'Not a member of that team')
+      return
+    }
+    space = { teamId: teamParam }
+  }
+
+  res.json(await listWalkthroughs(auth, parsed?.data, space))
 })
 
 ingestRouter.get(DETAIL, readLimit, async (req, res) => {

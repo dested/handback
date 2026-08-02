@@ -8,7 +8,7 @@ import { Link, useNavigate, useParams, useRouteLoaderData, useSearchParams } fro
 import { ReturnMark } from '~/components/logo'
 import { Button } from '~/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '~/components/ui/card'
-import { useActiveOrg } from '~/lib/org'
+import { useActiveSpace } from '~/lib/space'
 import { useTRPC } from '~/lib/trpc'
 import type { Session } from '../../server/auth'
 
@@ -16,7 +16,7 @@ export function JoinPage() {
   const { inviteId = '' } = useParams()
   const navigate = useNavigate()
   const trpc = useTRPC()
-  const { refreshOrgs, setActiveOrgId } = useActiveOrg()
+  const { refreshTeams, setActiveSpace } = useActiveSpace()
   const data = useRouteLoaderData('root') as { session: Session | null } | undefined
   const session = data?.session ?? null
   const [search] = useSearchParams()
@@ -32,8 +32,8 @@ export function JoinPage() {
   const accept = useMutation(
     trpc.invites.accept.mutationOptions({
       onSuccess: (result) => {
-        refreshOrgs()
-        setActiveOrgId(result.orgId)
+        refreshTeams()
+        setActiveSpace(result.teamId)
         navigate('/app')
       },
     })
@@ -75,14 +75,8 @@ export function JoinPage() {
           <CardHeader className="items-center text-center">
             <ReturnMark className="mx-auto h-6" />
             <CardTitle className="font-display text-2xl leading-snug font-semibold">
-              You're invited to join {inviteQuery.data.orgName}
+              You're invited to {inviteQuery.data.teamName}
             </CardTitle>
-            {inviteQuery.data.projectName && (
-              <CardDescription>
-                Guest access to the {inviteQuery.data.projectName} project — you'll see only its
-                walkthroughs.
-              </CardDescription>
-            )}
             {inviteQuery.data.email && (
               <CardDescription className="font-mono text-xs">
                 {inviteQuery.data.email}
@@ -128,7 +122,7 @@ export function JoinPage() {
                   Sign in
                 </Link>
                 <p className="text-muted-foreground text-center text-xs">
-                  You'll join {inviteQuery.data.orgName} as soon as you're in.
+                  You'll join {inviteQuery.data.teamName} as soon as you're in.
                 </p>
               </>
             )}

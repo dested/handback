@@ -46,13 +46,14 @@ async function rootLoader({ context }: LoaderFunctionArgs): Promise<RootLoaderDa
   return { session: await fetchClientSession() }
 }
 
-// Signed-in surfaces: bounce to sign-in without a session, and warm the org
-// list on the server so the shell renders with the switcher populated.
+// Signed-in surfaces: bounce to sign-in without a session, and warm the team
+// list so the shell renders with the switcher populated — Personal needs no
+// fetch.
 async function appLoader({ context }: LoaderFunctionArgs): Promise<RootLoaderData> {
   if (typeof window === 'undefined') {
     const ctx = context as SsrLoaderContext
     if (!ctx.session) throw redirect('/sign-in')
-    await ctx.queryClient.prefetchQuery(ctx.trpc.orgs.mine.queryOptions())
+    await ctx.queryClient.prefetchQuery(ctx.trpc.teams.mine.queryOptions())
     return { session: ctx.session }
   }
   const session = await fetchClientSession()

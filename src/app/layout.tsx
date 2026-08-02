@@ -15,7 +15,7 @@ import { Input } from '~/components/ui/input'
 import { Label } from '~/components/ui/label'
 import { Wordmark } from '~/components/logo'
 import { authClient } from '~/lib/auth-client'
-import { OrgProvider, useActiveOrg } from '~/lib/org'
+import { SpaceProvider, useActiveSpace } from '~/lib/space'
 import { useTRPC } from '~/lib/trpc'
 import { cn } from '~/lib/utils'
 import type { RootLoaderData } from './routes'
@@ -37,13 +37,13 @@ export function Layout() {
   const inApp = session !== null && APP_PREFIXES.some((p) => location.pathname.startsWith(p))
 
   return (
-    <OrgProvider enabled={session !== null}>
+    <SpaceProvider enabled={session !== null}>
       {inApp ? <AppHeader email={session!.user.email} /> : <MarketingHeader signedIn={!!session} />}
       <main className={inApp ? 'mx-auto w-full max-w-6xl px-6 py-8' : ''}>
         <Outlet />
       </main>
       {!inApp && <MarketingFooter />}
-    </OrgProvider>
+    </SpaceProvider>
   )
 }
 
@@ -83,7 +83,7 @@ function AppHeader({ email }: { email: string }) {
   const navigate = useNavigate()
   const revalidator = useRevalidator()
   const trpc = useTRPC()
-  const { org } = useActiveOrg()
+  const { space } = useActiveSpace()
   const adminStatus = useQuery(trpc.admin.status.queryOptions())
 
   async function signOut() {
@@ -104,7 +104,7 @@ function AppHeader({ email }: { email: string }) {
         <Link to="/app" aria-label="Handback inbox">
           <Wordmark />
         </Link>
-        {org && <WorkspaceSwitcher />}
+        <SpaceSwitcher />
         <div className="ml-2 flex items-center gap-1">
           <NavLink to="/app" className={tab} end>
             Inbox
@@ -112,7 +112,7 @@ function AppHeader({ email }: { email: string }) {
           <NavLink to="/projects" className={tab}>
             Projects
           </NavLink>
-          {!org?.personal && (
+          {space.teamId && (
             <NavLink to="/team" className={tab}>
               Team
             </NavLink>
@@ -144,17 +144,17 @@ function AppHeader({ email }: { email: string }) {
 }
 
 /**
- * The workspace menu. It renders even with one workspace, because the menu is
- * also where a team gets created — and a lone personal workspace is exactly the
- * account most likely to want one.
+ * The space menu. It renders even for an account with nothing but Personal,
+ * because the menu is also where a team gets created — and a lone personal
+ * space is exactly the account most likely to want one.
  */
-function WorkspaceSwitcher() {
+function SpaceSwitcher() {
   const trpc = useTRPC()
-  const { orgs, org, setActiveOrgId } = useActiveOrg()
+  const { spaces, space, setActiveSpace } = useActiveSpace()
   const [open, setOpen] = useState(false)
   const [creating, setCreating] = useState(false)
   const wrap = useRef<HTMLDivElement | null>(null)
-  const entitlements = useQuery(trpc.orgs.entitlements.queryOptions())
+  const entitlements = useQuery(trpc.teams.entitlements.queryOptions())
 
   useEffect(() => {
     if (!open) return
@@ -172,41 +172,35 @@ function WorkspaceSwitcher() {
     }
   }, [open])
 
-  if (!org) return null
   const item = 'w-full rounded px-2 py-1.5 text-left text-sm'
 
   return (
     <div className="relative" ref={wrap}>
       <button
         type="button"
-        aria-label="Workspace"
+        aria-label="Space"
         onClick={() => setOpen((o) => !o)}
         className="border-input bg-background text-foreground flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-sm font-medium">
-        {org.name}
+        {space.name}
         <ChevronDown className="size-3.5" />
       </button>
 
       {open && (
         <div className="bg-card border-border absolute z-50 mt-1 min-w-52 rounded-md border p-1 shadow-md">
-          {orgs.map((o) => (
+          {spaces.map((s) => (
             <button
-              key={o.id}
+              key={s.teamId ?? 'personal'}
               type="button"
               onClick={() => {
-                setActiveOrgId(o.id)
+                setActiveSpace(s.teamId)
                 setOpen(false)
               }}
               className={cn(
                 item,
                 'flex items-center gap-2',
-                o.id === org.id ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'
+                s.teamId === space.teamId ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'
               )}>
-              <span className="truncate">{o.name}</span>
-              {o.personal && (
-                <span className="text-muted-foreground ml-auto font-mono text-[0.6rem] tracking-wide uppercase">
-                  Personal
-                </span>
-              )}
+              <span className="truncate">{s.name}</span>
             </button>
           ))}
           <div className="border-border my-1 border-t" />
@@ -241,14 +235,14 @@ function WorkspaceSwitcher() {
 
 function NewTeamModal({ onClose }: { onClose: () => void }) {
   const trpc = useTRPC()
-  const { refreshOrgs, setActiveOrgId } = useActiveOrg()
+  const { refreshTeams, setActiveSpace } = useActiveSpace()
   const [name, setName] = useState('')
 
   const create = useMutation(
-    trpc.orgs.create.mutationOptions({
+    trpc.teams.create.mutationOptions({
       onSuccess: (result) => {
-        refreshOrgs()
-        setActiveOrgId(result.id)
+        refreshTeams()
+        setActiveSpace(result.id)
         onClose()
       },
     })

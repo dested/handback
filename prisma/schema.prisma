@@ -4,11 +4,15 @@
 // verification). Field names are camelCase (better-auth queries them by name);
 // columns are snake_case via `@map`.
 //
-// App models: Org → Membership/Invite/Project/ApiToken, Walkthrough → Take/WalkthroughFile.
+// App models: Team → Membership/Invite, Walkthrough → Take/WalkthroughFile,
+// ApiToken hanging off User. There is no workspace: content lives in a *space*,
+// and a space is the ownership pair `teamId | userId` on Project/Walkthrough —
+// exactly one of the two is set. `userId` set means someone's personal space,
+// which is the absence of a team and needs no provisioning.
 // File payloads (video, frames, grids, report.md, recording.json) live in S3
-// under orgs/<orgId>/gripes/<walkthroughId>/<path> — the `gripes/` segment is
-// frozen at the old product noun, because every object already uploaded lives
-// there. The DB holds listing and routing metadata only.
+// under orgs/<teamId ?? userId>/gripes/<walkthroughId>/<path> — the `orgs/` and
+// `gripes/` segments are frozen at the old product nouns, because every object
+// already uploaded lives there. The DB holds listing and routing metadata only.
 
 generator client {
   provider = "prisma-client-js"
@@ -31,11 +35,15 @@ model User {
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @default(now()) @map("updated_at")
 
-  sessions    Session[]
-  accounts    Account[]
-  memberships Membership[]
-  apiTokens   ApiToken[]
-  uploads     Walkthrough[] @relation("uploader")
+  sessions     Session[]
+  accounts     Account[]
+  memberships  Membership[]
+  apiTokens    ApiToken[]
+  uploads      Walkthrough[] @relation("uploader")
+  // The personal space: rows owned by this account rather than a team.
+  walkthroughs Walkthrough[] @relation("personal")
+  projects     Project[]     @relation("personalProjects")
+  ownedTeams   Team[]        @relation("teamOwner")
 
   @@map("user")
 }
@@ -84,50 +92,38 @@ model Verification {
   @@map("verification")
 }
 
-model Org {
+// A team is the only explicit space. The owner is authoritative here, not in a
+// membership role — `ownerId` is what transferOwnership moves — and the owner
+// also holds a Membership row so the roster is complete.
+model Team {
   id        String   @id @default(uuid())
   name      String
   slug      String   @unique
-  // A personal workspace is one account's own: no members, no invites.
-  personal  Boolean  @default(false)
+  ownerId   String   @map("owner_id")
+  owner     User     @relation("teamOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  seatLimit Int      @default(5) @map("seat_limit")
   createdAt DateTime @default(now()) @map("created_at")
 
   memberships  Membership[]
   invites      Invite[]
   projects     Project[]
   walkthroughs Walkthrough[]
-  apiTokens    ApiToken[]
 
-  @@map("org")
+  @@map("team")
 }
 
 model Membership {
-  id            String          @id @default(uuid())
-  orgId         String          @map("org_id")
-  org           Org             @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  userId        String          @map("user_id")
-  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  role          String          @default("member") // owner | admin | member
-  createdAt     DateTime        @default(now()) @map("created_at")
-  // "org" members see the whole workspace; "projects" members (guests) see
-  // only the projects granted in projectAccess and are always role "member".
-  scope         String          @default("org") // org | projects
-  projectAccess ProjectAccess[]
+  id        String   @id @default(uuid())
+  teamId    String   @map("team_id")
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // admin | member only — "owner" is never stored, it's Team.ownerId.
+  role      String   @default("member")
+  createdAt DateTime @default(now()) @map("created_at")
 
-  @@unique([orgId, userId])
+  @@unique([teamId, userId])
   @@map("membership")
-}
-
-model ProjectAccess {
-  id           String     @id @default(uuid())
-  membershipId String     @map("membership_id")
-  membership   Membership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
-  projectId    String     @map("project_id")
-  project      Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  createdAt    DateTime   @default(now()) @map("created_at")
-
-  @@unique([membershipId, projectId])
-  @@map("project_access")
 }
 
 // The invite id IS the link token (/join/<id>). It's emailed when an address
@@ -135,8 +131,8 @@ model ProjectAccess {
 // way, so a failed send degrades to copy-paste.
 model Invite {
   id           String    @id @default(uuid())
-  orgId        String    @map("org_id")
-  org          Org       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  teamId       String    @map("team_id")
+  team         Team      @relation(fields: [teamId], references: [id], onDelete: Cascade)
   email        String?
   role         String    @default("member")
   createdById  String    @map("created_by_id")
@@ -144,17 +140,19 @@ model Invite {
   expiresAt    DateTime  @map("expires_at")
   acceptedById String?   @map("accepted_by_id")
   acceptedAt   DateTime? @map("accepted_at")
-  // Set = a guest invite scoped to one project (role is forced to member).
-  projectId    String?   @map("project_id")
-  project      Project?  @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@map("invite")
 }
 
 model Project {
   id          String   @id @default(uuid())
-  orgId       String   @map("org_id")
-  org         Org      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  // Ownership pair: exactly one of teamId / userId is set. Prisma can't express
+  // a partial unique over a nullable pair, so slug uniqueness per space is
+  // enforced in code (findFirst + suffix loop), not by the database.
+  teamId      String?  @map("team_id")
+  team        Team?    @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  userId      String?  @map("user_id")
+  user        User?    @relation("personalProjects", fields: [userId], references: [id], onDelete: Cascade)
   name        String
   slug        String
   // URL origins (https://app.example.com) used to auto-route uploaded walkthroughs
@@ -163,21 +161,23 @@ model Project {
   createdAt   DateTime @default(now()) @map("created_at")
 
   walkthroughs Walkthrough[]
-  access       ProjectAccess[]
-  invites      Invite[]
 
-  @@unique([orgId, slug])
   @@map("project")
 }
 
 model Walkthrough {
   id           String    @id @default(uuid())
-  orgId        String    @map("org_id")
-  org          Org       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  // Ownership pair: exactly one of teamId / userId is set (code invariant).
+  // S3 keys live under orgs/<teamId ?? userId>/gripes/<id>/ — the `orgs/` and
+  // `gripes/` segments are frozen at the old product nouns.
+  teamId       String?   @map("team_id")
+  team         Team?     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  userId       String?   @map("user_id")
+  user         User?     @relation("personal", fields: [userId], references: [id], onDelete: Cascade)
   projectId    String?   @map("project_id")
   project      Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
-  // The extension's folder name (2026-07-29-1412-<slug>); unique per org so a
-  // re-push of the same folder replaces rather than duplicates.
+  // The extension's folder name (2026-07-29-1412-<slug>); kept unique per space
+  // in code so a re-push of the same folder replaces rather than duplicates.
   slug         String
   title        String
   origin       String? // site origin the walkthrough was recorded on
@@ -203,7 +203,6 @@ model Walkthrough {
   takes Take[]
   files WalkthroughFile[]
 
-  @@unique([orgId, slug])
   @@map("walkthrough")
 }
 
@@ -225,7 +224,8 @@ model Take {
 }
 
 // One row per uploaded object. `path` is walkthrough-relative (report.md,
-// rec-01/frames/03-0125.jpg); the S3 key is orgs/<orgId>/gripes/<walkthroughId>/<path>.
+// rec-01/frames/03-0125.jpg); the S3 key is
+// orgs/<teamId ?? userId>/gripes/<walkthroughId>/<path>.
 model WalkthroughFile {
   id            String      @id @default(uuid())
   walkthroughId String      @map("walkthrough_id")
@@ -241,11 +241,11 @@ model WalkthroughFile {
 }
 
 // Bearer tokens for the CLI / extension / MCP (`hb_...`). Only the sha256
-// hash is stored; lastFour is for display.
+// hash is stored; lastFour is for display. A token IS the user: it reaches the
+// owner's personal space and every team they belong to, and loses a team's
+// content the moment their membership does.
 model ApiToken {
   id         String    @id @default(uuid())
-  orgId      String    @map("org_id")
-  org        Org       @relation(fields: [orgId], references: [id], onDelete: Cascade)
   userId     String    @map("user_id")
   user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   name       String

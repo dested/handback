@@ -1,7 +1,9 @@
 // /recorder — the page that gets the Handback Recorder installed and pointed at
-// this workspace. The whole design goal is that nobody copies a token: the page
+// this server. The whole design goal is that nobody copies a token: the page
 // mints one and hands it to the extension over Chrome's external messaging
 // channel, so "linked" is one click rather than a trip through a settings pane.
+// A token is the whole account, so linking has nothing to choose — where a
+// recording lands is picked in the panel, at send time.
 //
 // Everything here that touches `window.chrome` happens in effects and handlers.
 // The page renders on the server, where there is no window and no extension.
@@ -13,7 +15,6 @@ import { Check, Copy } from 'lucide-react'
 import { Step, autoTokenName } from '~/components/setup-step'
 import { Button } from '~/components/ui/button'
 import { useCopy } from '~/components/viewer/use-copy'
-import { useActiveOrg, type OrgSummary } from '~/lib/org'
 import { useTRPC } from '~/lib/trpc'
 
 /** Fixed by the `key` in extension/public/manifest.json — same ID unpacked and in the Web Store. */
@@ -49,17 +50,19 @@ declare global {
 }
 
 /**
- * `orgs` is the set of workspaces the extension holds a key for *on this
- * origin* — 1.2.0 keeps one link per workspace, so linking adds a destination
- * rather than replacing one. Extensions at 1.1.x and older omit the field
- * entirely; they get `[]` and fall back to the single-link `linked`/`serverUrl`
- * pair below.
+ * A link is now per *server*, not per space: `linkedOrigins` is every Handback
+ * the extension holds a key for. Shipped 1.2.x recorders answer with `orgs`
+ * instead — the orgs they held keys for on this origin — and 1.1.x and
+ * older send neither, leaving only the single-link `linked`/`serverUrl` pair.
+ * Both legacy shapes are read as null so `isLinked` can tell "old recorder"
+ * from "linked nowhere".
  */
 type Presence = {
   version: string
   linked: boolean
   serverUrl: string
-  orgs: { id: string; name: string }[]
+  linkedOrigins: string[] | null
+  orgs: { id: string; name: string }[] | null
 }
 type LinkResult = { ok: boolean; error?: string }
 
@@ -95,7 +98,7 @@ function pingExtension(): Promise<Presence | null> {
 }
 
 /** Hands the extension a freshly minted token. It answers, or it didn't hear us. */
-function linkExtension(apiToken: string, org: { id: string; name: string }): Promise<LinkResult> {
+function linkExtension(apiToken: string): Promise<LinkResult> {
   return new Promise((resolve) => {
     const runtime = window.chrome?.runtime
     if (!runtime) {
@@ -105,7 +108,7 @@ function linkExtension(apiToken: string, org: { id: string; name: string }): Pro
     try {
       runtime.sendMessage(
         EXTENSION_ID,
-        { type: 'handback:link', apiToken, orgId: org.id, orgName: org.name },
+        { type: 'handback:link', apiToken },
         (response) => {
           if (window.chrome?.runtime?.lastError) {
             resolve({ ok: false, error: NO_ANSWER })
@@ -130,22 +133,36 @@ function readPresence(response: unknown): Presence | null {
     version: response.version,
     linked: response.linked,
     serverUrl: response.serverUrl,
+    linkedOrigins: readLinkedOrigins(response),
     orgs: readLinkedOrgs(response),
   }
 }
 
 /**
- * A missing `orgs` means an extension too old to know about multi-workspace
- * links — not a malformed reply — so it reads as an empty list. When the field
- * is there it has to be an array, and anything in it that isn't a plain
- * `{ id, name }` pair is dropped rather than sinking the whole ping.
+ * Every Handback origin the recorder holds a key for. A missing field means an
+ * extension too old to answer it — null, not `[]`, so the legacy branch in
+ * `isLinked` can still run.
  */
-function readLinkedOrgs(response: object): { id: string; name: string }[] {
-  if (!('orgs' in response)) return []
-  const { orgs } = response
-  if (!Array.isArray(orgs)) return []
+function readLinkedOrigins(response: object): string[] | null {
+  if (!('linkedOrigins' in response)) return null
+  const { linkedOrigins } = response
+  if (!Array.isArray(linkedOrigins)) return null
   // Array.isArray widens to any[]; hold it as unknown[] so each element still
   // has to be narrowed before it is read.
+  const entries: unknown[] = linkedOrigins
+  return entries.filter((entry): entry is string => typeof entry === 'string')
+}
+
+/**
+ * What a shipped 1.2.x recorder answers instead: the orgs it held keys for on
+ * this origin. Null when absent (1.1.x and older). Anything in the list
+ * that isn't a plain `{ id, name }` pair is dropped rather than sinking the
+ * whole ping.
+ */
+function readLinkedOrgs(response: object): { id: string; name: string }[] | null {
+  if (!('orgs' in response)) return null
+  const { orgs } = response
+  if (!Array.isArray(orgs)) return null
   const entries: unknown[] = orgs
   const linked: { id: string; name: string }[] = []
   for (const entry of entries) {
@@ -168,32 +185,9 @@ function readLinkResult(response: unknown): LinkResult {
   return { ok: false, error }
 }
 
-export function RecorderPage() {
-  const { org, orgsLoaded } = useActiveOrg()
-
-  if (!org) {
-    return orgsLoaded ? (
-      <div className="max-w-3xl">
-        <h1 className="font-display text-3xl font-semibold">Set up the recorder</h1>
-        <p className="text-muted-foreground mt-3 text-sm">
-          Name a workspace first —{' '}
-          <Link to="/app" className="text-primary underline underline-offset-4">
-            head to the inbox
-          </Link>
-          . Recordings belong to a workspace, so there has to be one to belong to.
-        </p>
-      </div>
-    ) : (
-      <p className="text-muted-foreground text-sm">Loading…</p>
-    )
-  }
-
-  return <Recorder key={org.id} org={org} />
-}
-
 type Phase = 'idle' | 'linking' | 'linked' | 'failed'
 
-function Recorder({ org }: { org: OrgSummary }) {
+export function RecorderPage() {
   // window is absent during SSR; render the production host, then correct it on
   // mount so a local dev session shows its own origin.
   const [origin, setOrigin] = useState('https://handback.dev')
@@ -228,8 +222,6 @@ function Recorder({ org }: { org: OrgSummary }) {
   }, [])
 
   const trpc = useTRPC()
-  const connection = useQuery(trpc.tokens.connection.queryOptions({ orgId: org.id }))
-  const canConnect = connection.data?.canConnect ?? true
   const release = useQuery(trpc.recorder.release.queryOptions())
   const latest = release.data?.version ?? null
 
@@ -242,62 +234,56 @@ function Recorder({ org }: { org: OrgSummary }) {
         <h1 className="font-display text-4xl font-semibold tracking-tight">Set up the recorder</h1>
         <p className="text-muted-foreground text-base leading-relaxed">
           The Handback Recorder is a Chrome extension: hit record, walk through the problem out
-          loud, and the recording, transcript, and console errors land in {org.name}'s inbox as a
+          loud, and the recording, transcript, and console errors land in your Handback inbox as a
           brief an agent can act on.
         </p>
       </header>
 
-      {!canConnect ? (
-        <GuestNotice />
-      ) : (
-        <>
-          {inChrome === false && <NotChromeNotice />}
-          <Step
-            n="01"
-            title="Install the extension"
-            blurb="Chrome only. It records the tab, your narration, and the console together, and only while you're recording.">
-            {/* Once the extension answers a ping, the how-to-install steps have
-                served their purpose — they collapse rather than sitting under a
-                green "it's installed" banner telling you to install it. Still
-                reachable, because updating means walking them again. */}
-            <div className="space-y-4">
-              {presence ? (
-                <>
-                  <PresenceIndicator presence={presence} checked={checked} latest={latest} />
-                  <details className="group">
-                    <summary className="text-muted-foreground hover:text-foreground cursor-pointer list-none text-sm underline decoration-dotted underline-offset-4 marker:content-['']">
-                      Reinstall or update it
-                    </summary>
-                    <div className="mt-4">
-                      <InstallInstructions />
-                    </div>
-                  </details>
-                </>
-              ) : (
-                <>
+      {inChrome === false && <NotChromeNotice />}
+      <Step
+        n="01"
+        title="Install the extension"
+        blurb="Chrome only. It records the tab, your narration, and the console together, and only while you're recording.">
+        {/* Once the extension answers a ping, the how-to-install steps have
+            served their purpose — they collapse rather than sitting under a
+            green "it's installed" banner telling you to install it. Still
+            reachable, because updating means walking them again. */}
+        <div className="space-y-4">
+          {presence ? (
+            <>
+              <PresenceIndicator presence={presence} checked={checked} latest={latest} />
+              <details className="group">
+                <summary className="text-muted-foreground hover:text-foreground cursor-pointer list-none text-sm underline decoration-dotted underline-offset-4 marker:content-['']">
+                  Reinstall or update it
+                </summary>
+                <div className="mt-4">
                   <InstallInstructions />
-                  {inChrome !== false && (
-                    <PresenceIndicator presence={presence} checked={checked} latest={latest} />
-                  )}
-                </>
+                </div>
+              </details>
+            </>
+          ) : (
+            <>
+              <InstallInstructions />
+              {inChrome !== false && (
+                <PresenceIndicator presence={presence} checked={checked} latest={latest} />
               )}
-            </div>
-          </Step>
+            </>
+          )}
+        </div>
+      </Step>
 
-          <Step
-            n="02"
-            title="Link this workspace"
-            blurb={
-              isLinkedTo(presence, org.id, origin)
-                ? `The recorder holds a key to ${org.name}. Pick it as the destination in the panel when you send.`
-                : `One click hands the recorder a key to ${org.name} — no tokens to copy. Recordings upload straight to this inbox.`
-            }>
-            <LinkStep org={org} origin={origin} presence={presence} />
-          </Step>
+      <Step
+        n="02"
+        title="Link the recorder"
+        blurb={
+          isLinked(presence, origin)
+            ? 'Linked. Pick your destination in the recorder panel when you send.'
+            : 'One click hands the recorder a key to your account — no tokens to copy. Pick where each recording goes (Personal or a team) in the panel when you send.'
+        }>
+        <LinkStep origin={origin} presence={presence} />
+      </Step>
 
-          <Recording />
-        </>
-      )}
+      <Recording />
 
       <CliAside origin={origin} />
     </div>
@@ -305,47 +291,20 @@ function Recorder({ org }: { org: OrgSummary }) {
 }
 
 /**
- * "Does the extension already hold a key to *this* workspace?" — the answer a
- * 1.2.0 extension gives by listing the org, and the one an older extension can
- * only approximate: it reports a single link, so a match on this origin is the
- * best it can say.
+ * "Does the extension already hold a key to this server?" — what a current
+ * recorder answers by listing its origins. The fallback branch is for SHIPPED
+ * 1.2.x recorders, which answer with `orgs` (the orgs on this origin) or, at
+ * 1.1.x, only a single `linked`/`serverUrl` pair. Don't drop it until no 1.2.x
+ * installs remain.
  */
-function isLinkedTo(presence: Presence | null, orgId: string, origin: string): boolean {
+function isLinked(presence: Presence | null, origin: string): boolean {
   if (presence === null) return false
-  if (presence.orgs.length > 0) return presence.orgs.some((o) => o.id === orgId)
-  return presence.linked && presence.serverUrl === origin
+  return Array.isArray(presence.linkedOrigins)
+    ? presence.linkedOrigins.includes(origin)
+    : (presence.orgs?.length ?? 0) > 0 || (presence.linked && presence.serverUrl === origin)
 }
 
-/** The workspace this link will point at. Hidden for anyone with a single one. */
-function WorkspacePicker() {
-  const { orgs, org, setActiveOrgId } = useActiveOrg()
-  if (orgs.length < 2 || !org) return null
-  return (
-    <label className="flex items-center gap-3 text-sm">
-      <span className="text-muted-foreground">Workspace</span>
-      <select
-        value={org.id}
-        onChange={(e) => setActiveOrgId(e.target.value)}
-        className="border-input bg-background h-9 rounded-md border px-2 text-sm">
-        {orgs.map((o) => (
-          <option key={o.id} value={o.id}>
-            {o.name}
-          </option>
-        ))}
-      </select>
-    </label>
-  )
-}
-
-function LinkStep({
-  org,
-  origin,
-  presence,
-}: {
-  org: OrgSummary
-  origin: string
-  presence: Presence | null
-}) {
+function LinkStep({ origin, presence }: { origin: string; presence: Presence | null }) {
   const trpc = useTRPC()
   const [phase, setPhase] = useState<Phase>('idle')
   const [minted, setMinted] = useState<string | null>(null)
@@ -354,7 +313,7 @@ function LinkStep({
     trpc.tokens.create.mutationOptions({
       onSuccess: async (result) => {
         setMinted(result.token)
-        const outcome = await linkExtension(result.token, { id: org.id, name: org.name })
+        const outcome = await linkExtension(result.token)
         setPhase(outcome.ok ? 'linked' : 'failed')
       },
       onError: () => setPhase('idle'),
@@ -363,30 +322,18 @@ function LinkStep({
 
   const link = useCallback(() => {
     setPhase('linking')
-    create.mutate({
-      orgId: org.id,
-      name: autoTokenName('Recorder', navigator.userAgent, new Date()),
-    })
-  }, [create, org.id])
+    create.mutate({ name: autoTokenName('Recorder', navigator.userAgent, new Date()) })
+  }, [create])
 
-  const linkedThisOrg = isLinkedTo(presence, org.id, origin)
-  // Other workspaces on this same Handback that the recorder can already reach.
-  // Linking adds to this list; it never replaces it.
-  const otherLinked = presence === null ? [] : presence.orgs.filter((o) => o.id !== org.id)
-  // Linked, but at a different Handback entirely — only an old single-link
-  // extension can say this, since a 1.2.0 one lists per-origin workspaces.
-  // Violet, not amber — ui.md forbids the warm hues, and this is a "heads up",
-  // not a failure.
+  const detectedHere = isLinked(presence, origin)
+  // Linked, but at a different Handback entirely. Violet, not amber — ui.md
+  // forbids the warm hues, and this is a "heads up", not a failure.
   const linkedElsewhere =
-    presence !== null &&
-    presence.linked &&
-    presence.orgs.length === 0 &&
-    presence.serverUrl !== origin
-  const detectedHere = linkedThisOrg
+    presence !== null && presence.linked && !detectedHere && presence.serverUrl !== origin
   // The banner distinguishes "was already linked when you arrived" from "you
   // just linked it", so it stays keyed to phase. The *button* must not: the
   // moment linking succeeds the action is done, and offering a primary
-  // "Link <org>" under a green "Linked." banner reads as a failed click.
+  // "Link the recorder" under a green "Linked." banner reads as a failed click.
   // presence lags a poll tick behind, so phase carries it until it catches up.
   const linkedHere = detectedHere || phase === 'linked'
   const alreadyHere = detectedHere && phase === 'idle'
@@ -394,27 +341,19 @@ function LinkStep({
 
   return (
     <div className="space-y-4">
-      <WorkspacePicker />
-
       {linkedElsewhere && (
         <div className="border-review/40 bg-review-wash text-review rounded-md border p-4 text-sm">
           The recorder is linked to <span className="font-mono text-xs">{presence.serverUrl}</span>.
-          Linking here points it at this workspace instead.
-        </div>
-      )}
-
-      {otherLinked.length > 0 && !linkedThisOrg && phase === 'idle' && (
-        <div className="border-review/40 bg-review-wash text-review rounded-md border p-4 text-sm">
-          The recorder is already linked to {otherLinked.map((o) => o.name).join(', ')}. Linking
-          adds {org.name} as a destination — you pick where each recording goes from the recorder
-          panel.
+          Linking here points it at this server instead.
         </div>
       )}
 
       {alreadyHere && (
         <div className="border-approve/40 bg-approve-wash flex items-center gap-3 rounded-md border p-4">
           <span className="bg-approve size-2 shrink-0 rounded-full" />
-          <p className="text-approve text-sm font-medium">Already linked to {org.name}.</p>
+          <p className="text-approve text-sm font-medium">
+            Linked. Pick your destination in the recorder panel when you send.
+          </p>
         </div>
       )}
 
@@ -422,8 +361,8 @@ function LinkStep({
         <div className="border-approve/40 bg-approve-wash flex items-center gap-3 rounded-md border p-4">
           <span className="bg-approve size-2 shrink-0 rounded-full" />
           <p className="text-approve text-sm font-medium">
-            Linked. {org.name} is now a destination in the recorder — pick it in the panel when you
-            send. You can close this page.
+            Linked. Pick your destination in the recorder panel when you send. You can close this
+            page.
           </p>
         </div>
       )}
@@ -434,7 +373,7 @@ function LinkStep({
           variant={linkedHere ? 'outline' : 'default'}
           disabled={presence === null || busy}
           onClick={link}>
-          {busy ? 'Linking…' : linkedHere ? 'Re-link' : `Link ${org.name}`}
+          {busy ? 'Linking…' : linkedHere ? 'Re-link' : 'Link the recorder'}
         </Button>
         {presence === null && (
           <span className="text-muted-foreground text-sm">
@@ -575,8 +514,8 @@ function PresenceIndicator({
                 Download {latest}
               </a>
               , then hit reload on the extension at{' '}
-              <code className="font-mono text-xs">chrome://extensions</code> — your workspace link
-              survives the update.
+              <code className="font-mono text-xs">chrome://extensions</code> — your link survives
+              the update.
             </p>
           </div>
         )}
@@ -641,18 +580,6 @@ function NotChromeNotice() {
       <p className="text-muted-foreground text-sm">
         This page can only talk to the extension from Chrome. Open{' '}
         <span className="font-mono text-xs">handback.dev/recorder</span> in Chrome to finish setup.
-      </p>
-    </div>
-  )
-}
-
-function GuestNotice() {
-  return (
-    <div className="border-border bg-card rounded-xl border p-8">
-      <h2 className="font-display text-2xl font-semibold">You're a guest on this workspace</h2>
-      <p className="text-muted-foreground mt-3 text-sm leading-relaxed">
-        The recorder uploads with a workspace token, and only full members can hold one. Ask an
-        owner for full access, then come back — recording itself takes about a minute to set up.
       </p>
     </div>
   )

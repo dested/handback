@@ -7,15 +7,17 @@
 // shape can't reach one caller and miss the other.
 //
 // Everything returned here is JSON-safe: Dates are ISO strings, sizes are
-// Numbers. Auth is a bearer ApiToken (`hb_…`) and the token pins the org — no
-// caller may name an org, they only ever see the one their token belongs to.
+// Numbers. Auth is a bearer ApiToken (`hb_…`) and the token is its owner — no
+// caller names a space, they see the owner's personal space plus every team the
+// owner belongs to.
 //
 // One exception: a token whose owner is a **platform admin** reads and triages
-// across every workspace (`TokenAuth.isAdmin` → `orgScope()` drops the filter).
-// Writing walkthroughs *in* — declare, upload, finalize — is never cross-org: an
-// upload always lands in the token's own workspace.
+// across every space (`TokenAuth.isAdmin` → `scopeWhere()` drops the filter).
+// Writing walkthroughs *in* — declare, upload, finalize — is never cross-space:
+// an upload always lands in a space the token's owner is actually in.
 
 import { createHash } from 'node:crypto'
+import { memberTeamIds, spaceId } from './access'
 import { isPlatformAdmin } from './features'
 import { log } from './logger'
 import { prisma } from './prisma'
@@ -24,23 +26,33 @@ import { getObjectText, walkthroughKey, presignGet } from './storage'
 export const WALKTHROUGH_STATUSES = ['open', 'in_review', 'resolved'] as const
 export type WalkthroughStatus = (typeof WALKTHROUGH_STATUSES)[number]
 
-export type TokenAuth = { orgId: string; userId: string; tokenId: string; isAdmin: boolean }
+export type TokenAuth = { userId: string; tokenId: string; isAdmin: boolean }
+
+/** The ownership pair every space-scoped row carries — exactly one side is set. */
+type SpaceRef = { teamId: string | null; userId: string | null }
 
 /**
- * The `where` fragment that pins a query to the token's workspace — empty for a
- * platform admin, who sees the whole platform. One place, so a new query can't
- * forget the rule or apply it twice.
+ * The `where` fragment that pins a query to the spaces the token's owner reaches
+ * — their own personal walkthroughs plus every team they're a member of, and
+ * empty for a platform admin, who sees the whole platform. One place, so a new
+ * query can't forget the rule or apply it twice.
  */
-const orgScope = (auth: TokenAuth) => (auth.isAdmin ? {} : { orgId: auth.orgId })
+const scopeWhere = async (auth: TokenAuth) =>
+  auth.isAdmin
+    ? {}
+    : { OR: [{ userId: auth.userId }, { teamId: { in: await memberTeamIds(auth.userId) } }] }
 
 /** Same rule, for a row already loaded. */
-const inScope = (auth: TokenAuth, orgId: string) => auth.isAdmin || orgId === auth.orgId
+const inScope = async (auth: TokenAuth, w: SpaceRef): Promise<boolean> =>
+  auth.isAdmin ||
+  w.userId === auth.userId ||
+  (w.teamId !== null && (await memberTeamIds(auth.userId)).includes(w.teamId))
 
 /** An agent scans this list, then pulls the one walkthrough it's going to work on. */
 const LIST_LIMIT = 100
 
 /**
- * Resolve an `Authorization: Bearer hb_…` header to the org it speaks for, or
+ * Resolve an `Authorization: Bearer hb_…` header to the user it speaks for, or
  * null for anything unrecognized. Stamps `lastUsedAt` fire-and-forget — the
  * connect page reads it to tell someone their agent actually landed.
  */
@@ -57,7 +69,6 @@ export async function authenticateToken(header: string | undefined): Promise<Tok
     .update({ where: { id: token.id }, data: { lastUsedAt: new Date() } })
     .catch(() => {})
   return {
-    orgId: token.orgId,
     userId: token.userId,
     tokenId: token.id,
     isAdmin: isPlatformAdmin(token.user),
@@ -77,25 +88,49 @@ export type WalkthroughListItem = {
   droppedCount: number
   takeCount: number
   projectName: string | null
-  // Always present — the only way an admin's cross-workspace list is readable,
-  // and its own workspace's name for everyone else.
-  workspace: string
+  // Always present — the only way a list spanning personal + several teams is
+  // readable, and the name of the one space it came from for everyone else.
+  space: string
 }
 
+/** How a row's owning space reads to an agent: a team's name, or 'Personal'. */
+const spaceName = (
+  auth: TokenAuth,
+  w: SpaceRef & { team: { name: string } | null; user: { name: string } | null }
+): string => {
+  if (w.team) return w.team.name
+  if (w.userId === auth.userId) return 'Personal'
+  // Platform admin reading across spaces: whose personal space this is matters.
+  return `${w.user?.name ?? 'Someone'} (personal)`
+}
+
+/**
+ * Finalized walkthroughs the token reaches, newest first. `space` narrows it:
+ * undefined = everything in scope, `{ teamId: null }` = the owner's personal
+ * space, `{ teamId: X }` = that team (the caller has already checked membership).
+ */
 export async function listWalkthroughs(
   auth: TokenAuth,
-  status?: WalkthroughStatus
+  status?: WalkthroughStatus,
+  space?: { teamId: string | null }
 ): Promise<WalkthroughListItem[]> {
+  const spaceFilter =
+    space === undefined
+      ? await scopeWhere(auth)
+      : space.teamId === null
+        ? { userId: auth.userId, teamId: null }
+        : { teamId: space.teamId }
   const rows = await prisma.walkthrough.findMany({
     where: {
-      ...orgScope(auth),
+      ...spaceFilter,
       finalizedAt: { not: null },
       ...(status ? { status } : {}),
     },
     orderBy: { recordedAt: 'desc' },
     take: LIST_LIMIT,
     include: {
-      org: { select: { name: true } },
+      team: { select: { name: true } },
+      user: { select: { name: true } },
       project: { select: { name: true } },
       _count: { select: { takes: true } },
     },
@@ -103,7 +138,7 @@ export async function listWalkthroughs(
   return rows.map((g) => ({
     id: g.id,
     slug: g.slug,
-    workspace: g.org.name,
+    space: spaceName(auth, g),
     title: g.title,
     origin: g.origin,
     status: g.status,
@@ -122,7 +157,7 @@ export type WalkthroughFileRef = { path: string; size: number; contentType: stri
 export type WalkthroughDetail = {
   id: string
   slug: string
-  workspace: string
+  space: string
   title: string
   origin: string | null
   status: string
@@ -146,9 +181,9 @@ export type WalkthroughDetail = {
 /**
  * One walkthrough, everything an agent needs in a single round trip: metadata, the
  * report.md the recorder wrote for it, and a presigned GET per uploaded file.
- * Null when the id is unknown, belongs to another org (unless the token is an
- * admin's), or was never finalized — callers turn all three into the same 404,
- * on purpose.
+ * Null when the id is unknown, sits in a space the token doesn't reach (unless
+ * the token is an admin's), or was never finalized — callers turn all three into
+ * the same 404, on purpose.
  */
 export async function getWalkthroughDetail(
   auth: TokenAuth,
@@ -157,28 +192,31 @@ export async function getWalkthroughDetail(
   const walkthrough = await prisma.walkthrough.findUnique({
     where: { id: walkthroughId },
     include: {
-      org: { select: { name: true } },
+      team: { select: { name: true } },
+      user: { select: { name: true } },
       takes: { orderBy: { index: 'asc' } },
       files: { where: { status: 'uploaded' }, orderBy: { path: 'asc' } },
     },
   })
-  if (!walkthrough || !inScope(auth, walkthrough.orgId) || !walkthrough.finalizedAt) return null
+  if (!walkthrough || !(await inScope(auth, walkthrough)) || !walkthrough.finalizedAt) return null
+
+  const space = spaceId({ teamId: walkthrough.teamId, userId: walkthrough.userId })
 
   // report.md is the whole point of the pull, but a walkthrough is still usable
   // without it (bad upload, hand-declared walkthrough) — degrade to null.
-  const reportMd = await getObjectText(
-    walkthroughKey(walkthrough.orgId, walkthrough.id, 'report.md')
-  ).catch((err: unknown) => {
-    log.warn(
-      `[walkthroughs] report.md unreadable for walkthrough ${walkthrough.id}: ${String(err)}`
-    )
-    return null
-  })
+  const reportMd = await getObjectText(walkthroughKey(space, walkthrough.id, 'report.md')).catch(
+    (err: unknown) => {
+      log.warn(
+        `[walkthroughs] report.md unreadable for walkthrough ${walkthrough.id}: ${String(err)}`
+      )
+      return null
+    }
+  )
 
   return {
     id: walkthrough.id,
     slug: walkthrough.slug,
-    workspace: walkthrough.org.name,
+    space: spaceName(auth, walkthrough),
     title: walkthrough.title,
     origin: walkthrough.origin,
     status: walkthrough.status,
@@ -201,7 +239,7 @@ export async function getWalkthroughDetail(
         path: f.path,
         size: f.size,
         contentType: f.contentType,
-        url: await presignGet(walkthroughKey(walkthrough.orgId, walkthrough.id, f.path)),
+        url: await presignGet(walkthroughKey(space, walkthrough.id, f.path)),
       }))
     ),
   }
@@ -210,7 +248,7 @@ export async function getWalkthroughDetail(
 /**
  * How an agent reports progress: in_review when a fix is up, resolved only
  * after a human signs off. Returns the slug it moved, or null if the walkthrough
- * isn't this org's.
+ * sits in a space this token doesn't reach.
  */
 export async function setWalkthroughStatus(
   auth: TokenAuth,
@@ -219,9 +257,9 @@ export async function setWalkthroughStatus(
 ): Promise<{ slug: string } | null> {
   const walkthrough = await prisma.walkthrough.findUnique({
     where: { id: walkthroughId },
-    select: { id: true, slug: true, orgId: true },
+    select: { id: true, slug: true, teamId: true, userId: true },
   })
-  if (!walkthrough || !inScope(auth, walkthrough.orgId)) return null
+  if (!walkthrough || !(await inScope(auth, walkthrough))) return null
   await prisma.walkthrough.update({
     where: { id: walkthrough.id },
     data: { status, resolvedAt: status === 'resolved' ? new Date() : null },

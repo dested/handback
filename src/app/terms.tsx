@@ -19,8 +19,8 @@ export function TermsPage() {
       <Section heading="2. What Handback is">
         <p>
           Handback records narrated walkthroughs of software problems — screen, voice, and the page
-          context around them — uploads them to a shared workspace, and makes them available to your
-          team and to coding agents that hold your organization's API tokens.
+          context around them — uploads them to your Handback space, and makes them available to
+          your team and to coding agents that hold your API tokens.
         </p>
       </Section>
 

@@ -15,7 +15,7 @@ export interface PageEvent {
 }
 
 /**
- * Which engine wrote the transcript that shipped. `groq` is the workspace's
+ * Which engine wrote the transcript that shipped. `groq` is the server's
  * hosted pass (fast, audio leaves the machine); `whisper` is the on-device
  * fallback — same model family, minutes instead of seconds, nothing uploaded.
  * The report cites this, so it is a fact about the recording, not a setting.
@@ -96,7 +96,7 @@ export interface RecordingMeta {
   /** Set when a real transcription pass replaced the live Web Speech lines; absent = Web Speech or none. */
   transcriber?: TranscriberId;
   /**
-   * The workspace's cleanup pass rewrote the wording — product nouns spelled
+   * The server's cleanup pass rewrote the wording — product nouns spelled
    * right, sentences punctuated, filler dropped. Timings are the transcriber's
    * either way. The report says so, because a reader deserves to know a model
    * touched the words.
@@ -149,7 +149,7 @@ export interface Session {
   closed?: boolean;
   /** Set once the gripe uploaded to Handback — the cloud viewer URL. */
   uploadedUrl?: string;
-  /** The project this gripe ships to. Absent = let the workspace route it by origin. */
+  /** The project this gripe ships to. Absent = let the server route it by origin. */
   projectId?: string;
   /** The project's name as the panel last saw it — display fallback when the list can't be fetched. */
   projectName?: string;
@@ -175,15 +175,15 @@ export type TimelineRef =
   | { kind: 'frame'; recId: string; index: number } // RecordingFrame.index — identity, survives deletes
   | { kind: 'line'; recId: string; index: number }; // array position in meta.transcript
 
-/** One workspace this recorder can upload to. A link is a server + org + the token that opens it. */
-export interface WorkspaceLink {
-  /** `${serverUrl}::${orgId}` — orgId may be '' until the workspace confirms who the token belongs to. */
+/**
+ * One Handback server this recorder can upload to. A token is the user's, not a
+ * space's — it already reaches their personal space and every team they're in —
+ * so a link is a server and the key that opens it, and nothing else.
+ */
+export interface ServerLink {
+  /** The server URL. One link per server, so the id is the server. */
   id: string;
   serverUrl: string;
-  /** '' when unknown (hand-pasted token, or migrated from the single-link days). */
-  orgId: string;
-  /** '' until known; the panel self-heals it from GET /api/ingest/context. */
-  orgName: string;
   apiToken: string;
   addedAt: number;
 }
@@ -193,15 +193,20 @@ export interface Settings {
   drawStart: boolean;
   lang: string;
   /**
-   * Transcribe in this browser instead of on the workspace. Slower by minutes
-   * and it spins the fan, but no audio ever leaves the machine — the answer for
+   * Transcribe in this browser instead of on the server. Slower by minutes and
+   * it spins the fan, but no audio ever leaves the machine — the answer for
    * anyone who can't send a recording to a third party. Off by default.
    */
   onDeviceTranscription: boolean;
-  /** Every workspace this recorder holds a key to. */
-  links: WorkspaceLink[];
+  /**
+   * Every Handback server this recorder holds a key to — one per server; the
+   * token spans the owner's personal space and teams.
+   */
+  links: ServerLink[];
   /** Which link uploads go to; '' = none. */
   activeLinkId: string;
+  /** Where uploads land on that server: '' = the token owner's personal space, else a team id. */
+  activeTeamId: string;
 }
 
 export const DEFAULT_SERVER = 'https://handback.dev';
@@ -212,13 +217,15 @@ export const DEFAULT_SETTINGS: Settings = {
   onDeviceTranscription: false,
   links: [],
   activeLinkId: '',
+  activeTeamId: '',
 };
 
-export function linkId(serverUrl: string, orgId: string): string {
-  return `${serverUrl}::${orgId}`;
+/** The id of the link for a server. Kept as a helper so call sites stay uniform. */
+export function linkId(serverUrl: string): string {
+  return serverUrl;
 }
 
-export function activeLink(settings: Settings): WorkspaceLink | null {
+export function activeLink(settings: Settings): ServerLink | null {
   return settings.links.find((l) => l.id === settings.activeLinkId) ?? settings.links[0] ?? null;
 }
 

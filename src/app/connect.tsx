@@ -12,14 +12,12 @@
 // the token list — is reference material and sits below that path, unnumbered.
 
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, Copy, Terminal } from 'lucide-react'
 import { Button } from '~/components/ui/button'
 import { Input } from '~/components/ui/input'
 import { Step, autoTokenName } from '~/components/setup-step'
 import { useCopy } from '~/components/viewer/use-copy'
-import { useActiveOrg, type OrgSummary } from '~/lib/org'
 import { useTRPC } from '~/lib/trpc'
 import { cn } from '~/lib/utils'
 
@@ -37,29 +35,6 @@ const AGENTS: Array<{ id: Agent; label: string; soon: boolean }> = [
 type Minted = { token: string; id: string; name: string }
 
 export function ConnectPage() {
-  const { org, orgsLoaded } = useActiveOrg()
-
-  if (!org) {
-    return orgsLoaded ? (
-      <div className="max-w-3xl">
-        <h1 className="font-display text-3xl font-semibold">Connect your coding agent</h1>
-        <p className="text-muted-foreground mt-3 text-sm">
-          Your workspace is still being set up —{' '}
-          <Link to="/app" className="text-primary underline underline-offset-4">
-            head to the inbox
-          </Link>
-          . Tokens belong to a workspace, so there has to be one to belong to.
-        </p>
-      </div>
-    ) : (
-      <p className="text-muted-foreground text-sm">Loading…</p>
-    )
-  }
-
-  return <Connect key={org.id} org={org} />
-}
-
-function Connect({ org }: { org: OrgSummary }) {
   const [agent, setAgent] = useState<Agent>('claude-code')
   // window is absent during SSR; render the production host, then correct it on
   // mount so a local dev session gets a command that points at localhost.
@@ -68,14 +43,13 @@ function Connect({ org }: { org: OrgSummary }) {
 
   const trpc = useTRPC()
   const connection = useQuery({
-    ...trpc.tokens.connection.queryOptions({ orgId: org.id }),
+    ...trpc.tokens.connection.queryOptions(),
     // A live check: once the page is open, someone is actively wiring an agent
     // up and wants to see it land.
     refetchInterval: 5000,
   })
 
   const [minted, setMinted] = useState<Minted | null>(null)
-  const canConnect = connection.data?.canConnect ?? true
 
   return (
     <div className="max-w-3xl space-y-12">
@@ -87,10 +61,10 @@ function Connect({ org }: { org: OrgSummary }) {
           Connect your coding agent
         </h1>
         <p className="text-muted-foreground text-base leading-relaxed">
-          Every walkthrough in {org.name} was recorded for you: someone walked through the problem
-          out loud, and the recorder wrote it up as a brief. One button below, one paste into your
-          terminal, and your agent can pull that brief — narration, keyframes, console errors and
-          all — fix the thing, and hand it back for a human to sign off.
+          Every walkthrough here was recorded for you: someone walked through the problem out loud,
+          and the recorder wrote it up as a brief. One button below, one paste into your terminal,
+          and your agent can pull that brief — narration, keyframes, console errors and all — fix
+          the thing, and hand it back for a human to sign off.
         </p>
       </header>
 
@@ -118,11 +92,8 @@ function Connect({ org }: { org: OrgSummary }) {
 
       {agent === 'codex' ? (
         <CodexSoon />
-      ) : !canConnect ? (
-        <GuestNotice />
       ) : (
         <ClaudeCodeSteps
-          org={org}
           origin={origin}
           minted={minted}
           onMinted={setMinted}
@@ -132,9 +103,9 @@ function Connect({ org }: { org: OrgSummary }) {
       )}
 
       <ToolReference />
-      {agent === 'claude-code' && canConnect && <WorkOne />}
-      {agent === 'claude-code' && canConnect && <Disconnect origin={origin} />}
-      {canConnect && <TokenManager org={org} />}
+      {agent === 'claude-code' && <WorkOne />}
+      {agent === 'claude-code' && <Disconnect origin={origin} />}
+      <TokenManager />
     </div>
   )
 }
@@ -146,14 +117,12 @@ function Connect({ org }: { org: OrgSummary }) {
  * "mint a fresh one and put it in the command".
  */
 function ClaudeCodeSteps({
-  org,
   origin,
   minted,
   onMinted,
   tokenCount,
   lastUsedAt,
 }: {
-  org: OrgSummary
   origin: string
   minted: Minted | null
   onMinted: (minted: Minted) => void
@@ -167,8 +136,8 @@ function ClaudeCodeSteps({
       <Step
         n="01"
         title="Add Handback to Claude Code"
-        blurb="One command, any directory. Nothing is installed and there's no repo to clone — Claude Code talks to this workspace over HTTP.">
-        <CommandGate org={org} command={command} minted={minted} onMinted={onMinted} />
+        blurb="One command, any directory. Nothing is installed and there's no repo to clone — Claude Code talks to Handback over HTTP.">
+        <CommandGate command={command} minted={minted} onMinted={onMinted} />
         <ul className="text-muted-foreground mt-5 space-y-2 text-sm">
           <li className="flex gap-2">
             <span className="text-cobalt">·</span>
@@ -219,12 +188,10 @@ function mcpCommand(origin: string, token: string): string {
  * thing, with the token already in it and Copy under the cursor.
  */
 function CommandGate({
-  org,
   command,
   minted,
   onMinted,
 }: {
-  org: OrgSummary
   command: string
   minted: Minted | null
   onMinted: (minted: Minted) => void
@@ -236,12 +203,8 @@ function CommandGate({
     trpc.tokens.create.mutationOptions({
       onSuccess: (result) => {
         onMinted({ token: result.token, id: result.id, name: result.name })
-        void queryClient.invalidateQueries({
-          queryKey: trpc.tokens.connection.queryKey({ orgId: org.id }),
-        })
-        void queryClient.invalidateQueries({
-          queryKey: trpc.tokens.list.queryKey({ orgId: org.id }),
-        })
+        void queryClient.invalidateQueries({ queryKey: trpc.tokens.connection.queryKey() })
+        void queryClient.invalidateQueries({ queryKey: trpc.tokens.list.queryKey() })
       },
     })
   )
@@ -254,7 +217,7 @@ function CommandGate({
           Your token is already in that command. It's shown here once and never again — only its
           hash is stored.
         </p>
-        <TokenAftercare org={org} minted={minted} />
+        <TokenAftercare minted={minted} />
       </div>
     )
   }
@@ -266,16 +229,13 @@ function CommandGate({
         size="lg"
         disabled={create.isPending}
         onClick={() =>
-          create.mutate({
-            orgId: org.id,
-            name: autoTokenName('Claude Code', navigator.userAgent, new Date()),
-          })
+          create.mutate({ name: autoTokenName('Claude Code', navigator.userAgent, new Date()) })
         }>
         {create.isPending ? 'Building your command…' : 'Create my command'}
       </Button>
       <p className="text-muted-foreground text-sm">
-        Mints an API token for {org.name} and drops it straight into the command below. Nothing to
-        name, nothing to paste twice.
+        Mints an API token for your account — it reaches your personal space and every team you're
+        in.
       </p>
       {create.isError && <p className="text-destructive text-sm">{create.error.message}</p>}
       <CommandBlock command={command} inert />
@@ -288,7 +248,7 @@ function CommandGate({
  * token (for a config file or the CLI) and a better name than the one we guessed.
  * Neither is on the path to a working agent, so neither gets to sit on it.
  */
-function TokenAftercare({ org, minted }: { org: OrgSummary; minted: Minted }) {
+function TokenAftercare({ minted }: { minted: Minted }) {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const [name, setName] = useState(minted.name)
@@ -300,9 +260,7 @@ function TokenAftercare({ org, minted }: { org: OrgSummary; minted: Minted }) {
       onSuccess: (_result, variables) => {
         setSaved(variables.name)
         setRenaming(false)
-        void queryClient.invalidateQueries({
-          queryKey: trpc.tokens.list.queryKey({ orgId: org.id }),
-        })
+        void queryClient.invalidateQueries({ queryKey: trpc.tokens.list.queryKey() })
       },
     })
   )
@@ -328,7 +286,7 @@ function TokenAftercare({ org, minted }: { org: OrgSummary; minted: Minted }) {
             e.preventDefault()
             const trimmed = name.trim()
             if (!trimmed || rename.isPending) return
-            rename.mutate({ orgId: org.id, tokenId: minted.id, name: trimmed })
+            rename.mutate({ tokenId: minted.id, name: trimmed })
           }}>
           <Input
             value={name}
@@ -384,16 +342,14 @@ function fmtDate(value: string | null) {
  * page is the one way to mint, so there's never a question about which control
  * to use.
  */
-function TokenManager({ org }: { org: OrgSummary }) {
+function TokenManager() {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
 
-  const tokensQuery = useQuery(trpc.tokens.list.queryOptions({ orgId: org.id }))
+  const tokensQuery = useQuery(trpc.tokens.list.queryOptions())
   const invalidate = () => {
-    void queryClient.invalidateQueries({ queryKey: trpc.tokens.list.queryKey({ orgId: org.id }) })
-    void queryClient.invalidateQueries({
-      queryKey: trpc.tokens.connection.queryKey({ orgId: org.id }),
-    })
+    void queryClient.invalidateQueries({ queryKey: trpc.tokens.list.queryKey() })
+    void queryClient.invalidateQueries({ queryKey: trpc.tokens.connection.queryKey() })
   }
   const revoke = useMutation(trpc.tokens.revoke.mutationOptions({ onSuccess: invalidate }))
 
@@ -401,9 +357,9 @@ function TokenManager({ org }: { org: OrgSummary }) {
     <section className="border-border border-t pt-6">
       <h2 className="font-display text-xl font-semibold">Your API tokens</h2>
       <p className="text-muted-foreground mt-2 max-w-2xl text-sm leading-relaxed">
-        These authenticate the recorder, the CLI, and the MCP server. They're yours alone and scoped
-        to {org.name}; revoking one disconnects whatever holds it. Old ones keep working until you
-        revoke them — a new one never displaces them.
+        These authenticate the recorder, the CLI, and the MCP server. They're yours alone. A token
+        reads your personal space and every team you belong to; revoking one disconnects whatever
+        holds it. Old ones keep working until you revoke them — a new one never displaces them.
       </p>
 
       <div className="mt-5 space-y-3">
@@ -444,7 +400,7 @@ function TokenManager({ org }: { org: OrgSummary }) {
                       onClick={() => {
                         if (!window.confirm(`Revoke "${t.name}"? Anything using it stops working.`))
                           return
-                        revoke.mutate({ orgId: org.id, tokenId: t.id })
+                        revoke.mutate({ tokenId: t.id })
                       }}>
                       Revoke
                     </Button>
@@ -520,7 +476,8 @@ function Disconnect({ origin }: { origin: string }) {
           <p className="text-muted-foreground mt-3 text-sm">
             Tokens can't be un-revoked and the raw value is never recoverable — if you revoke by
             mistake, hit <span className="font-medium">Create my command</span> again and run the
-            new one. Removing a member from the workspace revokes their tokens automatically.
+            new one. Leaving a team removes that team from what your tokens can see — revoke a token
+            here to cut it off entirely.
           </p>
         </div>
       </div>
@@ -651,7 +608,7 @@ function ConnectionStatus({
       <div className="border-approve/40 bg-approve-wash mt-4 flex items-center gap-3 rounded-md border p-4">
         <span className="bg-approve size-2 shrink-0 rounded-full" />
         <p className="text-approve text-sm font-medium">
-          An agent reached this workspace {relativeTime(lastUsedAt)}. You're connected.
+          An agent reached Handback {relativeTime(lastUsedAt)}. You're connected.
         </p>
       </div>
     )
@@ -697,22 +654,10 @@ function CodexSoon() {
   )
 }
 
-function GuestNotice() {
-  return (
-    <div className="border-border bg-card rounded-xl border p-8">
-      <h2 className="font-display text-2xl font-semibold">You're a guest on this workspace</h2>
-      <p className="text-muted-foreground mt-3 text-sm leading-relaxed">
-        API tokens read every walkthrough in a workspace, so only full members can create them. Ask
-        an owner for access to the whole workspace, or have them run the agent side themselves.
-      </p>
-    </div>
-  )
-}
-
 const TOOLS: Array<{ name: string; does: string }> = [
   {
     name: 'list_walkthroughs',
-    does: "The workspace's walkthroughs, newest first. Filter by status.",
+    does: 'Your walkthroughs across personal and teams, newest first. Filter by status.',
   },
   {
     name: 'get_walkthrough',
@@ -729,7 +674,8 @@ function ToolReference() {
     <section className="border-border border-t pt-6">
       <h2 className="font-display text-xl font-semibold">What your agent gets</h2>
       <p className="text-muted-foreground mt-2 text-sm">
-        Three tools. They read and write only the workspace its token belongs to.
+        Three tools. They read and write every space your token's owner belongs to — each
+        walkthrough carries a <code className="font-mono text-xs">space</code> field.
       </p>
       <dl className="mt-5 space-y-3">
         {TOOLS.map((t) => (
