@@ -2,6 +2,12 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-08-02 — cross-account cache leak on re-login
+Asked: "when i log out and log back in it keeps the header... it had the other user's teams".
+Done: `clearIdentity()` in space.tsx (queryClient.clear + drop handback.activeSpace), called at
+all three identity boundaries — sign-out, sign-in, sign-up. e2e 4/4.
+Touched: src/lib/space.tsx, src/app/{layout,sign-in,sign-up}.tsx
+
 ## 2026-08-02 — workspaces removed: Teams + your one Personal space
 Asked: "no more workspaces at all... just teams and your personal", per-seat teams paid by a
 transferable owner, migration with zero data loss, change everywhere incl. extension.
