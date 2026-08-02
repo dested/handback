@@ -2,6 +2,22 @@
 
 > ADR-lite: what was decided, why, what was rejected. Append-only.
 
+## 2026-08-02 — Workspaces don't exist: Teams + one implicit Personal space
+**Why:** the workspace abstraction "fucked me time and time again" (owner) — a hidden personal
+org behind every account leaked into switchers, token scoping, invites, and the extension's
+link juggling. Personal is now the *absence* of a team (`teamId null, userId = owner` on
+Walkthrough/Project); Teams are the only explicit, paid thing (`ownerId` transferable,
+`seatLimit` enforced on invites; Stripe later plugs into those fields). Tokens are user-scoped:
+one `hb_` token reaches personal + every team, and the recorder picks the destination per
+upload. Guests (Membership.scope/ProjectAccess) were deleted outright — the one prod guest was
+promoted to member.
+**Rejected:** keeping a hidden personal Team row (that IS the old model); per-team tokens (the
+extension's per-workspace link juggling was the pain); building Stripe now (modeled instead);
+keeping guests (biggest single simplification available).
+**Consequences accepted:** slug uniqueness per space is code-enforced (Prisma can't
+partial-index the nullable ownership pair); recorder ≤1.5.x declares carry no teamId, so their
+uploads land in the uploader's personal space until the install updates.
+
 ## 2026-08-01 — Pointing outside Chrome is a PiP window (the puck), not a native helper
 **Why:** "draw all over the screen, not just the Chrome window" (gripe `3f491ef7`, 2:21 —
 "really, really important"), aimed at people narrating over Excel and other native apps. MV3

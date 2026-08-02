@@ -1,7 +1,7 @@
 # Teams restructure — workspaces are gone
 
 - **Date:** 2026-08-01
-- **Status:** active
+- **Status:** done
 - **Type:** plan
 - **What:** Remove the workspace/Org concept entirely. A user has one implicit Personal space + zero or more Teams. Owner-approved decisions: true DB restructure (personal = `teamId: null`, owned by user), user-scoped tokens, seats/ownership modeled now (Stripe later), guests dropped.
 

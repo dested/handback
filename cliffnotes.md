@@ -13,9 +13,13 @@
 > missing (no password reset, unbounded presigned PUTs, no Web Store listing) and the Chrome Web
 > Store submission notes.
 
+> **Model note (2026-08-01): workspaces no longer exist.** A user has one implicit **Personal
+> space** (rows with `teamId: null, userId: <owner>`) and zero or more **Teams** (`team` table,
+> `ownerId` + `seatLimit`). The word "workspace" is banned from code and copy.
+
 ## What this is
 
-The cloud half of the recording workflow: a workspace where recorded **walkthroughs** — narrated
+The cloud half of the recording workflow: the place where recorded **walkthroughs** — narrated
 screen recordings (a bug, review notes, a change request) produced by the bundled recorder
 extension — are uploaded, reviewed by humans, routed to projects, and pulled by coding agents. A
 walkthrough folder (report.md + MANIFEST.txt +
@@ -35,8 +39,9 @@ the Gripe extension.
 - **DB:** local Postgres 18 service; `bun run db:push` after schema edits (+`db:generate`)
 - **E2E:** `E2E_DATABASE_URL=postgres://postgres:<pw>@localhost:5432/handback_test bun run test:e2e`
   (isolated DB + port 3100; screenshots committed; `test:e2e:update` to re-baseline)
-- **Seed a dev login:** `bun cli/dev-bootstrap.ts [email] [password] [org]` → prints an `hb_` token
+- **Seed a dev login:** `bun cli/dev-bootstrap.ts [email] [password] [team]` → prints an `hb_` token
 - **Push a walkthrough:** `bun cli/push.ts <folder> --server http://localhost:3995 --token hb_…`
+  (`--team <teamId>` targets a team; default is the token owner's personal space)
 - **Publish a recorder build:** `bun run publish:extension` (build → zip → upload) →
   `releases/recorder/`; `/recorder` serves the newest within 60s. Steps also run standalone:
   `build:extension` / `zip:extension` / `bun cli/publish-recorder.ts`
@@ -70,23 +75,24 @@ server/
                         GROQ_API_KEY / ANTHROPIC_API_KEY / RESEND_API_KEY + EMAIL_FROM (all
                         optional — each unset one disables its feature, nothing crashes),
                         ADMIN_EMAILS (comma-separated bootstrap platform admins)
-  auth.ts               better-auth: email+password, autoSignIn, reset/verify email, rate limits;
-                        databaseHooks.user.create → createPersonalOrg (auto personal workspace)
-  orgs.ts               createPersonalOrg — idempotent "<First>'s workspace" (personal=true);
-                        called by the sign-up hook AND orgs.ensurePersonal
+  auth.ts               better-auth: email+password, autoSignIn, reset/verify email, rate limits.
+                        No sign-up hook — a personal space needs no provisioning, it just exists
   trpc.ts               context (session from headers) + public/protectedProcedure
-  membership.ts         requireMembership(user, org, atLeast) → Access{role, projectIds} + slugify;
-                        requireViewAccess = the read-only platform-admin bypass
+  access.ts             requireTeamRole / requireSpaceAccess(user, {teamId,userId}, atLeast) /
+                        requireViewAccess (read-only platform-admin bypass) / memberTeamIds /
+                        spaceId (teamId ?? userId — the S3 path segment) / slugify
   features.ts           entitlements: isPlatformAdmin (User.isAdmin OR ADMIN_EMAILS env),
-                        orgHasFeature('team') checked at the org's OWNER, requireAdmin
-  router.ts             THE tRPC API: orgs (incl. entitlements/ensurePersonal), invites, tokens,
-                        projects, walkthroughs
+                        teamHasFeature('team') checked at Team.owner, requireAdmin
+  router.ts             THE tRPC API: teams (incl. get/transferOwnership), invites (seat-capped),
+                        tokens (user-scoped, no team input), projects, walkthroughs — space inputs
+                        are `teamId: string | null` (null = the caller's personal space)
   ingest.ts             Token-authed REST (Bearer hb_…): two-phase upload, size caps + per-org
                         quota, /transcribe and /polish; read side delegates to walkthroughs-api.
                         Every route registered under /walkthroughs* AND legacy /gripes* aliases
   walkthroughs-api.ts   THE agent-facing surface: token auth + list/get/setStatus. Shared by
-                        ingest.ts AND both MCP servers so they can't drift. A platform admin's
-                        token spans every workspace (`TokenAuth.isAdmin` → `orgScope`/`inScope`)
+                        ingest.ts AND both MCP servers so they can't drift. A token reaches its
+                        owner's personal space + every team they're in; a platform admin's token
+                        reaches everything. Items carry `space` (team name or "Personal")
   mcp.ts                Hosted MCP at /mcp — StreamableHTTP, stateless, hb_ bearer auth
   mcp-format.ts         Pure formatter for a walkthrough brief; shared with cli/mcp.ts
   storage.ts            S3: presignPut/Get, getObjectText, deletePrefix, key layout, isSafePath
@@ -96,26 +102,29 @@ server/
   ratelimit.ts          in-memory fixed-window limiter (one ECS task, so one process sees all)
   prisma.ts / logger.ts PrismaClient singleton · ANSI request logger
 cli/
-  push.ts               `handback push` — walks a walkthrough folder, declare → PUT xN → finalize
+  push.ts               `handback push` — declare → PUT xN → finalize; `--team <id>` or personal
   mcp.ts                stdio MCP server — the LOCAL fallback; prod uses server/mcp.ts at /mcp
-  dev-bootstrap.ts      idempotent dev seed: user (admin + team) + org + fresh API token (prints it)
+  dev-bootstrap.ts      idempotent dev seed: user (admin + team feature) + owned Team + token
+  migrate-teams.ts      the one-shot workspace→teams data migration (raw SQL + S3 re-prefixing;
+                        idempotent/resumable). ALREADY RUN on prod 2026-08-02 — keep for reference
   make-admin.ts         promote an account to platform admin by email (dev; prod uses ADMIN_EMAILS)
-prisma/schema.prisma    better-auth models + Org(personal)/Membership/Invite/Project/Walkthrough/
-                        Take/WalkthroughFile/ApiToken
+prisma/schema.prisma    better-auth models + Team(ownerId, seatLimit)/Membership/Invite/Project/
+                        Walkthrough/Take/WalkthroughFile/ApiToken — Project/Walkthrough carry the
+                        ownership pair `teamId | userId` (exactly one set; null teamId = personal)
 src/
   app/
     routes.tsx          All routes + loaders (appLoader guards session, prefetches orgs.mine)
-    layout.tsx          Shell: marketing chrome vs app chrome. WorkspaceSwitcher dropdown (all
-                        orgs, Personal tag, "New team…" modal gated on orgs.entitlements); the
-                        Team nav hides on a personal workspace
+    layout.tsx          Shell: marketing chrome vs app chrome. SpaceSwitcher dropdown (Personal
+                        first, then teams, "New team…" modal gated on teams.entitlements); the
+                        Team nav renders only on a team space
     home.tsx            Landing page (assembles src/components/landing/*)
     sign-in/up.tsx      Auth cards (better-auth client flows)
-    app.tsx             InboxPage: filters + walkthrough list; org-less accounts self-repair via
-                        orgs.ensurePersonal (no naming screen)
+    app.tsx             InboxPage: filters + walkthrough list. No provisioning state — Personal
+                        always exists, the space is never null
     walkthrough.tsx     WalkthroughPage: the viewer (assembles src/components/viewer/*)
     projects.tsx        Projects list + create (origin-hints field removed from the UI)
-    team.tsx            Members / Invites for team orgs; personal/member/guest cards otherwise.
-                        Tokens moved to /connect
+    team.tsx            Members / Invites for team spaces (seat line, owner-only role select +
+                        ownership transfer); a lone personal card otherwise. No guests
     connect.tsx         /connect — THE agent onboarding, one button + one paste: "Create my
                         command" mints an auto-named token and renders the real `claude mcp add`
                         with Copy in place (before the click the command is an inert dimmed
@@ -148,7 +157,8 @@ src/
                         walkthrough-header, walkthrough-controls, status-control, types, format,
                         use-copy
   lib/
-    org.tsx             OrgProvider/useActiveOrg — active org id in localStorage
+    space.tsx           SpaceProvider/useActiveSpace — Personal + teams; active space in
+                        localStorage `handback.activeSpace` ('personal' | teamId); never null
     trpc.tsx / auth-client.ts / utils.ts
   styles/app.css        ALL design tokens (light only) + .rule/.stamp/.ink-underline utilities
 e2e/                    smoke.spec.ts + committed screenshots (landing, sign-up, app flow)
@@ -184,9 +194,9 @@ extension/              Handback Recorder — the Chrome MV3 extension (own npm 
 | `/join/:inviteId` | Invite accept | `src/app/join.tsx` |
 | `/forgot-password` · `/reset-password` | Password recovery (better-auth emails the link) | `src/app/{forgot,reset}-password.tsx` |
 | `/privacy` · `/terms` | Legal pages (linked from the marketing footer) | `src/app/{privacy,terms}.tsx` |
-| `/app` | Inbox (walkthrough list; auto-provisions a personal workspace) | `src/app/app.tsx` |
+| `/app` | Inbox (active space's walkthrough list) | `src/app/app.tsx` |
 | `/walkthroughs/:walkthroughId` | The viewer (`/gripes/:id` 302s here) | `src/app/walkthrough.tsx` |
-| `/projects` · `/team` | Projects · Members/Invites (teams only) | `src/app/{projects,team}.tsx` |
+| `/projects` · `/team` | Projects (any space) · Members/Invites/seats (team spaces) | `src/app/{projects,team}.tsx` |
 | `/connect` | Connect a coding agent — one button mints a token and fills in `claude mcp add`; tokens/disconnect are reference below | `src/app/connect.tsx` |
 | `/recorder` | Install + one-click-link the extension (detects install, mints token, handshake) | `src/app/recorder.tsx` |
 | `/admin` | Platform admin — stats, users, entitlements, per-user walkthrough drill-down (admins only; nav link hidden otherwise) | `src/app/admin.tsx` |
@@ -201,10 +211,10 @@ extension/              Handback Recorder — the Chrome MV3 extension (own npm 
 
 | Endpoint | Does |
 | --- | --- |
-| `GET /context` | Who the token speaks for: `{ org: {id,name,slug}, projects: [{id,name,slug,originHints}] }`. The recorder panel's workspace name + project picker |
-| `POST /walkthroughs` | Declare: metadata + file list → walkthrough/take/file rows + presigned PUT per file. Optional `projectId` pins the project (validated against the token's org *before* the replace below; else originHints route it). Re-declaring an existing (org, slug) deletes the old walkthrough + S3 prefix first |
+| `GET /context` | Who the token speaks for: `{ user, personal: {projects}, teams: [{id,name,slug,projects}] }`. Feeds the recorder's destination picker |
+| `POST /walkthroughs` | Declare: metadata + file list → rows + presigned PUT per file. Optional `teamId` targets a team (member-validated; absent = personal), optional `projectId` pins a project in that space (else originHints route it). Re-declaring an existing (space, slug) deletes the old walkthrough + S3 prefix first |
 | `POST /walkthroughs/:id/finalize` | Marks files uploaded + sets `finalizedAt` (list only shows finalized) |
-| `GET /walkthroughs` | List for agents (MCP `list_walkthroughs`). Every workspace's, when the token's owner is a platform admin |
+| `GET /walkthroughs` | List for agents (MCP `list_walkthroughs`): everything the token reaches, `?team=personal\|<id>` filters. Platform-wide when the owner is a platform admin |
 | `GET /walkthroughs/:id` | Detail + `reportMd` text + presigned GET for every file (MCP `get_walkthrough`) |
 | `POST /walkthroughs/:id/status` | open / in_review / resolved (MCP `set_walkthrough_status`) |
 
@@ -221,18 +231,18 @@ doesn't match.
 
 ## Data model (Postgres via Prisma)
 
-better-auth's User/Session/Account/Verification, plus: **Org** (**personal** flag — auto-created
-"<First>'s workspace" at sign-up, takes no invites; personal:false = a team, created from the
-switcher behind the `team` entitlement) ← Membership(role owner/admin/member, unique org+user;
-**scope** org|projects — "projects" = a **guest** who sees only granted projects and is clamped to
-member) ← ProjectAccess(membership+project grant, unique pair) · Invite (id IS the join-link
-token, 7-day expiry; optional **projectId** = guest invite, role forced to member; an org-wide
-invite upgrades an existing guest; refused on personal orgs) · Project (originHints[] auto-routes
-uploads by recorded origin — column kept, UI field removed) · **Walkthrough** (unique org+slug;
-slug = the recorder's folder name; status open/in_review/resolved; finalizedAt gates visibility;
-**errorCount**/**droppedCount** — see the events gotcha) ← Take (rec-NN) + WalkthroughFile (path
-unique per walkthrough; S3 key = `orgs/<orgId>/gripes/<walkthroughId>/<path>` — prefix frozen
-pre-rename) · ApiToken (sha256 hash only; `hb_` prefix; lastUsedAt stamped on ingest auth).
+better-auth's User/Session/Account/Verification, plus: **Team** (`ownerId` — authoritative,
+transferable; `seatLimit` default 5, enforced on invites/accept; created from the switcher behind
+the `team` entitlement; the owner also holds a Membership row role `admin`, effective role is
+computed) ← Membership (role admin/member, unique team+user — no scope, no guests) · Invite (id
+IS the join-link token, 7-day expiry, team-only) · Project and **Walkthrough** both carry the
+**ownership pair `teamId | userId`** — exactly one set, `userId` = someone's personal space; slug
+uniqueness per space is **code-enforced** (findFirst + suffix loop; no DB unique — Prisma can't
+partial-index a nullable pair). Walkthrough keeps slug/status/finalizedAt/errorCount/droppedCount
+semantics ← Take (rec-NN) + WalkthroughFile (path unique per walkthrough; S3 key =
+`orgs/<spaceId>/gripes/<walkthroughId>/<path>` where spaceId = teamId ?? userId — both segments
+frozen) · ApiToken (**user-scoped**, no team column; sha256 hash only; `hb_` prefix; lastUsedAt
+stamped on ingest auth).
 
 ## Storage (S3)
 
@@ -277,17 +287,11 @@ service.
 | build / start | `bun run build` / `bun run start` |
 | predeploy | `bunx prisma db push` (no `--accept-data-loss`, on purpose) |
 
-> **⚠️ PROD MIGRATION PENDING (2026-08-01) — the walkthrough rename is NOT on prod yet.** Local
-> `handback` + `handback_test` are renamed; prod still has `gripe`/`gripe_file`. Ship it as one
-> back-to-back move (walkthrough reads 500 in the gap, so don't linger): (1) on the prod DB run
-> `ALTER TABLE "gripe" RENAME TO "walkthrough"; ALTER TABLE "gripe_file" RENAME TO
-> "walkthrough_file"; ALTER TABLE "take" RENAME COLUMN "gripe_id" TO "walkthrough_id";
-> ALTER TABLE "walkthrough_file" RENAME COLUMN "gripe_id" TO "walkthrough_id";` plus the backfill
-> `UPDATE org SET personal = true WHERE id IN (SELECT org_id FROM membership GROUP BY org_id
-> HAVING count(*) = 1);` (the `personal` column itself arrives via predeploy `db push`); (2) push
-> `main`. The 2026-07-31 `errorCount` half-migration is resolved — that `main` was pushed.
-> Note: prod Postgres currently answers on `52.24.94.83:5432` (Sal opened it; dev `.env` briefly
-> pointed at it and was flipped back to local on purpose — never run dev against prod).
+> **PROD MIGRATED (2026-08-02).** `cli/migrate-teams.ts` + `db push` ran against prod (org→team,
+> tokens de-org'd, guest promoted; audit after: 16 walkthroughs / 1381 files / 1.45 GB, zero
+> orphans). It ran *before* the code deploy — dev `.env` was pointing at prod again — so prod
+> 500'd for signed-in users until commit `3207be1` rolled. **The `.env` prod flip is a standing
+> hazard: it has now bitten twice. Check `DATABASE_URL` before ANY db/migration command.**
 
 **Reaching the prod DB** (there is no public port — it's `172.17.0.1:5432` on the Docker bridge):
 the EC2 box is SSM-managed, so `aws ssm send-command --instance-ids i-082378e80e708f4f2
@@ -313,11 +317,12 @@ reaches the container on a plain push.
   old-name aliases — old report.md files that say `get_gripe` predate the rename. The extension's
   internal identifiers are still `Gripe*` on purpose (only its emitted strings changed); rename
   them in a quiet moment, not while panel work is in flight.
-- **Personal workspaces are a server-enforced shape, not a UI style.** `invites.create` refuses
-  `org.personal`; `orgs.create` requires the `team` entitlement (platform admins pass); sign-up
-  auto-creates via `databaseHooks.user.create` (failure is swallowed — `orgs.ensurePersonal` is
-  the repair path the inbox fires for org-less accounts). Existing single-member orgs were
-  backfilled `personal = true` locally; the same UPDATE ships with the prod migration above.
+- **A personal space is the absence of a team, not a row.** `teamId: null` in a tRPC input means
+  "the caller's own personal space" and nothing else — it cannot be spoofed (server/router.ts
+  `toSpace`). Nothing provisions it, nothing can fail to provision it, and it takes no invites by
+  construction. `teams.create` still requires the `team` entitlement (platform admins pass).
+  Exactly one of a Walkthrough/Project's `teamId`/`userId` is set — a code invariant, not a DB
+  constraint; keep it true in every new write path.
 - **Dev FOUC fix lives in server.ts, not index.html.** Dev injects
   `<link rel="stylesheet" href="/src/styles/app.css?direct">` after `transformIndexHtml`
   (`?direct` = compiled CSS, not a JS module). Prod builds emit a hashed CSS link and don't need
@@ -382,8 +387,8 @@ reaches the container on a plain push.
   JSON-RPC client gets a page of HTML.
 - **The inbox's connect banner is gated on `tokens.connection.lastUsedAt`**, which
   `authenticateToken` stamps on every ingest/MCP call. So "has an agent connected?" means "has a
-  token ever completed a request", not "does a token exist". Guests get `canConnect: false` and
-  never see it.
+  token ever completed a request", not "does a token exist". `tokens.connection` takes no input
+  now — tokens are account-wide.
 - **An invite must survive the auth round trip.** `/join/:id` is the only page a signed-out stranger
   lands on; its auth links carry `?invite=<id>`, `/sign-up` and `/sign-in` return to
   `/join/:id?accept=1`, and `redirectIfSignedIn` (routes.tsx) honours the same param. Drop any one
@@ -411,41 +416,39 @@ reaches the container on a plain push.
   the old ones sit until they're revoked. Don't reintroduce a token-inventory prompt on the primary
   path — that phrasing is what got the flow rewritten on 2026-08-01. `tokens.create` returns
   `{ token, id, name }` so the caller can offer `tokens.rename` without a `list` round trip.
-- **The roster is admin-only** (2026-07-31): `orgs.members` requires `admin` — members and guests
-  get FORBIDDEN, and the Team page doesn't render Members/Invites tabs for them (they see only
-  their own API tokens). Don't add a procedure that returns member names/emails without that gate;
-  the only sanctioned leak is a gripe's `uploadedByName`.
-- **`gripes.moveToOrg` is copy → flip → delete, in that order.** Both ends require whole-workspace
-  membership (a guest must never walk a project's gripe out). Objects are copied server-side
-  (`copyObject`, S3 CopyObject — bytes never cross the container), then the row flips
-  (orgId + `projectId: null` + slug suffixed if taken), then the old prefix is deleted
-  best-effort. A crash mid-copy loses nothing; after the flip, worst case is orphaned source
-  objects. Destination quota reuses ingest's exported `ORG_QUOTA_BYTES`/`ORG_MAX_GRIPES`.
-- **A platform admin's `hb_` token is a platform-wide token** (2026-07-31). `authenticateToken`
-  resolves `isAdmin` off the token's owner, and `gripes-api.ts` drops the org filter for it:
-  `list_gripes` returns **every workspace's** gripes, `get_gripe` and `set_gripe_status` accept any
-  id anywhere. Unlike the web bypass this *does* include the write (deliberate — an agent that can
-  pull a gripe has to be able to mark it in_review). Every list item and brief now carries
-  **`workspace`**; the MCP tool descriptions gain an admin-scope sentence so the agent knows to
-  read it. **Uploads are never cross-org** — declare/finalize still pin `auth.orgId`, so an admin's
-  recorder can't drop a gripe into someone else's workspace. The practical trap: your own everyday
-  token is an admin token, so your agent's queue is the whole platform.
+- **The roster is admin-only** (2026-07-31): `teams.members` requires `admin` — plain members get
+  FORBIDDEN and the Team page doesn't render the tabs for them. Don't add a procedure that returns
+  member names/emails without that gate; the only sanctioned leak is a walkthrough's
+  `uploadedByName`. Ownership is `Team.ownerId` (never a stored role) — effective role is computed,
+  and `teams.transferOwnership` is the only way it moves.
+- **`walkthroughs.move` is copy → flip → delete, in that order.** Source and destination are
+  spaces (Personal included); the caller must hold both. Objects are copied server-side
+  (`copyObject` — bytes never cross the container), then the row flips (ownership pair +
+  `projectId: null` + slug suffixed if taken), then the old prefix is deleted best-effort. A crash
+  mid-copy loses nothing; after the flip, worst case is orphaned source objects. Destination quota
+  reuses ingest's exported `SPACE_QUOTA_BYTES`/`SPACE_MAX_WALKTHROUGHS` — quota is per space.
+- **Every `hb_` token is account-wide; a platform admin's is platform-wide** (2026-08-01).
+  `TokenAuth` has no org: a token reaches its owner's personal space + every team they belong to
+  (`scopeWhere`/`inScope` in walkthroughs-api.ts), and `isAdmin` drops the filter entirely —
+  including status writes (deliberate). Every list item and brief carries **`space`** (team name,
+  'Personal', or '<name> (personal)' on the admin path). **Uploads are never cross-space without
+  membership** — declare validates `teamId` against the uploader's memberships, admins included.
+  The practical trap stands: your own everyday token is an admin token, so your agent's queue is
+  the whole platform.
 - **Platform admins bypass membership on reads only** (2026-07-31): `requireViewAccess`
-  (server/membership.ts) falls back to a synthetic owner Access for a platform admin who isn't a
-  member, and is wired into exactly `gripes.get` and `gripes.fileUrl` — so /admin's per-user gripe
-  list can open the viewer (with presigned S3 URLs) for any workspace. Every mutation still goes
-  through `requireMembership`. `gripes.get` returns **`viewerIsMember: false`** on that path and
-  `GripeControls` collapses to a read-only chip; don't render a control that ignores it, and don't
-  move the bypass into `requireMembership` — that would hand admins delete on every workspace.
-- **Guest scoping is enforced in `requireMembership`** (server/membership.ts): it returns
-  `Access { role, projectIds }` (`null` = whole workspace). Any NEW tRPC procedure returning
-  org data must respect `access.projectIds` (`canSeeGripe` / `requireOrgScope`) or guests leak.
-  `hb_` tokens are org-wide, so guests can't mint them, and both `orgs.removeMember` and a
-  restricting `orgs.setAccess` revoke the target's tokens.
-- **"team" is a paid entitlement checked at the org's owner** (server/features.ts): the only gate
-  is `invites.create`; the UI reads `orgs.mine → teamEnabled`. Platform admins (`User.isAdmin` or
-  `ADMIN_EMAILS` env, comma-separated) implicitly hold every feature — set `ADMIN_EMAILS` in SSM
-  to bootstrap prod admin, then grant from `/admin`.
+  (server/access.ts) falls back to a synthetic owner role for a platform admin with no access,
+  wired into exactly `walkthroughs.get` and `walkthroughs.fileUrl` — so /admin's drill-down can
+  open the viewer anywhere. Every mutation still goes through `requireSpaceAccess`. `get` returns
+  **`viewerIsMember: false`** on that path and the controls collapse to a read-only chip; don't
+  render a control that ignores it, and don't move the bypass into `requireSpaceAccess`.
+- **Guests no longer exist** (2026-08-01, deleted with the restructure): no Membership.scope, no
+  ProjectAccess, no project-scoped invites, no `canSeeWalkthrough` filtering. Don't reintroduce a
+  partial-visibility member without reopening the decision in decisions.md.
+- **"team" is a paid entitlement checked at Team.owner** (server/features.ts): gates
+  `teams.create` and `invites.create`; seats (`Team.seatLimit`, members + pending invites) gate
+  both `invites.create` and `invites.accept`. Billing is modeled, not charged — Stripe later
+  plugs into `ownerId`/`seatLimit` without another migration. Platform admins implicitly hold
+  every feature — `ADMIN_EMAILS` in SSM bootstraps prod admin, then grant from `/admin`.
 - **Prisma 7**: no `--skip-generate` flag; `prisma.config.ts` hand-loads `.env` — keep that block.
 - **The e2e suite boots its own server** on :3100 against `handback_test` with dummy S3 creds — any
   test that actually touches S3 will fail loudly (none do today).
@@ -519,15 +522,15 @@ reaches the container on a plain push.
   of lines; `t`/`d`/`tl` never cross the boundary. Any change there has to keep that true, or the
   timeline, the frames, and the report stop agreeing. The report says when a transcript was
   polished (`report.ts` → `engineName`) because a reader is deciding how far to trust the words.
-- **The extension holds one link per workspace, not one token** (since 1.2.0):
-  `Settings.links: WorkspaceLink[]` — `{ id: \`${serverUrl}::${orgId}\`, serverUrl, orgId, orgName,
-  apiToken }` — with `activeLinkId` choosing where uploads go; the panel's destination row
-  ("to workspace · project") sits above Send. `/recorder`'s `handback:link` carries `orgId` and
-  *adds* a link (absorbing the same server's anonymous `orgId:''` slot); the 1.1.x flat
-  serverUrl/apiToken/orgName fields migrate into one link on first `getSettings()` read — don't
-  remove that fold until no 1.1.x installs remain. A hand-pasted token starts as `orgId:''` and
-  self-heals from `GET /api/ingest/context`. Uploads still run the same two-phase `/api/ingest`
-  flow as the CLI, now with the session's `projectId` when one was picked and confirmed.
+- **The extension holds one link per SERVER** (since 1.6.0): `Settings.links: ServerLink[]` —
+  `{ id: serverUrl, serverUrl, apiToken }` — plus `activeLinkId` + **`activeTeamId`** ('' =
+  personal) choosing where uploads go; the destination row is "to <space> · <project>" fed by the
+  new `/context`. `handback:link` carries only `apiToken` (origin from `sender.origin`, never the
+  payload); `handback:ping` answers `linkedOrigins`. `getSettings()` folds BOTH legacy shapes —
+  1.1.x flat fields and 1.2.x per-workspace rows (deduped per server, activeLinkId's row wins) —
+  don't remove either fold until no old installs remain. **Recorder ≤1.5.x uploads land in the
+  uploader's PERSONAL space** (their declares carry no teamId): teammates won't see them until the
+  install updates — `walkthroughs.move` is the fix-up, /recorder's version nag is the cure.
 - **The extension's ID is pinned** by the `key` in `manifest.json` →
   `gmggnebbenlmpakojgocnjfcnpmifdci`, identical unpacked and (on first upload) in the Web Store.
   `/recorder` deep-links through it: page → `chrome.runtime.sendMessage(ID, handback:ping|link)`,
@@ -629,6 +632,14 @@ reaches the container on a plain push.
   branch**, a **two-row walkthrough header** (crumb+meta, then title+`record a take`), an inline
   right-aligned **zoom** control, and a **project picker that never hides** — `no project` /
   `projects unavailable · retry`, with a way through to `/projects`.
+- **Done (2026-08-02)** — **workspaces removed: Teams + one implicit Personal space**
+  (`plans/2026-08-01-teams-restructure.md`, commit `3207be1`). Org→Team (ownerId transferable via
+  `teams.transferOwnership`, seatLimit enforced on invites), personal = `teamId null` owned by
+  userId, guests/ProjectAccess deleted, tokens user-scoped, ingest/MCP re-scoped (`space` field,
+  `?team=` filter, declare `teamId`), client Space context + switcher, extension 1.6.0 (one link
+  per server, Personal/team destination picker). `cli/migrate-teams.ts` ran against prod (before
+  the deploy, by accident — dev `.env` pointed at prod; ~15 min of signed-in 500s until the
+  deploy rolled; zero data lost, audit in the Deploy section). e2e 4/4 re-verified.
 - **Next** — **deploy, then re-test the loop**: `/mcp` and `/connect` only exist locally until the
   next push to `main`, so the command `/connect` prints for handback.dev 404s until then. Sal's
   Drydock/DNS checklist in the rename plan (zone, project, S3 via
@@ -652,3 +663,5 @@ reaches the container on a plain push.
   data-use disclosure table, reviewer notes with test-account steps, and the screenshot shot list.
 - `plans/2026-07-30-handback-rename.md` — **active**. The Inloop → Handback rename: settled
   decisions table + Sal's Drydock/DNS checklist (zone, S3, project recreate, SSM, cleanup).
+- `plans/2026-08-01-teams-restructure.md` — **done**. Workspaces removed: the target model,
+  pinned contracts, migration steps, and wave plan for the Teams + Personal restructure.

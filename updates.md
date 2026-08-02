@@ -2,6 +2,17 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-08-02 — workspaces removed: Teams + your one Personal space
+Asked: "no more workspaces at all... just teams and your personal", per-seat teams paid by a
+transferable owner, migration with zero data loss, change everywhere incl. extension.
+Done: Org→Team (ownerId/seatLimit/transfer), personal = teamId null owned by user, guests
+deleted, tokens user-scoped, ingest/MCP re-scoped (`space`, `?team=`, declare teamId), Space
+context + switcher client-wide, extension 1.6.0 (one link per server, destination picker),
+`cli/migrate-teams.ts`. Migration hit PROD early (.env pointed at prod) — ~15 min of 500s until
+the deploy rolled; audit confirmed zero loss. e2e 4/4. Per plans/2026-08-01-teams-restructure.md.
+Touched: prisma/schema.prisma, server/* (access.ts new; membership/orgs deleted), src/lib/space.tsx,
+src/app/*, extension/src/*, cli/*, e2e/*
+
 ## 2026-08-01 — the walkthrough panel, rebuilt ("i hate this ui. god i hate it so much")
 Asked: the recorder panel's walkthrough surface — four bands of chrome, a timeline nobody could
 use, no way to drop a take, no way to pick a project.
