@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useRevalidator, useSearchParams } from 'react-router-dom'
 import { ReturnMark } from '~/components/logo'
 import { authClient } from '~/lib/auth-client'
+import { clearIdentity } from '~/lib/space'
 import { useTRPC } from '~/lib/trpc'
 import { Button } from '~/components/ui/button'
 import { Input } from '~/components/ui/input'
@@ -12,6 +13,7 @@ export function SignUpPage() {
   const navigate = useNavigate()
   const revalidator = useRevalidator()
   const trpc = useTRPC()
+  const queryClient = useQueryClient()
   const [search] = useSearchParams()
   // Someone who arrived from /join carries the invite through sign-up so we can
   // hand them straight back to it — otherwise the account exists and the
@@ -42,6 +44,8 @@ export function SignUpPage() {
       setError(err.message ?? 'Sign up failed')
       return
     }
+    // Whatever was cached belongs to whoever was signed in before, if anyone.
+    clearIdentity(queryClient)
     await revalidator.revalidate()
     navigate(inviteId ? `/join/${encodeURIComponent(inviteId)}?accept=1` : '/dashboard')
   }

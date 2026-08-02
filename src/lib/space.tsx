@@ -8,7 +8,7 @@
 // applied on mount.
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useTRPC } from '~/lib/trpc'
 
 export type SpaceRole = 'owner' | 'admin' | 'member'
@@ -43,6 +43,18 @@ const PERSONAL_VALUE = 'personal'
 /** Role arrives as a bare string on the wire; narrow it rather than trust it. */
 function toRole(role: string): SpaceRole {
   return role === 'owner' || role === 'admin' ? role : 'member'
+}
+
+/**
+ * Call whenever the signed-in identity changes — sign-out, sign-in, sign-up.
+ * Everything cached belongs to the *previous* account: the query cache would
+ * otherwise hand the next user someone else's teams (and inbox) until a
+ * refetch lands, and the remembered space would point at a team they may not
+ * even be in.
+ */
+export function clearIdentity(queryClient: QueryClient): void {
+  localStorage.removeItem(STORAGE_KEY)
+  queryClient.clear()
 }
 
 export function SpaceProvider({ children, enabled }: { children: ReactNode; enabled: boolean }) {

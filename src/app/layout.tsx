@@ -8,14 +8,14 @@ import {
   useRouteLoaderData,
 } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronDown } from 'lucide-react'
 import { Button } from '~/components/ui/button'
 import { Input } from '~/components/ui/input'
 import { Label } from '~/components/ui/label'
 import { Wordmark } from '~/components/logo'
 import { authClient } from '~/lib/auth-client'
-import { SpaceProvider, useActiveSpace } from '~/lib/space'
+import { SpaceProvider, clearIdentity, useActiveSpace } from '~/lib/space'
 import { useTRPC } from '~/lib/trpc'
 import { cn } from '~/lib/utils'
 import type { RootLoaderData } from './routes'
@@ -83,11 +83,15 @@ function AppHeader({ email }: { email: string }) {
   const navigate = useNavigate()
   const revalidator = useRevalidator()
   const trpc = useTRPC()
+  const queryClient = useQueryClient()
   const { space } = useActiveSpace()
   const adminStatus = useQuery(trpc.admin.status.queryOptions())
 
   async function signOut() {
     await authClient.signOut()
+    // The cache holds this account's teams and inbox; the next sign-in on this
+    // browser must not inherit them.
+    clearIdentity(queryClient)
     navigate('/', { replace: true })
     revalidator.revalidate()
   }

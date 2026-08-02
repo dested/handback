@@ -1,7 +1,9 @@
 import { useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useRevalidator, useSearchParams } from 'react-router-dom'
 import { ReturnMark } from '~/components/logo'
 import { authClient } from '~/lib/auth-client'
+import { clearIdentity } from '~/lib/space'
 import { Button } from '~/components/ui/button'
 import { Input } from '~/components/ui/input'
 import { Label } from '~/components/ui/label'
@@ -9,6 +11,7 @@ import { Label } from '~/components/ui/label'
 export function SignInPage() {
   const navigate = useNavigate()
   const revalidator = useRevalidator()
+  const queryClient = useQueryClient()
   const [search] = useSearchParams()
   // Carried through from /join so an invite survives the round trip.
   const inviteId = search.get('invite') ?? ''
@@ -27,6 +30,9 @@ export function SignInPage() {
       setError(err.message ?? 'Sign in failed')
       return
     }
+    // A different account may have been signed in before this one — everything
+    // cached (teams, inbox, active space) is theirs, not this user's.
+    clearIdentity(queryClient)
     await revalidator.revalidate()
     navigate(inviteId ? `/join/${encodeURIComponent(inviteId)}?accept=1` : '/dashboard')
   }
