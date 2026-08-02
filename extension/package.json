@@ -1,7 +1,7 @@
 {
   "name": "handback-extension",
   "private": true,
-  "version": "1.6.1",
+  "version": "1.6.2",
   "type": "module",
   "description": "Handback Recorder — narrate what's broken, sanitize the timeline, and the gripe lands in your team's inbox for an agent to fix.",
   "scripts": {

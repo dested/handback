@@ -301,6 +301,15 @@ export function App() {
   const [pageDock, setPageDock] = useState(false);
   const [recUpdate, setRecUpdate] = useState<RecorderUpdate | null>(null);
   const [stopping, setStopping] = useState(false);
+  /**
+   * The two moments Record can't do anything about until the human acts elsewhere,
+   * each a full-container takeover so the panel isn't a lump behind an OS surface:
+   * `micGate` is the one-time microphone grant (it happens in a tab Chrome opens);
+   * `picking` is Chrome's own screen-share dialog — 'choosing' while it's up,
+   * 'refused' when it closed with nothing picked.
+   */
+  const [micGate, setMicGate] = useState(false);
+  const [picking, setPicking] = useState<'choosing' | 'refused' | null>(null);
   const [whisper, setWhisper] = useState<TranscribeProgress | null>(null);
   // The queue, mirrored into state so the panel can say `queued` / `transcribing…`.
   // A single-slot guard silently dropped the second of a back-to-back pair.
@@ -320,14 +329,15 @@ export function App() {
   const whisperQueue = useRef<string[]>([]);
   const whisperRunning = useRef(false);
   const recorderRef = useRef<Recorder | null>(null);
-  /** micperm.html is opened once per panel life — a second Record records silent. */
-  const micTabOpened = useRef(false);
   const recovering = useRef<Set<string>>(new Set());
   // The Stop button, the page dock, and Chrome's own "Stop sharing" bar can all fire.
   const stopGuard = useRef(false);
   // The runtime listener is installed once, but the stop path closes over today's
   // state. Keep the latest copy behind a ref.
   const stopRef = useRef<() => void>(() => {});
+  // The mic gate's permission watcher fires long after this render — it needs the
+  // current start path, not the one captured when the gate opened.
+  const startRef = useRef<() => void>(() => {});
   // Transcription runs off a queue, minutes after the settings it needs were read.
   // A ref keeps it on the current server, token, and on-device choice.
   const settingsRef = useRef<Settings>(DEFAULT_SETTINGS);
@@ -540,9 +550,11 @@ export function App() {
   };
 
   /**
-   * The side panel can't render the getUserMedia prompt — it rejects without
-   * ever asking. First Record press without a granted mic opens micperm.html
-   * in a tab (prompts work there); a second press records anyway, silent.
+   * The side panel can't render the getUserMedia prompt — it rejects without ever
+   * asking. So the first Record press without a granted mic doesn't record: it
+   * raises the in-panel mic gate, which opens micperm.html (prompts work there)
+   * and, once the grant lands, walks straight into recording on its own. The gate
+   * also offers a mic-less take for anyone who'd rather not.
    */
   const ensureMic = async (): Promise<boolean> => {
     try {
@@ -551,18 +563,17 @@ export function App() {
     } catch {
       return true; // no Permissions API — let getUserMedia decide
     }
-    if (!micTabOpened.current) {
-      micTabOpened.current = true;
-      await chrome.tabs.create({ url: chrome.runtime.getURL('micperm.html') });
-      say('grant the mic in the new tab, then hit Record');
-      return false;
-    }
-    return true;
+    setMicGate(true);
+    return false;
   };
 
-  const startRecording = async () => {
+  /** The mic gate's permission tab — opened by the gate, reopened on demand. */
+  const openMicTab = () => void chrome.tabs.create({ url: chrome.runtime.getURL('micperm.html') });
+
+  const startRecording = async (skipMic = false) => {
     if (recorderRef.current) return;
-    if (!(await ensureMic())) return;
+    if (!skipMic && !(await ensureMic())) return;
+    setMicGate(false);
     setShipped(null);
     setUploadError(null);
     // A take lands in the open walkthrough, so pressing Record from the home
@@ -581,11 +592,16 @@ export function App() {
       id,
       Dictation,
     );
+    // Chrome's screen-share dialog is a separate OS surface; the panel would sit
+    // blank behind it, so it says what the dialog is waiting on instead.
+    setPicking('choosing');
     try {
       await r.start();
     } catch {
-      // Refused the screen share: nothing was minted, so there's nothing to undo.
-      say('screen share refused');
+      // Refused or dismissed the picker: nothing was minted, so there's nothing to
+      // undo — but the panel stays on the pick screen with a way back, rather than
+      // snapping to Home as if nothing happened.
+      setPicking('refused');
       return;
     }
     // Claim the take *before* announcing it: `recording:start` broadcasts, and a
@@ -604,12 +620,17 @@ export function App() {
       await r.cancel();
       await send({ type: 'recording:discard', id }).catch(() => {});
       setRecUpdate(null);
+      setPicking(null);
       say("couldn't start the recording");
       return;
     }
     // The dock only exists where a content script can run, and the live readout
     // must not point at a bar that isn't there.
     setPageDock(Boolean(r.scope));
+    // Seed the live readout so the pick screen hands straight to it — the recorder's
+    // first real emit is a sample-tick away, and a blank Home must not flash between.
+    setRecUpdate((u) => u ?? { elapsedMs: 0, frameCount: 0, segmentCount: 0, interim: '', micState: 'off' });
+    setPicking(null);
     await refresh();
   };
 
@@ -617,7 +638,41 @@ export function App() {
   // lands in stopRecording, and the listener above needs today's copy.
   useEffect(() => {
     stopRef.current = () => void stopRecording();
+    startRef.current = () => void startRecording();
   });
+
+  /**
+   * While the mic gate is up, watch the extension's own microphone permission. The
+   * grant happens in the tab Chrome opened — it can't happen in a side panel — so
+   * this is how the panel learns it landed, and when it does the gate closes and
+   * recording begins without a second Record press.
+   */
+  useEffect(() => {
+    if (!micGate) return;
+    let status: PermissionStatus | null = null;
+    let disposed = false;
+    const proceed = () => {
+      if (disposed) return;
+      setMicGate(false);
+      startRef.current();
+    };
+    const onChange = () => {
+      if (status?.state === 'granted') proceed();
+    };
+    void navigator.permissions
+      .query({ name: 'microphone' as PermissionName })
+      .then((s) => {
+        if (disposed) return;
+        status = s;
+        if (s.state === 'granted') proceed();
+        else s.addEventListener('change', onChange);
+      })
+      .catch(() => {});
+    return () => {
+      disposed = true;
+      status?.removeEventListener('change', onChange);
+    };
+  }, [micGate]);
 
   // ── handing the gripe over ────────────────────────────────────────────
   /**
@@ -810,6 +865,12 @@ export function App() {
    * only thing worth showing while the screen is being captured.
    */
   const editing = Boolean(session) && !browsing;
+  /**
+   * A gate is a full-container takeover — the mic grant or Chrome's share dialog.
+   * While one is up nothing else in the body (Home, the editor, the footer) renders,
+   * so the panel is about the one thing it's waiting on, not a lump behind it.
+   */
+  const overlay = micGate || Boolean(picking);
 
   const serverHost = hostOf(serverUrl);
   const appUrl = (path: string) => `${serverUrl.replace(/\/+$/, '')}${path}`;
@@ -970,7 +1031,15 @@ export function App() {
         </>
       )}
 
-      {recUpdate ? (
+      {micGate ? (
+        <MicGate onOpenTab={openMicTab} onSkip={() => void startRecording(true)} />
+      ) : picking ? (
+        <PickGate
+          mode={picking}
+          onRetry={() => void startRecording(true)}
+          onCancel={() => setPicking(null)}
+        />
+      ) : recUpdate ? (
         <section className="live">
           <div className="live-row">
             <span className="dot pulse" />
@@ -1026,7 +1095,7 @@ export function App() {
         />
       )}
 
-      {editing && session && (
+      {!overlay && editing && session && (
         <>
           <section className="gripe">
             {/* Two rows, not four. The crumb row carries where you are, what this
@@ -1098,7 +1167,7 @@ export function App() {
         </>
       )}
 
-      {editing && (hasContent || !linked || hasStatus) && (
+      {!overlay && editing && (hasContent || !linked || hasStatus) && (
         <footer className="foot">
           {statusRow}
           {linked && hasContent && (
@@ -1176,6 +1245,88 @@ function Mark() {
         strokeLinejoin="round"
       />
     </svg>
+  );
+}
+
+/**
+ * First run: the microphone grant, as the whole panel rather than a flash nobody
+ * reads. Chrome won't raise the permission prompt inside a side panel, so the
+ * button opens a tab where it can be answered; the moment it is, App's watcher
+ * closes this and starts recording. The mic-less path is here for anyone who
+ * doesn't want to narrate.
+ */
+function MicGate({ onOpenTab, onSkip }: { onOpenTab: () => void; onSkip: () => void }) {
+  const [opened, setOpened] = useState(false);
+  return (
+    <section className="gate">
+      <h2 className="gate-title">First, turn on your microphone</h2>
+      <p className="gate-lead">
+        A walkthrough carries your voice, so Handback needs the mic — just this once.
+        Chrome won't ask inside this panel, so it opens a quick permission tab. Say
+        yes there and recording starts on its own.
+      </p>
+      <button
+        className="gate-cta"
+        onClick={() => {
+          setOpened(true);
+          onOpenTab();
+        }}
+      >
+        {opened ? 'Reopen the permission tab' : 'Enable the microphone'}
+      </button>
+      {opened && (
+        <p className="note gate-wait">
+          Waiting on that tab — grant the mic and this jumps straight into recording.
+        </p>
+      )}
+      <button className="link gate-skip" onClick={onSkip}>
+        skip — record without narration this time
+      </button>
+    </section>
+  );
+}
+
+/**
+ * Chrome's screen-share dialog is a separate OS surface the panel can't reach into,
+ * so instead of sitting blank behind it the panel says what it's waiting on:
+ * 'choosing' while the dialog is up, 'refused' when it closed with nothing chosen —
+ * the one moment there's actually a button to offer.
+ */
+function PickGate({
+  mode,
+  onRetry,
+  onCancel,
+}: {
+  mode: 'choosing' | 'refused';
+  onRetry: () => void;
+  onCancel: () => void;
+}) {
+  if (mode === 'choosing') {
+    return (
+      <section className="gate">
+        <span className="gate-dot pulse" />
+        <h2 className="gate-title">Pick what to record</h2>
+        <p className="gate-lead">
+          Chrome just opened its share dialog. Choose a screen, window, or tab and hit{' '}
+          <b>Share</b> — recording starts the moment you do.
+        </p>
+      </section>
+    );
+  }
+  return (
+    <section className="gate">
+      <h2 className="gate-title">Nothing picked yet</h2>
+      <p className="gate-lead">
+        The share dialog closed without a choice. Pick a screen, window, or tab and your
+        walkthrough starts recording.
+      </p>
+      <button className="gate-cta" onClick={onRetry}>
+        <span className="dot" /> Choose a screen
+      </button>
+      <button className="link gate-skip" onClick={onCancel}>
+        not now
+      </button>
+    </section>
   );
 }
 

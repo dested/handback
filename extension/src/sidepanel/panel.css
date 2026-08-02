@@ -606,6 +606,81 @@
   }
 }
 
+/* ── Gates ──────────────────────────────────────────────────────────────── */
+/* The two waits Record can't clear on its own — the one-time mic grant and
+ * Chrome's screen-share dialog. Each takes the whole body so the panel is about
+ * the thing being waited on, not a blank behind an OS surface. Same paper, same
+ * cobalt; the copy carries it, not a box. */
+.gate {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 24px 16px 18px;
+}
+.gate-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--cobalt);
+  flex: none;
+  margin-bottom: 2px;
+}
+.gate-title {
+  margin: 0;
+  font-size: var(--fs-3);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+.gate-lead {
+  margin: 0;
+  font-size: var(--fs-1);
+  line-height: 1.5;
+  color: var(--muted);
+}
+.gate-lead b {
+  color: var(--ink);
+  font-weight: 600;
+}
+.gate-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  align-self: stretch;
+  min-height: 46px;
+  margin-top: 4px;
+  background: var(--cobalt);
+  color: #fff;
+  border: 0;
+  border-radius: var(--radius);
+  padding: 0 16px;
+  font-size: var(--fs-2);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.gate-cta:hover {
+  filter: brightness(1.06);
+}
+.gate-cta .dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #fff;
+  flex: none;
+}
+.gate-wait {
+  margin: 0;
+}
+.gate-skip {
+  align-self: flex-start;
+  margin-top: 2px;
+}
+
 /* ── While it runs ──────────────────────────────────────────────────────── */
 
 /* Three lines of unrelated type stacked 6px apart read as one mush. The meter, the
