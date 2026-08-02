@@ -136,8 +136,17 @@ src/
                         one-click Link (token minted + handed over, nothing pasted). Two numbered
                         steps; "Then just record" is unnumbered
     join.tsx            /join/:inviteId — peek + accept
-    admin.tsx           /admin — platform admin: stats, user search, team/admin toggles, and a
-                        per-user drill-down of every walkthrough their workspaces hold
+    admin/              /admin — the platform-admin console, its own sidebar shell (nested routes):
+                        layout.tsx (gate + sidebar frame), overview.tsx (counts, status mix,
+                        latest accounts/uploads), users.tsx + user.tsx (search, team/admin
+                        toggles, per-account detail: tokens, teams, walkthroughs by space),
+                        teams.tsx + team.tsx (all teams w/ seats·storage; roster, invites,
+                        projects, seat-limit editor, delete team), walkthroughs.tsx (platform
+                        feed, status filter, debug links), walkthrough-debug.tsx (full anatomy
+                        of one walkthrough: the EXACT MCP brief via getWalkthroughDetail+
+                        formatWalkthrough, frame-cap math, takes, all files incl. pending,
+                        report.md, move-to-any-space control), usage.tsx (per-space bytes/
+                        recordings vs quota), shared.tsx. user.tsx also carries delete account
     forgot-password.tsx /forgot-password — same answer whether or not the account exists
     reset-password.tsx  /reset-password?token=… — the link better-auth emails
     privacy.tsx         /privacy — what's collected, where it lives, subprocessors
@@ -148,7 +157,8 @@ src/
                         `autoTokenName(kind, ua, now)` — the name both pages mint under so
                         neither has to ask for one
     legal.tsx           LegalPage/Section/Terms/Notice — shared chrome for /privacy + /terms
-    ui/                 button, card, input, label (shadcn new-york style, no asChild)
+    ui/                 button, card, input, label, sidebar (shadcn new-york style, no asChild;
+                        sidebar is hand-rolled — no radix — collapse persisted, mobile overlay)
     landing/            hero, how-it-works, distill, walkthrough-manifest, agent-view, pricing,
                         final-cta · demo-shot.tsx (a keyframe as SVG) + demo-data.ts (the one
                         demo walkthrough) + mock.tsx (Pane/ContactSheet/Filmstrip/PlayerStrip/
@@ -199,7 +209,7 @@ extension/              Handback Recorder — the Chrome MV3 extension (own npm 
 | `/projects` · `/team` | Projects (any space) · Members/Invites/seats (team spaces) | `src/app/{projects,team}.tsx` |
 | `/connect` | Connect a coding agent — one button mints a token and fills in `claude mcp add`; tokens/disconnect are reference below | `src/app/connect.tsx` |
 | `/recorder` | Install + one-click-link the extension (detects install, mints token, handshake) | `src/app/recorder.tsx` |
-| `/admin` | Platform admin — stats, users, entitlements, per-user walkthrough drill-down (admins only; nav link hidden otherwise) | `src/app/admin.tsx` |
+| `/admin` (+ `/users[/:id]`, `/teams[/:id]`, `/walkthroughs`, `/usage`) | Platform-admin console — sidebar shell, overview stats, users + drill-down, teams + seat editor, platform feed, per-space usage (admins only; nav link hidden otherwise) | `src/app/admin/*` |
 | `/dashboard` | redirect → /app (legacy) | `routes.tsx` |
 | `/healthz` | DB probe | `server.ts` |
 | `/api/auth/*` · `/api/trpc/*` | better-auth · tRPC | `server.ts` |
@@ -421,12 +431,25 @@ reaches the container on a plain push.
   member names/emails without that gate; the only sanctioned leak is a walkthrough's
   `uploadedByName`. Ownership is `Team.ownerId` (never a stored role) — effective role is computed,
   and `teams.transferOwnership` is the only way it moves.
+- **Admin deletes are S3-first, and both are prefix wipes.** `admin.deleteUser` refuses self,
+  platform admins (demote first) and team owners (transfer first — the DB's `Restrict` on
+  `Team.ownerId` backs it), then wipes `orgs/<userId>/` and deletes the row (cascades take
+  memberships/tokens/personal content; team uploads survive with `uploadedById` nulled).
+  `admin.deleteTeam` is the same shape on `orgs/<teamId>/`. S3 goes first on purpose: a failed
+  wipe leaves the account/team intact rather than orphaning unlistable objects.
 - **`walkthroughs.move` is copy → flip → delete, in that order.** Source and destination are
   spaces (Personal included); the caller must hold both. Objects are copied server-side
   (`copyObject` — bytes never cross the container), then the row flips (ownership pair +
   `projectId: null` + slug suffixed if taken), then the old prefix is deleted best-effort. A crash
   mid-copy loses nothing; after the flip, worst case is orphaned source objects. Destination quota
   reuses ingest's exported `SPACE_QUOTA_BYTES`/`SPACE_MAX_WALKTHROUGHS` — quota is per space.
+  The core lives in `relocate()` (router.ts), shared with `admin.moveWalkthrough` (any team, or
+  the uploader's personal space; quotas still apply — an admin move is not a quota bypass).
+  **`relocate` refuses unfinalized walkthroughs**: pending file rows can hide real S3 objects
+  the copy would skip and the source wipe would destroy — delete is their only exit.
+  `/admin/walkthroughs/:id` renders the exact agent brief through the same
+  `getWalkthroughDetail` + `formatWalkthrough` pipeline MCP uses — change those and the debug
+  page follows for free; never re-implement the brief for display.
 - **Every `hb_` token is account-wide; a platform admin's is platform-wide** (2026-08-01).
   `TokenAuth` has no org: a token reaches its owner's personal space + every team they belong to
   (`scopeWhere`/`inScope` in walkthroughs-api.ts), and `isAdmin` drops the filter entirely —

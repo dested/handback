@@ -2,6 +2,17 @@
 
 > ADR-lite: what was decided, why, what was rejected. Append-only.
 
+## 2026-08-02 — /admin is a console with its own sidebar; the sidebar primitive is hand-rolled
+**Why:** admin outgrew one page ("a 3 screen mess" — owner asked for a full real admin with a
+shadcn sidebar). It's now a nested route section (`src/app/admin/*`) behind one gate in
+layout.tsx, so a new admin page = one file + one route child. The sidebar is shadcn's sidebar
+re-cut by hand in `src/components/ui/sidebar.tsx` because the repo's primitives are radix-free
+and no-`asChild` — installing radix (Slot/Sheet/Tooltip) for one component would have broken
+that convention. Collapse persists to localStorage but is read in an effect, never the useState
+initializer (SSR hydration).
+**Rejected:** upstream shadcn sidebar via CLI (drags in radix + asChild); keeping admin inside
+the shared max-w-6xl main (the shell needs full bleed — layout.tsx special-cases /admin).
+
 ## 2026-08-02 — Workspaces don't exist: Teams + one implicit Personal space
 **Why:** the workspace abstraction "fucked me time and time again" (owner) — a hidden personal
 org behind every account leaked into switchers, token scoping, invites, and the extension's

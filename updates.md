@@ -2,6 +2,24 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-08-02 — admin deletes, admin move, walkthrough debug page
+Asked: "delete user (keeps teams), delete team, move walkthroughs between teams, and a pretty
+debug view — I want to see the cutting and prompt stuff".
+Done: admin.deleteUser/deleteTeam (typed-confirm danger zones, S3-prefix-first, guards: self/
+admin/owner), relocate() extracted and shared with admin.moveWalkthrough (any team or uploader's
+personal, quota kept), /admin/walkthroughs/:id — exact MCP brief (real pipeline), frame-cap
+line, takes, full file inventory w/ presigned links + pending flags, raw report.md, move control.
+Touched: server/router.ts, src/app/admin/{user,team,walkthroughs,walkthrough-debug}.tsx,
+src/app/routes.tsx, cliffnotes.md
+Asked: "show me the list of teams, make admin expandable, shadcn sidebar, full real admin" +
+"usage stats per user per team".
+Done: hand-rolled sidebar primitive (ui/sidebar.tsx + tokens); admin split into nested pages —
+overview, users(+detail: tokens/teams/toggles/walkthroughs), teams(+detail: roster, invites,
+projects, seat-limit editor), platform walkthrough feed, usage vs quota; adminRouter grew
+overview/user/teams/team/walkthroughs/usage/setSeatLimit. Typecheck green.
+Touched: server/router.ts, src/components/ui/sidebar.tsx, src/app/admin/* (9 files),
+src/app/{routes,layout}.tsx, src/styles/app.css (admin.tsx deleted)
+
 ## 2026-08-02 — cross-account cache leak on re-login
 Asked: "when i log out and log back in it keeps the header... it had the other user's teams".
 Done: `clearIdentity()` in space.tsx (queryClient.clear + drop handback.activeSpace), called at

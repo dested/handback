@@ -31,8 +31,13 @@ const GET_TTL_SECONDS = 60 * 60
 // object already uploaded lives under them, and changing the path would orphan
 // every one of them. `spaceId` is the team id, or the owner's user id for a
 // personal walkthrough.
+/** Everything a space has ever stored — the unit admin deletes wipe. */
+export function spacePrefix(spaceId: string): string {
+  return `orgs/${spaceId}/`
+}
+
 export function walkthroughPrefix(spaceId: string, walkthroughId: string): string {
-  return `orgs/${spaceId}/gripes/${walkthroughId}/`
+  return `${spacePrefix(spaceId)}gripes/${walkthroughId}/`
 }
 
 export function walkthroughKey(spaceId: string, walkthroughId: string, path: string): string {

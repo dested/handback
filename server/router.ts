@@ -14,17 +14,20 @@ import { env } from './env'
 import { isPlatformAdmin, requireAdmin, teamHasFeature, userHasFeature } from './features'
 import { SPACE_MAX_WALKTHROUGHS, SPACE_QUOTA_BYTES } from './ingest'
 import { log } from './logger'
+import { briefFrameLimit, formatWalkthrough } from './mcp-format'
 import { prisma } from './prisma'
 import { latestRecorderRelease } from './releases'
 import {
   copyObject,
   deletePrefix,
+  spacePrefix,
   walkthroughKey,
   walkthroughPrefix,
   isSafePath,
   presignGet,
 } from './storage'
 import { protectedProcedure, publicProcedure, router } from './trpc'
+import { getWalkthroughDetail } from './walkthroughs-api'
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000
 
@@ -40,6 +43,96 @@ const toSpace = (teamId: string | null, selfId: string): SpaceOwner =>
 /** Prisma `where` fragment selecting exactly one space's rows. */
 const spaceWhere = (s: SpaceOwner) =>
   s.teamId ? { teamId: s.teamId } : { teamId: null, userId: s.userId }
+
+/**
+ * The move core shared by walkthroughs.move and admin.moveWalkthrough: quota
+ * check, slug de-dup, copy → flip → best-effort delete. Callers authorize.
+ */
+async function relocate(
+  walkthroughId: string,
+  dest: SpaceOwner
+): Promise<{ teamId: string | null; slug: string }> {
+  const walkthrough = await prisma.walkthrough.findUnique({
+    where: { id: walkthroughId },
+    // Only uploaded files exist as objects — a pending row (declared but
+    // never finished) would make the copy throw NoSuchKey and strand the move.
+    include: { files: { select: { path: true }, where: { status: 'uploaded' } } },
+  })
+  if (!walkthrough) throw new TRPCError({ code: 'NOT_FOUND' })
+  // A walkthrough that never finalized can have real objects behind rows still
+  // marked pending: the copy below would skip them and the source wipe would
+  // eat them. It's invisible in every list anyway — deletion is the only safe
+  // exit for one of these.
+  if (!walkthrough.finalizedAt) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: 'This walkthrough never finished uploading — it can be deleted, not moved',
+    })
+  }
+  const source: SpaceOwner = { teamId: walkthrough.teamId, userId: walkthrough.userId }
+  if (source.teamId === dest.teamId && source.userId === dest.userId) {
+    throw new TRPCError({ code: 'BAD_REQUEST', message: 'Already there' })
+  }
+
+  // The destination's quota is the same one ingest enforces — a move is
+  // another way to put bytes in a space.
+  const destTotals = await prisma.walkthrough.aggregate({
+    where: spaceWhere(dest),
+    _sum: { bytes: true },
+    _count: true,
+  })
+  if ((destTotals._sum.bytes ?? 0n) + walkthrough.bytes > BigInt(SPACE_QUOTA_BYTES)) {
+    throw new TRPCError({ code: 'BAD_REQUEST', message: 'That space is at its storage quota' })
+  }
+  if (destTotals._count >= SPACE_MAX_WALKTHROUGHS) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: 'That space is at its walkthrough limit',
+    })
+  }
+
+  // Suffix until free — a move must never replace a walkthrough already there.
+  let slug = walkthrough.slug
+  for (
+    let n = 2;
+    await prisma.walkthrough.findFirst({ where: { ...spaceWhere(dest), slug } });
+    n++
+  ) {
+    slug = `${walkthrough.slug}-${n}`
+  }
+
+  // A walkthrough can hold hundreds of files; copy server-side, 8 at a time.
+  const paths = walkthrough.files.map((f) => f.path)
+  for (let i = 0; i < paths.length; i += 8) {
+    await Promise.all(
+      paths
+        .slice(i, i + 8)
+        .map((path) =>
+          copyObject(
+            walkthroughKey(spaceId(source), walkthrough.id, path),
+            walkthroughKey(spaceId(dest), walkthrough.id, path)
+          )
+        )
+    )
+  }
+
+  await prisma.walkthrough.update({
+    where: { id: walkthrough.id },
+    // Projects are per-space, so the assignment cannot survive the move.
+    data: { teamId: dest.teamId, userId: dest.userId, projectId: null, slug },
+  })
+
+  try {
+    await deletePrefix(walkthroughPrefix(spaceId(source), walkthrough.id))
+  } catch (err) {
+    log.warn('move: source cleanup failed', {
+      walkthroughId: walkthrough.id,
+      spaceId: spaceId(source),
+      err,
+    })
+  }
+  return { teamId: dest.teamId, slug }
+}
 
 const teamsRouter = router({
   /** Teams the signed-in user belongs to, with their effective role. */
@@ -744,81 +837,19 @@ const walkthroughsRouter = router({
   move: protectedProcedure
     .input(z.object({ walkthroughId: z.string(), teamId: z.string().nullable() }))
     .mutation(async ({ ctx, input }) => {
-      const walkthrough = await prisma.walkthrough.findUnique({
+      const g = await prisma.walkthrough.findUnique({
         where: { id: input.walkthroughId },
-        // Only uploaded files exist as objects — a pending row (declared but
-        // never finished) would make the copy throw NoSuchKey and strand the move.
-        include: { files: { select: { path: true }, where: { status: 'uploaded' } } },
+        select: { teamId: true, userId: true },
       })
-      if (!walkthrough) throw new TRPCError({ code: 'NOT_FOUND' })
-      const source: SpaceOwner = { teamId: walkthrough.teamId, userId: walkthrough.userId }
+      if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
+      const source: SpaceOwner = { teamId: g.teamId, userId: g.userId }
       const dest = toSpace(input.teamId, ctx.session.user.id)
       // Both ends have to admit the caller: a move must not be a way to walk
       // content out of a space they only half belong to.
       await requireSpaceAccess(ctx.session.user.id, source)
       await requireSpaceAccess(ctx.session.user.id, dest)
-      if (source.teamId === dest.teamId && source.userId === dest.userId) {
-        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Already there' })
-      }
-
-      // The destination's quota is the same one ingest enforces — a move is
-      // another way to put bytes in a space.
-      const destTotals = await prisma.walkthrough.aggregate({
-        where: spaceWhere(dest),
-        _sum: { bytes: true },
-        _count: true,
-      })
-      if ((destTotals._sum.bytes ?? 0n) + walkthrough.bytes > BigInt(SPACE_QUOTA_BYTES)) {
-        throw new TRPCError({ code: 'BAD_REQUEST', message: 'That space is at its storage quota' })
-      }
-      if (destTotals._count >= SPACE_MAX_WALKTHROUGHS) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: 'That space is at its walkthrough limit',
-        })
-      }
-
-      // Suffix until free — a move must never replace a walkthrough already there.
-      let slug = walkthrough.slug
-      for (
-        let n = 2;
-        await prisma.walkthrough.findFirst({ where: { ...spaceWhere(dest), slug } });
-        n++
-      ) {
-        slug = `${walkthrough.slug}-${n}`
-      }
-
-      // A walkthrough can hold hundreds of files; copy server-side, 8 at a time.
-      const paths = walkthrough.files.map((f) => f.path)
-      for (let i = 0; i < paths.length; i += 8) {
-        await Promise.all(
-          paths
-            .slice(i, i + 8)
-            .map((path) =>
-              copyObject(
-                walkthroughKey(spaceId(source), walkthrough.id, path),
-                walkthroughKey(spaceId(dest), walkthrough.id, path)
-              )
-            )
-        )
-      }
-
-      await prisma.walkthrough.update({
-        where: { id: walkthrough.id },
-        // Projects are per-space, so the assignment cannot survive the move.
-        data: { teamId: dest.teamId, userId: dest.userId, projectId: null, slug },
-      })
-
-      try {
-        await deletePrefix(walkthroughPrefix(spaceId(source), walkthrough.id))
-      } catch (err) {
-        log.warn('move: source cleanup failed', {
-          walkthroughId: walkthrough.id,
-          spaceId: spaceId(source),
-          err,
-        })
-      }
-      return { ok: true, teamId: dest.teamId, slug }
+      const moved = await relocate(input.walkthroughId, dest)
+      return { ok: true, ...moved }
     }),
 
   delete: protectedProcedure
@@ -849,15 +880,61 @@ const adminRouter = router({
     return { isAdmin: u !== null && isPlatformAdmin(u) }
   }),
 
-  stats: protectedProcedure.query(async ({ ctx }) => {
+  /** The overview page in one round trip: counts, status mix, latest arrivals. */
+  overview: protectedProcedure.query(async ({ ctx }) => {
     await requireAdmin(ctx.session.user.id)
-    const [users, teams, walkthroughs, bytes] = await Promise.all([
-      prisma.user.count(),
-      prisma.team.count(),
-      prisma.walkthrough.count(),
-      prisma.walkthrough.aggregate({ _sum: { bytes: true } }),
-    ])
-    return { users, teams, walkthroughs, bytes: Number(bytes._sum.bytes ?? 0) }
+    const [users, teams, projects, walkthroughs, bytes, byStatus, recentUsers, recentWalkthroughs] =
+      await Promise.all([
+        prisma.user.count(),
+        prisma.team.count(),
+        prisma.project.count(),
+        prisma.walkthrough.count(),
+        prisma.walkthrough.aggregate({ _sum: { bytes: true } }),
+        prisma.walkthrough.groupBy({ by: ['status'], _count: true }),
+        prisma.user.findMany({
+          orderBy: { createdAt: 'desc' },
+          take: 8,
+          select: { id: true, name: true, email: true, isAdmin: true, createdAt: true },
+        }),
+        prisma.walkthrough.findMany({
+          orderBy: { uploadedAt: 'desc' },
+          take: 8,
+          include: {
+            team: { select: { name: true } },
+            user: { select: { name: true } },
+            uploadedBy: { select: { name: true } },
+          },
+        }),
+      ])
+    const statusCount = (s: string) => byStatus.find((r) => r.status === s)?._count ?? 0
+    return {
+      counts: {
+        users,
+        teams,
+        projects,
+        walkthroughs,
+        bytes: Number(bytes._sum.bytes ?? 0),
+        open: statusCount('open'),
+        inReview: statusCount('in_review'),
+        resolved: statusCount('resolved'),
+      },
+      recentUsers: recentUsers.map((u) => ({
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        isAdmin: isPlatformAdmin(u),
+        createdAt: u.createdAt.toISOString(),
+      })),
+      recentWalkthroughs: recentWalkthroughs.map((g) => ({
+        id: g.id,
+        title: g.title,
+        status: g.status,
+        space: g.team?.name ?? `${g.user?.name ?? 'unknown'} (personal)`,
+        teamId: g.teamId,
+        uploadedByName: g.uploadedBy?.name ?? null,
+        uploadedAt: g.uploadedAt.toISOString(),
+      })),
+    }
   }),
 
   users: protectedProcedure
@@ -945,18 +1022,629 @@ const adminRouter = router({
         uploadedByThem: g.uploadedById === input.userId,
       })
 
+      const space = (teamId: string | null, name: string) => ({ teamId, name })
       return [
         {
-          space: { teamId: null as string | null, name: 'Personal' },
+          space: space(null, 'Personal'),
           role: 'owner',
           walkthroughs: walkthroughs.filter((g) => g.userId === input.userId).map(item),
         },
         ...memberships.map((m) => ({
-          space: { teamId: m.team.id as string | null, name: m.team.name },
+          space: space(m.team.id, m.team.name),
           role: m.team.ownerId === input.userId ? 'owner' : m.role,
           walkthroughs: walkthroughs.filter((g) => g.teamId === m.team.id).map(item),
         })),
       ]
+    }),
+
+  /** One account in full: profile, teams, tokens, what they hold. */
+  user: protectedProcedure.input(z.object({ userId: z.string() })).query(async ({ ctx, input }) => {
+    await requireAdmin(ctx.session.user.id)
+    const u = await prisma.user.findUnique({
+      where: { id: input.userId },
+      include: {
+        memberships: {
+          include: { team: { select: { id: true, name: true, ownerId: true } } },
+          orderBy: { createdAt: 'asc' },
+        },
+        apiTokens: { orderBy: { createdAt: 'desc' } },
+      },
+    })
+    if (!u) throw new TRPCError({ code: 'NOT_FOUND' })
+    const [uploads, personal, perTeam] = await Promise.all([
+      prisma.walkthrough.count({ where: { uploadedById: u.id } }),
+      prisma.walkthrough.aggregate({
+        where: { teamId: null, userId: u.id },
+        _count: true,
+        _sum: { bytes: true },
+      }),
+      // What THEY uploaded into each team — the per-user-per-team cell.
+      prisma.walkthrough.groupBy({
+        by: ['teamId'],
+        where: { uploadedById: u.id, teamId: { not: null } },
+        _count: true,
+        _sum: { bytes: true },
+      }),
+    ])
+    const teamUploadsFor = new Map(perTeam.map((r) => [r.teamId, r]))
+    return {
+      id: u.id,
+      name: u.name,
+      email: u.email,
+      emailVerified: u.emailVerified,
+      isAdmin: isPlatformAdmin(u),
+      features: u.features,
+      createdAt: u.createdAt.toISOString(),
+      teams: u.memberships.map((m) => ({
+        id: m.team.id,
+        name: m.team.name,
+        role: m.team.ownerId === u.id ? 'owner' : m.role,
+        joinedAt: m.createdAt.toISOString(),
+        uploads: teamUploadsFor.get(m.team.id)?._count ?? 0,
+        uploadedBytes: Number(teamUploadsFor.get(m.team.id)?._sum.bytes ?? 0),
+      })),
+      tokens: u.apiTokens.map((t) => ({
+        id: t.id,
+        name: t.name,
+        lastFour: t.lastFour,
+        createdAt: t.createdAt.toISOString(),
+        lastUsedAt: iso(t.lastUsedAt),
+        revokedAt: iso(t.revokedAt),
+      })),
+      counts: {
+        uploads,
+        personalWalkthroughs: personal._count,
+        personalBytes: Number(personal._sum.bytes ?? 0),
+      },
+    }
+  }),
+
+  /** Every team on the platform, sized: seats, members, projects, storage. */
+  teams: protectedProcedure
+    .input(z.object({ query: z.string().trim().max(100).default('') }))
+    .query(async ({ ctx, input }) => {
+      await requireAdmin(ctx.session.user.id)
+      const [rows, usage] = await Promise.all([
+        prisma.team.findMany({
+          where: input.query
+            ? {
+                OR: [
+                  { name: { contains: input.query, mode: 'insensitive' } },
+                  { slug: { contains: input.query, mode: 'insensitive' } },
+                  { owner: { email: { contains: input.query, mode: 'insensitive' } } },
+                ],
+              }
+            : undefined,
+          orderBy: { createdAt: 'desc' },
+          take: 200,
+          include: {
+            owner: { select: { id: true, name: true, email: true } },
+            _count: { select: { memberships: true, projects: true, walkthroughs: true } },
+          },
+        }),
+        // One aggregate pass instead of a sum query per team.
+        prisma.walkthrough.groupBy({
+          by: ['teamId'],
+          where: { teamId: { not: null } },
+          _sum: { bytes: true },
+        }),
+      ])
+      const now = Date.now()
+      const pending = await prisma.invite.groupBy({
+        by: ['teamId'],
+        where: { acceptedAt: null, expiresAt: { gt: new Date(now) } },
+        _count: true,
+      })
+      const bytesFor = new Map(usage.map((r) => [r.teamId, Number(r._sum.bytes ?? 0)]))
+      const pendingFor = new Map(pending.map((r) => [r.teamId, r._count]))
+      return rows.map((t) => ({
+        id: t.id,
+        name: t.name,
+        slug: t.slug,
+        owner: t.owner,
+        seatLimit: t.seatLimit,
+        createdAt: t.createdAt.toISOString(),
+        members: t._count.memberships,
+        pendingInvites: pendingFor.get(t.id) ?? 0,
+        projects: t._count.projects,
+        walkthroughs: t._count.walkthroughs,
+        bytes: bytesFor.get(t.id) ?? 0,
+      }))
+    }),
+
+  /** One team in full: roster, open invites, projects, latest uploads. */
+  team: protectedProcedure.input(z.object({ teamId: z.string() })).query(async ({ ctx, input }) => {
+    await requireAdmin(ctx.session.user.id)
+    const t = await prisma.team.findUnique({
+      where: { id: input.teamId },
+      include: {
+        owner: { select: { id: true, name: true, email: true } },
+        memberships: {
+          include: { user: { select: { id: true, name: true, email: true } } },
+          orderBy: { createdAt: 'asc' },
+        },
+        invites: {
+          where: { acceptedAt: null, expiresAt: { gt: new Date() } },
+          orderBy: { createdAt: 'desc' },
+        },
+        projects: {
+          include: { _count: { select: { walkthroughs: true } } },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+    })
+    if (!t) throw new TRPCError({ code: 'NOT_FOUND' })
+    const [walkthroughs, bytes, perMember] = await Promise.all([
+      prisma.walkthrough.findMany({
+        where: { teamId: t.id },
+        orderBy: { uploadedAt: 'desc' },
+        take: 50,
+        include: {
+          project: { select: { name: true } },
+          uploadedBy: { select: { name: true } },
+        },
+      }),
+      prisma.walkthrough.aggregate({ where: { teamId: t.id }, _sum: { bytes: true } }),
+      // Who is actually filling this team — usage per member.
+      prisma.walkthrough.groupBy({
+        by: ['uploadedById'],
+        where: { teamId: t.id },
+        _count: true,
+        _sum: { bytes: true },
+      }),
+    ])
+    const memberUsageFor = new Map(perMember.map((r) => [r.uploadedById, r]))
+    return {
+      id: t.id,
+      name: t.name,
+      slug: t.slug,
+      owner: t.owner,
+      seatLimit: t.seatLimit,
+      createdAt: t.createdAt.toISOString(),
+      bytes: Number(bytes._sum.bytes ?? 0),
+      members: t.memberships.map((m) => ({
+        userId: m.user.id,
+        name: m.user.name,
+        email: m.user.email,
+        role: t.ownerId === m.user.id ? 'owner' : m.role,
+        joinedAt: m.createdAt.toISOString(),
+        uploads: memberUsageFor.get(m.user.id)?._count ?? 0,
+        uploadedBytes: Number(memberUsageFor.get(m.user.id)?._sum.bytes ?? 0),
+      })),
+      invites: t.invites.map((i) => ({
+        id: i.id,
+        email: i.email,
+        role: i.role,
+        createdAt: i.createdAt.toISOString(),
+        expiresAt: i.expiresAt.toISOString(),
+      })),
+      projects: t.projects.map((p) => ({
+        id: p.id,
+        name: p.name,
+        slug: p.slug,
+        walkthroughs: p._count.walkthroughs,
+        createdAt: p.createdAt.toISOString(),
+      })),
+      walkthroughs: walkthroughs.map((g) => ({
+        id: g.id,
+        slug: g.slug,
+        title: g.title,
+        status: g.status,
+        origin: g.origin,
+        projectName: g.project?.name ?? null,
+        uploadedByName: g.uploadedBy?.name ?? null,
+        uploadedAt: g.uploadedAt.toISOString(),
+        durationMs: g.durationMs,
+        bytes: Number(g.bytes),
+        finalized: g.finalizedAt !== null,
+      })),
+    }
+  }),
+
+  /** Platform-wide walkthrough feed, filterable — the "what is happening" view. */
+  walkthroughs: protectedProcedure
+    .input(
+      z.object({
+        query: z.string().trim().max(100).default(''),
+        status: z.enum(['open', 'in_review', 'resolved']).nullish(),
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      await requireAdmin(ctx.session.user.id)
+      const rows = await prisma.walkthrough.findMany({
+        where: {
+          ...(input.status ? { status: input.status } : {}),
+          ...(input.query
+            ? {
+                OR: [
+                  { title: { contains: input.query, mode: 'insensitive' } },
+                  { slug: { contains: input.query, mode: 'insensitive' } },
+                  { origin: { contains: input.query, mode: 'insensitive' } },
+                ],
+              }
+            : {}),
+        },
+        orderBy: { uploadedAt: 'desc' },
+        take: 100,
+        include: {
+          team: { select: { id: true, name: true } },
+          user: { select: { name: true } },
+          project: { select: { name: true } },
+          uploadedBy: { select: { name: true } },
+        },
+      })
+      return rows.map((g) => ({
+        id: g.id,
+        slug: g.slug,
+        title: g.title,
+        status: g.status,
+        origin: g.origin,
+        space: g.team?.name ?? `${g.user?.name ?? 'unknown'} (personal)`,
+        teamId: g.teamId,
+        projectName: g.project?.name ?? null,
+        uploadedByName: g.uploadedBy?.name ?? null,
+        uploadedAt: g.uploadedAt.toISOString(),
+        durationMs: g.durationMs,
+        bytes: Number(g.bytes),
+        finalized: g.finalizedAt !== null,
+      }))
+    }),
+
+  /**
+   * The full anatomy of one walkthrough, including the EXACT brief an agent
+   * pulls over MCP — built by the same code path (getWalkthroughDetail +
+   * formatWalkthrough) under a synthetic admin auth, so what /admin shows and
+   * what an agent sees cannot drift.
+   */
+  walkthroughDebug: protectedProcedure
+    .input(z.object({ walkthroughId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      await requireAdmin(ctx.session.user.id)
+      const g = await prisma.walkthrough.findUnique({
+        where: { id: input.walkthroughId },
+        include: {
+          team: { select: { id: true, name: true } },
+          user: { select: { id: true, name: true, email: true } },
+          project: { select: { id: true, name: true } },
+          uploadedBy: { select: { id: true, name: true, email: true } },
+          takes: { orderBy: { index: 'asc' } },
+          files: { orderBy: { path: 'asc' } },
+        },
+      })
+      if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
+      const sid = spaceId({ teamId: g.teamId, userId: g.userId })
+      const urls = new Map(
+        await Promise.all(
+          g.files
+            .filter((f) => f.status === 'uploaded')
+            .map(
+              async (f) => [f.path, await presignGet(walkthroughKey(sid, g.id, f.path))] as const
+            )
+        )
+      )
+      // The agent's view, through the agent's own pipeline — reportMd included,
+      // so it can't be fetched a second, subtly different way.
+      const detail = await getWalkthroughDetail(
+        { userId: ctx.session.user.id, tokenId: 'admin-ui', isAdmin: true },
+        g.id
+      )
+      const brief = detail ? formatWalkthrough(detail) : null
+      const frameFiles = g.files.filter(
+        (f) => f.path.includes('/frames/') && f.status === 'uploaded'
+      ).length
+      return {
+        id: g.id,
+        slug: g.slug,
+        title: g.title,
+        status: g.status,
+        origin: g.origin,
+        space: {
+          kind: g.teamId ? ('team' as const) : ('personal' as const),
+          id: g.teamId ?? g.userId ?? '',
+          name: g.team?.name ?? `${g.user?.name ?? 'unknown'} (personal)`,
+        },
+        project: g.project,
+        uploadedBy: g.uploadedBy,
+        recordedAt: g.recordedAt.toISOString(),
+        uploadedAt: g.uploadedAt.toISOString(),
+        finalizedAt: iso(g.finalizedAt),
+        resolvedAt: iso(g.resolvedAt),
+        durationMs: g.durationMs,
+        frameCount: g.frameCount,
+        errorCount: g.errorCount,
+        droppedCount: g.droppedCount,
+        bytes: Number(g.bytes),
+        takes: g.takes.map((t) => ({
+          id: t.id,
+          index: t.index,
+          dir: t.dir,
+          interrupted: t.interrupted,
+          startedAt: iso(t.startedAt),
+          durationMs: t.durationMs,
+          frameCount: t.frameCount,
+          transcriber: t.transcriber,
+          videoPath: t.videoPath,
+        })),
+        files: g.files.map((f) => ({
+          id: f.id,
+          path: f.path,
+          size: f.size,
+          contentType: f.contentType,
+          status: f.status,
+          url: urls.get(f.path) ?? null,
+        })),
+        reportMd: detail?.reportMd ?? null,
+        brief,
+        briefFrameLimit: briefFrameLimit(g.durationMs),
+        frameFilesUploaded: frameFiles,
+      }
+    }),
+
+  /**
+   * Consumption per space, ranked — every team (even idle ones) plus every
+   * personal space that actually holds something, against the ingest quotas.
+   */
+  usage: protectedProcedure.query(async ({ ctx }) => {
+    await requireAdmin(ctx.session.user.id)
+    const [teamUsage, personalUsage, teams] = await Promise.all([
+      prisma.walkthrough.groupBy({
+        by: ['teamId'],
+        where: { teamId: { not: null } },
+        _count: true,
+        _sum: { bytes: true, durationMs: true },
+      }),
+      prisma.walkthrough.groupBy({
+        by: ['userId'],
+        where: { teamId: null, userId: { not: null } },
+        _count: true,
+        _sum: { bytes: true, durationMs: true },
+      }),
+      prisma.team.findMany({
+        select: {
+          id: true,
+          name: true,
+          owner: { select: { email: true } },
+          _count: { select: { memberships: true } },
+        },
+      }),
+    ])
+    const users = await prisma.user.findMany({
+      where: { id: { in: personalUsage.map((r) => r.userId).filter((v) => v !== null) } },
+      select: { id: true, name: true, email: true },
+    })
+    const teamFor = new Map(teamUsage.map((r) => [r.teamId, r]))
+    const userFor = new Map(users.map((u) => [u.id, u]))
+    const spaces = [
+      ...teams.map((t) => {
+        const u = teamFor.get(t.id)
+        return {
+          kind: 'team' as const,
+          id: t.id,
+          name: t.name,
+          detail: `${t._count.memberships} ${t._count.memberships === 1 ? 'member' : 'members'} · ${t.owner.email}`,
+          walkthroughs: u?._count ?? 0,
+          bytes: Number(u?._sum.bytes ?? 0),
+          durationMs: u?._sum.durationMs ?? 0,
+        }
+      }),
+      ...personalUsage.map((r) => {
+        const u = r.userId ? userFor.get(r.userId) : undefined
+        return {
+          kind: 'personal' as const,
+          id: r.userId ?? '',
+          name: u ? `${u.name} (personal)` : 'unknown (personal)',
+          detail: u?.email ?? '',
+          walkthroughs: r._count,
+          bytes: Number(r._sum.bytes ?? 0),
+          durationMs: r._sum.durationMs ?? 0,
+        }
+      }),
+    ].sort((a, b) => b.bytes - a.bytes)
+    return {
+      quota: { bytes: SPACE_QUOTA_BYTES, walkthroughs: SPACE_MAX_WALKTHROUGHS },
+      spaces,
+    }
+  }),
+
+  /** Seats are the paid knob; until billing exists, this hand-crank is it. */
+  setSeatLimit: protectedProcedure
+    .input(z.object({ teamId: z.string(), seatLimit: z.number().int().min(1).max(500) }))
+    .mutation(async ({ ctx, input }) => {
+      await requireAdmin(ctx.session.user.id)
+      const members = await prisma.membership.count({ where: { teamId: input.teamId } })
+      if (input.seatLimit < members) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Team already has ${members} members — seats cannot go below that`,
+        })
+      }
+      await prisma.team.update({
+        where: { id: input.teamId },
+        data: { seatLimit: input.seatLimit },
+      })
+      return { ok: true }
+    }),
+
+  /** Hand-adds an existing account; seats still apply — raise the limit first. */
+  addTeamMember: protectedProcedure
+    .input(
+      z.object({
+        teamId: z.string(),
+        email: z.string().trim().toLowerCase().max(255),
+        role: z.enum(['admin', 'member']).default('member'),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      await requireAdmin(ctx.session.user.id)
+      const t = await prisma.team.findUnique({
+        where: { id: input.teamId },
+        select: { id: true, seatLimit: true, _count: { select: { memberships: true } } },
+      })
+      if (!t) throw new TRPCError({ code: 'NOT_FOUND' })
+      if (t._count.memberships >= t.seatLimit) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Team is at its ${t.seatLimit} seats — raise the limit first`,
+        })
+      }
+      const u = await prisma.user.findUnique({ where: { email: input.email }, select: { id: true } })
+      if (!u) throw new TRPCError({ code: 'BAD_REQUEST', message: 'No account with that email' })
+      const existing = await prisma.membership.findUnique({
+        where: { teamId_userId: { teamId: t.id, userId: u.id } },
+        select: { id: true },
+      })
+      if (existing) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Already a member' })
+      await prisma.membership.create({
+        data: { teamId: t.id, userId: u.id, role: input.role },
+      })
+      return { ok: true }
+    }),
+
+  /** The owner cannot be removed — ownership transfers, it doesn't vacate. */
+  removeTeamMember: protectedProcedure
+    .input(z.object({ teamId: z.string(), userId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      await requireAdmin(ctx.session.user.id)
+      const t = await prisma.team.findUnique({
+        where: { id: input.teamId },
+        select: { ownerId: true },
+      })
+      if (!t) throw new TRPCError({ code: 'NOT_FOUND' })
+      if (input.userId === t.ownerId) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Transfer ownership before removing the owner',
+        })
+      }
+      // Idempotent: a membership already gone is the desired end state.
+      await prisma.membership.deleteMany({
+        where: { teamId: input.teamId, userId: input.userId },
+      })
+      return { ok: true }
+    }),
+
+  /** Owner's role is computed from Team.ownerId; it cannot be assigned away. */
+  setTeamMemberRole: protectedProcedure
+    .input(z.object({ teamId: z.string(), userId: z.string(), role: z.enum(['admin', 'member']) }))
+    .mutation(async ({ ctx, input }) => {
+      await requireAdmin(ctx.session.user.id)
+      const t = await prisma.team.findUnique({
+        where: { id: input.teamId },
+        select: { ownerId: true },
+      })
+      if (!t) throw new TRPCError({ code: 'NOT_FOUND' })
+      if (input.userId === t.ownerId) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: "The owner's role is ownership — transfer it instead",
+        })
+      }
+      const res = await prisma.membership.updateMany({
+        where: { teamId: input.teamId, userId: input.userId },
+        data: { role: input.role },
+      })
+      if (res.count === 0) throw new TRPCError({ code: 'NOT_FOUND', message: 'Not a member' })
+      return { ok: true }
+    }),
+
+  /** Kills a pending join link — the id IS the credential. */
+  revokeInvite: protectedProcedure
+    .input(z.object({ inviteId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      await requireAdmin(ctx.session.user.id)
+      const res = await prisma.invite.deleteMany({
+        where: { id: input.inviteId, acceptedAt: null },
+      })
+      if (res.count === 0) throw new TRPCError({ code: 'NOT_FOUND' })
+      return { ok: true }
+    }),
+
+  /**
+   * Deletes an account and its entire personal space (rows cascade; S3 prefix
+   * wiped wholesale). Teams keep everything uploaded to them — uploadedById
+   * just goes null. Owners must transfer first; admins must be demoted first.
+   */
+  deleteUser: protectedProcedure
+    .input(z.object({ userId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      await requireAdmin(ctx.session.user.id)
+      if (input.userId === ctx.session.user.id) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'You cannot delete yourself' })
+      }
+      const u = await prisma.user.findUnique({
+        where: { id: input.userId },
+        include: { ownedTeams: { select: { name: true } } },
+      })
+      if (!u) throw new TRPCError({ code: 'NOT_FOUND' })
+      if (isPlatformAdmin(u)) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Revoke their admin before deleting the account',
+        })
+      }
+      if (u.ownedTeams.length > 0) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `They still own ${u.ownedTeams.map((t) => t.name).join(', ')} — transfer ownership first`,
+        })
+      }
+      // Their unaccepted join links die with them — the invite id IS the
+      // credential and createdById has no FK to cascade it.
+      await prisma.invite.deleteMany({ where: { createdById: u.id, acceptedAt: null } })
+      // S3 first: if the wipe fails the account survives intact, which beats a
+      // deleted row pointing at orphaned objects nobody can list anymore.
+      await deletePrefix(spacePrefix(u.id))
+      await prisma.user.delete({ where: { id: u.id } })
+      return { ok: true }
+    }),
+
+  /** Deletes a team and everything it holds. Members keep their accounts. */
+  deleteTeam: protectedProcedure
+    .input(z.object({ teamId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      await requireAdmin(ctx.session.user.id)
+      const t = await prisma.team.findUnique({
+        where: { id: input.teamId },
+        select: { id: true },
+      })
+      if (!t) throw new TRPCError({ code: 'NOT_FOUND' })
+      await deletePrefix(spacePrefix(t.id))
+      await prisma.team.delete({ where: { id: t.id } })
+      return { ok: true }
+    }),
+
+  /**
+   * Move any walkthrough anywhere: a team, or (teamId null) the uploader's
+   * personal space. Quotas still apply — an admin move is not a quota bypass.
+   */
+  moveWalkthrough: protectedProcedure
+    .input(z.object({ walkthroughId: z.string(), teamId: z.string().nullable() }))
+    .mutation(async ({ ctx, input }) => {
+      await requireAdmin(ctx.session.user.id)
+      const g = await prisma.walkthrough.findUnique({
+        where: { id: input.walkthroughId },
+        select: { uploadedById: true },
+      })
+      if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
+      let dest: SpaceOwner
+      if (input.teamId) {
+        const team = await prisma.team.findUnique({
+          where: { id: input.teamId },
+          select: { id: true },
+        })
+        if (!team) throw new TRPCError({ code: 'NOT_FOUND', message: 'No such team' })
+        dest = { teamId: team.id, userId: null }
+      } else {
+        if (!g.uploadedById) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'No uploader on record — no personal space to move it to',
+          })
+        }
+        dest = { teamId: null, userId: g.uploadedById }
+      }
+      const moved = await relocate(input.walkthroughId, dest)
+      return { ok: true, ...moved }
     }),
 
   setFeature: protectedProcedure

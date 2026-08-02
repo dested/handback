@@ -35,11 +35,14 @@ export function Layout() {
   const session = data?.session ?? null
   const location = useLocation()
   const inApp = session !== null && APP_PREFIXES.some((p) => location.pathname.startsWith(p))
+  // /admin runs its own sidebar shell edge to edge; the shared container would
+  // box it in and double the padding.
+  const fullBleed = inApp && location.pathname.startsWith('/admin')
 
   return (
     <SpaceProvider enabled={session !== null}>
       {inApp ? <AppHeader email={session!.user.email} /> : <MarketingHeader signedIn={!!session} />}
-      <main className={inApp ? 'mx-auto w-full max-w-6xl px-6 py-8' : ''}>
+      <main className={inApp ? (fullBleed ? 'flex w-full' : 'mx-auto w-full max-w-6xl px-6 py-8') : ''}>
         <Outlet />
       </main>
       {!inApp && <MarketingFooter />}

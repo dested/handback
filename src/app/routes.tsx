@@ -4,7 +4,15 @@ import type { TRPCOptionsProxy } from '@trpc/tanstack-react-query'
 import { authClient } from '~/lib/auth-client'
 import type { Session } from '../../server/auth'
 import type { AppRouter } from '../../server/router'
-import { AdminPage } from './admin'
+import { AdminLayout } from './admin/layout'
+import { AdminOverviewPage } from './admin/overview'
+import { AdminUsersPage } from './admin/users'
+import { AdminUserPage } from './admin/user'
+import { AdminTeamsPage } from './admin/teams'
+import { AdminTeamPage } from './admin/team'
+import { AdminWalkthroughsPage } from './admin/walkthroughs'
+import { AdminWalkthroughDebugPage } from './admin/walkthrough-debug'
+import { AdminUsagePage } from './admin/usage'
 import { InboxPage } from './app'
 import { ConnectPage } from './connect'
 import { RouteErrorBoundary } from './error-boundary'
@@ -97,7 +105,21 @@ export const routes: RouteObject[] = [
       { path: 'recorder', Component: RecorderPage, loader: appLoader },
       { path: 'projects', Component: ProjectsPage, loader: appLoader },
       { path: 'team', Component: TeamPage, loader: appLoader },
-      { path: 'admin', Component: AdminPage, loader: appLoader },
+      {
+        path: 'admin',
+        Component: AdminLayout,
+        loader: appLoader,
+        children: [
+          { index: true, Component: AdminOverviewPage },
+          { path: 'users', Component: AdminUsersPage },
+          { path: 'users/:userId', Component: AdminUserPage },
+          { path: 'teams', Component: AdminTeamsPage },
+          { path: 'teams/:teamId', Component: AdminTeamPage },
+          { path: 'walkthroughs', Component: AdminWalkthroughsPage },
+          { path: 'walkthroughs/:walkthroughId', Component: AdminWalkthroughDebugPage },
+          { path: 'usage', Component: AdminUsagePage },
+        ],
+      },
       { path: 'dashboard', loader: () => redirect('/app') },
       // Links to a walkthrough were minted as /gripes/:id before the rename —
       // by push.ts, by MCP briefs, and by anyone who bookmarked one.

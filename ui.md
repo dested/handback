@@ -73,8 +73,11 @@ Loaded via Google Fonts in `index.html`. Do not add other font families.
 
 ## Components
 
-shadcn primitives live in `src/components/ui/` (button, card, input, label —
-add more there as needed, new-york style, no `asChild`). Buttons: `default`
+shadcn primitives live in `src/components/ui/` (button, card, input, label,
+sidebar — add more there as needed, new-york style, no `asChild`). The sidebar
+is shadcn's re-cut without radix: paper ground, hairline right rule, mono
+uppercase group labels, cobalt-wash active item; used by the /admin console
+(collapse persists, mobile is an overlay). No new sidebar variants — reuse it. Buttons: `default`
 variant is cobalt; use `outline` for secondary actions; destructive only for
 deletes. Page shells and nav come from `src/app/layout.tsx` — marketing chrome
 on public pages, app chrome (org switcher, Inbox/Projects/Team nav) when signed
