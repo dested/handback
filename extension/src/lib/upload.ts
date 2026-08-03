@@ -31,6 +31,7 @@ export interface UploadProgress {
   /** Files fully uploaded so far, and the total the server asked for. */
   done: number;
   total: number;
+  /** Live: finished files plus what the in-flight PUTs have pushed so far. */
   bytesDone: number;
   bytesTotal: number;
 }
@@ -54,6 +55,18 @@ const CONTENT_TYPES: Record<string, string> = {
 
 /** Four at a time: a walkthrough is mostly small JPEGs, and the webm wants the bandwidth. */
 const UPLOAD_CONCURRENCY = 4;
+
+/**
+ * A laptop that sleeps or drops Wi-Fi mid-PUT is not a lost walkthrough. Three
+ * tries per file, backing off, but only for the failures that can heal: a dead
+ * socket or a 5xx. A 403 is an expired or wrong presign and will read the same
+ * way in three seconds, so it fails straight through.
+ */
+const PUT_ATTEMPTS = 3;
+const PUT_BACKOFF_MS = [1000, 3000];
+
+/** The video is most of the upload, so bytes are the only honest progress. */
+const PROGRESS_INTERVAL_MS = 250;
 
 export function contentTypeFor(path: string): string {
   const ext = path.split('.').pop()?.toLowerCase() ?? '';
@@ -126,6 +139,50 @@ export function totalBytes(files: GripeFile[]): number {
   return files.reduce((sum, f) => sum + f.blob.size, 0);
 }
 
+/** `explain()`'s wording, for a transport that has no `Response` to read it off. */
+function putFailed(path: string, status: number, body: string): Error {
+  const detail = body.trim().slice(0, 200);
+  const where = status ? `(${status})` : '(no connection)';
+  return new Error(`upload of ${path} failed ${where}${detail ? `: ${detail}` : ''}`);
+}
+
+function backoff(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+/** The status and body of one PUT attempt. A transport failure throws instead. */
+interface PutAttempt {
+  status: number;
+  body: string;
+}
+
+/**
+ * One presigned PUT over XHR rather than fetch, for exactly one reason: fetch
+ * cannot report how far an upload has got, so the 50 MB video at the end of a
+ * walkthrough parked the bar at 99% for minutes and then either worked or didn't.
+ * Mirrors `src/lib/capture/upload.ts` — keep the two in step.
+ */
+function putOnce(
+  url: string,
+  contentType: string,
+  blob: Blob,
+  onBytes: (loaded: number) => void,
+): Promise<PutAttempt> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', url, true);
+    // The content-type is signed; no auth header may ride along on a presign.
+    xhr.setRequestHeader('content-type', contentType);
+    xhr.upload.onprogress = (event) => onBytes(event.loaded);
+    xhr.onload = () => resolve({ status: xhr.status, body: xhr.responseText ?? '' });
+    xhr.onerror = () => reject(new Error('network'));
+    xhr.ontimeout = () => reject(new Error('network'));
+    xhr.send(blob);
+  });
+}
+
 /**
  * Push one gripe to a workspace. Throws with a readable message on any failure —
  * the caller keeps the gripe open and offers to try again, because a half-uploaded
@@ -170,25 +227,63 @@ export async function pushGripe(
   const byPath = new Map(files.map((f) => [f.path, f]));
   const queue = [...uploads];
   let done = 0;
-  let bytesDone = 0;
+  /** Bytes of the files that finished. In-flight bytes are added on top, live. */
+  let settledBytes = 0;
+  /** Per-file `loaded` while a PUT is running, so the total never double-counts a retry. */
+  const inFlight = new Map<string, number>();
+  let lastEmit = 0;
+
+  const emit = (force: boolean) => {
+    const now = Date.now();
+    if (!force && now - lastEmit < PROGRESS_INTERVAL_MS) return;
+    lastEmit = now;
+    let bytesDone = settledBytes;
+    for (const loaded of inFlight.values()) bytesDone += loaded;
+    report({ phase: 'upload', done, total: uploads.length, bytesDone });
+  };
+
   report({ phase: 'upload', total: uploads.length });
   const worker = async () => {
     for (let job = queue.shift(); job; job = queue.shift()) {
       const file = byPath.get(job.path);
       if (!file) throw new Error(`the server asked for a file we don't have: ${job.path}`);
-      const res = await fetch(job.url, {
-        method: 'PUT',
-        headers: { 'content-type': job.contentType },
-        body: file.blob,
-      });
-      if (!res.ok) throw await explain(`upload of ${job.path}`, res);
-      done++;
-      bytesDone += file.blob.size;
-      report({ phase: 'upload', done, total: uploads.length, bytesDone });
+
+      for (let attempt = 1; ; attempt++) {
+        inFlight.set(job.path, 0);
+        let outcome: PutAttempt;
+        try {
+          outcome = await putOnce(job.url, job.contentType, file.blob, (loaded) => {
+            inFlight.set(job.path, loaded);
+            emit(false);
+          });
+        } catch {
+          inFlight.delete(job.path);
+          // A dead socket is the retryable case; the last attempt still fails.
+          if (attempt >= PUT_ATTEMPTS) throw putFailed(job.path, 0, '');
+          await backoff(PUT_BACKOFF_MS[attempt - 1] ?? 3000);
+          continue;
+        }
+
+        if (outcome.status >= 200 && outcome.status < 300) {
+          inFlight.delete(job.path);
+          settledBytes += file.blob.size;
+          done++;
+          emit(true);
+          break;
+        }
+
+        inFlight.delete(job.path);
+        // A 4xx won't heal — an expired presign reads the same in three seconds.
+        if (outcome.status < 500 || attempt >= PUT_ATTEMPTS) {
+          throw putFailed(job.path, outcome.status, outcome.body);
+        }
+        await backoff(PUT_BACKOFF_MS[attempt - 1] ?? 3000);
+      }
     }
   };
   await Promise.all(Array.from({ length: UPLOAD_CONCURRENCY }, worker));
 
+  const bytesDone = settledBytes;
   report({ phase: 'finalize', done, total: uploads.length, bytesDone });
   const finalizeRes = await fetch(`${server}/api/ingest/walkthroughs/${walkthroughId}/finalize`, {
     method: 'POST',

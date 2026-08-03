@@ -30,6 +30,7 @@ import { SignInPage, safeNext } from './sign-in'
 import { SignUpPage } from './sign-up'
 import { TeamPage } from './team'
 import { TermsPage } from './terms'
+import { UploadPage } from './upload'
 
 // Per-request context populated by entry-server.tsx and handed to loaders via
 // createStaticHandler.query(req, { requestContext }). Only available SSR-side.
@@ -126,6 +127,7 @@ export const routes: RouteObject[] = [
       // back here after auth or the stashed clip is orphaned — so this loader,
       // alone, carries the full URL through sign-in as ?next=.
       { path: 'phone', Component: PhonePage, loader: phoneLoader },
+      { path: 'upload', Component: UploadPage, loader: appLoader },
       { path: 'projects', Component: ProjectsPage, loader: appLoader },
       { path: 'team', Component: TeamPage, loader: appLoader },
       {

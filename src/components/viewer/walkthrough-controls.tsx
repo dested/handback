@@ -34,6 +34,7 @@ export function WalkthroughControls({ walkthrough }: { walkthrough: Walkthrough 
   function invalidate() {
     queryClient.invalidateQueries({ queryKey: walkthroughQueryKey })
     queryClient.invalidateQueries({ queryKey: trpc.walkthroughs.list.queryKey() })
+    queryClient.invalidateQueries({ queryKey: trpc.walkthroughs.inbox.queryKey() })
   }
 
   const setStatus = useMutation(
@@ -46,6 +47,7 @@ export function WalkthroughControls({ walkthrough }: { walkthrough: Walkthrough 
     trpc.walkthroughs.delete.mutationOptions({
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: trpc.walkthroughs.list.queryKey() })
+        queryClient.invalidateQueries({ queryKey: trpc.walkthroughs.inbox.queryKey() })
         navigate('/app')
       },
     })

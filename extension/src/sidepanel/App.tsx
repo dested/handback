@@ -280,7 +280,9 @@ function explainUpload(raw: string, host: string): UploadExplanation {
   return { line: `couldn't reach ${host} — check the connection and try again` };
 }
 
-const mb = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+/** `41.2 of 180.5 MB` — the unit once, so the two numbers can be read against each other. */
+const mbPair = (done: number, total: number) =>
+  `${(done / 1024 / 1024).toFixed(1)} of ${(total / 1024 / 1024).toFixed(1)} MB`;
 
 export function App() {
   const [state, setState] = useState<PanelState>(EMPTY);
@@ -914,15 +916,26 @@ export function App() {
     .filter(Boolean)
     .join(' · ');
 
+  /**
+   * Bytes, not files. The last file of a walkthrough is the video and it is most
+   * of the upload, so counting files parked the bar at "97 of 100" for minutes.
+   */
+  const uploadPct =
+    progress && progress.bytesTotal
+      ? Math.min(100, (progress.bytesDone / progress.bytesTotal) * 100)
+      : 0;
   const uploadLine = progress
     ? progress.phase === 'declare'
       ? 'opening the walkthrough in Handback…'
       : progress.phase === 'finalize'
         ? 'finishing up…'
-        : `uploading ${progress.done}/${progress.total} · ${mb(progress.bytesDone)} of ${mb(progress.bytesTotal)}`
+        : `uploading — ${Math.floor(uploadPct)}%`
     : null;
-  const uploadPct =
-    progress && progress.bytesTotal ? (progress.bytesDone / progress.bytesTotal) * 100 : 0;
+  /** The scale the percent is a percent of; absent before the server names the files. */
+  const uploadDetail =
+    progress && progress.phase !== 'declare' && progress.bytesTotal
+      ? mbPair(progress.bytesDone, progress.bytesTotal)
+      : null;
 
   const explained = uploadError ? explainUpload(uploadError, serverHost) : null;
 
@@ -931,7 +944,10 @@ export function App() {
     <>
       {uploadLine && (
         <div className="prog">
-          <div className="prog-line">{uploadLine}</div>
+          <div className="prog-line">
+            <span>{uploadLine}</span>
+            {uploadDetail && <span className="prog-bytes">{uploadDetail}</span>}
+          </div>
           <div className="bar">
             <i style={{ width: `${uploadPct}%` }} />
           </div>

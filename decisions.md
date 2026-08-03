@@ -2,6 +2,18 @@
 
 > ADR-lite: what was decided, why, what was rejected. Append-only.
 
+## 2026-08-03 — Space is an attribute, not a mode
+**Why:** the header SpaceSwitcher forced everyone to browse one space at a time, and the owner —
+who has many teams and projects — called the resulting inbox unusable and the switching senseless
+("stop making me switch space at the top"). Now every read surface spans everything the session
+reaches: `walkthroughs.inbox`/`projects.all` (membership IS the access check), filters instead of
+context, Teams and Projects pages grouped by space, team creation on the Teams page. The only
+place a space is *chosen* is where it must be: the destination of an upload (extension picker,
+/phone, /upload) — `useActiveSpace` survives solely as that default.
+**Rejected:** keeping the switcher alongside the cross-space inbox (two sources of truth for
+"what am I looking at"); server-side filter params on the inbox query (≤200 rows — client-side
+filtering makes every rail count free and instant); per-space routes like /t/:slug (deep-linkable
+but resurrects the mode).
 ## 2026-08-02 — The phone records with the OS recorder; the PWA is a share target, not a recorder
 **Why:** no mobile browser exposes screen capture — `getDisplayMedia` is `version_added: false`
 on Chrome Android (exposed 72–88 but always `NotAllowedError`, then hidden), Safari iOS, Firefox

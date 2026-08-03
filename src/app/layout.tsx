@@ -7,15 +7,10 @@ import {
   useRevalidator,
   useRouteLoaderData,
 } from 'react-router-dom'
-import { useEffect, useRef, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown } from 'lucide-react'
-import { Button } from '~/components/ui/button'
-import { Input } from '~/components/ui/input'
-import { Label } from '~/components/ui/label'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Wordmark } from '~/components/logo'
 import { authClient } from '~/lib/auth-client'
-import { SpaceProvider, clearIdentity, useActiveSpace } from '~/lib/space'
+import { SpaceProvider, clearIdentity } from '~/lib/space'
 import { useTRPC } from '~/lib/trpc'
 import { cn } from '~/lib/utils'
 import type { RootLoaderData } from './routes'
@@ -27,6 +22,7 @@ const APP_PREFIXES = [
   '/projects',
   '/recorder',
   '/phone',
+  '/upload',
   '/connect',
   '/admin',
 ]
@@ -43,7 +39,8 @@ export function Layout() {
   return (
     <SpaceProvider enabled={session !== null}>
       {inApp ? <AppHeader email={session!.user.email} /> : <MarketingHeader signedIn={!!session} />}
-      <main className={inApp ? (fullBleed ? 'flex w-full' : 'mx-auto w-full max-w-6xl px-6 py-8') : ''}>
+      <main
+        className={inApp ? (fullBleed ? 'flex w-full' : 'mx-auto w-full max-w-6xl px-6 py-8') : ''}>
         <Outlet />
       </main>
       {!inApp && <MarketingFooter />}
@@ -88,7 +85,6 @@ function AppHeader({ email }: { email: string }) {
   const revalidator = useRevalidator()
   const trpc = useTRPC()
   const queryClient = useQueryClient()
-  const { space } = useActiveSpace()
   const adminStatus = useQuery(trpc.admin.status.queryOptions())
 
   async function signOut() {
@@ -116,19 +112,19 @@ function AppHeader({ email }: { email: string }) {
         <Link to="/app" aria-label="Handback inbox" className="shrink-0">
           <Wordmark />
         </Link>
-        <SpaceSwitcher />
-        <div className="order-last flex w-full items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:order-none md:ml-2 md:w-auto md:overflow-visible">
+        <div className="order-last flex w-full items-center gap-1 overflow-x-auto [scrollbar-width:none] md:order-none md:ml-2 md:w-auto md:overflow-visible [&::-webkit-scrollbar]:hidden">
           <NavLink to="/app" className={tab} end>
             Inbox
           </NavLink>
           <NavLink to="/projects" className={tab}>
             Projects
           </NavLink>
-          {space.teamId && (
-            <NavLink to="/team" className={tab}>
-              Team
-            </NavLink>
-          )}
+          {/* Always, and plural. The inbox spans every space now, so the header
+              no longer knows which one you are "in" — and a Teams tab that
+              appears and disappears was the switcher's tell. */}
+          <NavLink to="/team" className={tab}>
+            Teams
+          </NavLink>
           <NavLink to="/recorder" className={tab}>
             Recorder
           </NavLink>
@@ -155,166 +151,9 @@ function AppHeader({ email }: { email: string }) {
   )
 }
 
-/**
- * The space menu. It renders even for an account with nothing but Personal,
- * because the menu is also where a team gets created — and a lone personal
- * space is exactly the account most likely to want one.
- */
-function SpaceSwitcher() {
-  const trpc = useTRPC()
-  const { spaces, space, setActiveSpace } = useActiveSpace()
-  const [open, setOpen] = useState(false)
-  const [creating, setCreating] = useState(false)
-  const wrap = useRef<HTMLDivElement | null>(null)
-  const entitlements = useQuery(trpc.teams.entitlements.queryOptions())
-
-  useEffect(() => {
-    if (!open) return
-    function onDown(e: MouseEvent) {
-      if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false)
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('mousedown', onDown)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onDown)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [open])
-
-  const item = 'w-full rounded px-2 py-1.5 text-left text-sm'
-
-  return (
-    <div className="relative" ref={wrap}>
-      <button
-        type="button"
-        aria-label="Space"
-        onClick={() => setOpen((o) => !o)}
-        className="border-input bg-background text-foreground flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-sm font-medium">
-        <span className="text-muted-foreground text-xs font-normal">Space</span>
-        <span className="max-w-32 truncate">{space.name}</span>
-        <ChevronDown className="size-3.5 shrink-0" />
-      </button>
-
-      {open && (
-        <div className="bg-card border-border absolute z-50 mt-1 min-w-52 rounded-md border p-1 shadow-md">
-          {spaces.map((s) => (
-            <button
-              key={s.teamId ?? 'personal'}
-              type="button"
-              onClick={() => {
-                setActiveSpace(s.teamId)
-                setOpen(false)
-              }}
-              className={cn(
-                item,
-                'flex items-center gap-2',
-                s.teamId === space.teamId ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'
-              )}>
-              <span className="truncate">{s.name}</span>
-            </button>
-          ))}
-          <div className="border-border my-1 border-t" />
-          {/* No affordance until the answer is in — flashing the mailto fallback
-              at an entitled user reads as "you can't" for a beat on every open. */}
-          {entitlements.isPending ? (
-            <div className={cn(item, 'text-muted-foreground')}>…</div>
-          ) : entitlements.data?.canCreateTeams ? (
-            <button
-              type="button"
-              onClick={() => {
-                setCreating(true)
-                setOpen(false)
-              }}
-              className={cn(item, 'hover:bg-accent/50')}>
-              New team…
-            </button>
-          ) : (
-            <a
-              href="mailto:sal@dested.com?subject=Handback%20teams"
-              className={cn(item, 'text-muted-foreground hover:bg-accent/50 block')}>
-              Create a team — write us
-            </a>
-          )}
-        </div>
-      )}
-
-      {creating && <NewTeamModal onClose={() => setCreating(false)} />}
-    </div>
-  )
-}
-
-function NewTeamModal({ onClose }: { onClose: () => void }) {
-  const trpc = useTRPC()
-  const { refreshTeams, setActiveSpace } = useActiveSpace()
-  const [name, setName] = useState('')
-
-  const create = useMutation(
-    trpc.teams.create.mutationOptions({
-      onSuccess: (result) => {
-        refreshTeams()
-        setActiveSpace(result.id)
-        onClose()
-      },
-    })
-  )
-
-  const trimmed = name.trim()
-
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose()
-    }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [onClose])
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/20"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose()
-      }}>
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="New team"
-        className="bg-card border-border w-80 rounded-xl border p-6 shadow-md">
-        <form
-          className="space-y-4"
-          onSubmit={(e) => {
-            e.preventDefault()
-            if (!trimmed || create.isPending) return
-            create.mutate({ name: trimmed })
-          }}>
-          <div className="space-y-2">
-            <Label htmlFor="new-team-name">Team name</Label>
-            <Input
-              id="new-team-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Acme Design"
-              maxLength={80}
-              autoFocus
-              required
-            />
-          </div>
-          {create.isError && <p className="text-destructive text-sm">{create.error.message}</p>}
-          <div className="flex items-center gap-2">
-            <Button type="submit" disabled={create.isPending || !trimmed}>
-              {create.isPending ? 'Creating…' : 'Create'}
-            </Button>
-            <Button type="button" variant="ghost" onClick={onClose}>
-              Cancel
-            </Button>
-          </div>
-        </form>
-      </div>
-    </div>
-  )
-}
+/* The header's SpaceSwitcher and its NewTeamModal died with the space-as-mode
+   model (2026-08-03): the inbox spans every space, and team creation lives on
+   the Teams page. */
 
 function MarketingFooter() {
   return (

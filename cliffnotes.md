@@ -16,6 +16,12 @@
 > **Model note (2026-08-01): workspaces no longer exist.** A user has one implicit **Personal
 > space** (rows with `teamId: null, userId: <owner>`) and zero or more **Teams** (`team` table,
 > `ownerId` + `seatLimit`). The word "workspace" is banned from code and copy.
+>
+> **UI note (2026-08-03): space is an attribute, not a mode.** The header SpaceSwitcher is
+> DELETED. The inbox spans every space (`walkthroughs.inbox`, client-side filters), Projects and
+> Teams pages are cross-space, team creation lives on /team ("Teams"). `useActiveSpace` survives
+> only as the destination default for /phone and /upload. Don't reintroduce a global "current
+> space".
 
 ## What this is
 
@@ -201,7 +207,8 @@ drydock.yaml            DRYDOCK-OWNED — the deploy manifest (portal is source 
 extension/              Handback Recorder — the Chrome MV3 extension (own npm workspace)
   public/manifest.json  MV3: sidePanel + activeTab/scripting/storage/tabs; hotkey Alt+Shift+D
   src/lib/              Shared contracts: types, messages (worker protocol), timeline math,
-                        db (IndexedDB 'handback-recorder'), report.md builder, upload (to /api/ingest),
+                        db (IndexedDB 'handback-recorder'), report.md builder, upload (to /api/ingest
+                        — XHR PUTs: live byte progress + 3-try retry, mirrors src/lib/capture/upload.ts),
                         context (GET /api/ingest/context), walkthroughs (GET /api/ingest/walkthroughs
                         — the workspace's queue, read back into the panel's home screen)
   src/background/       Service worker: hotkeys, dock routing, IndexedDB writes, strip docking
@@ -225,9 +232,10 @@ extension/              Handback Recorder — the Chrome MV3 extension (own npm 
 | `/join/:inviteId` | Invite accept | `src/app/join.tsx` |
 | `/forgot-password` · `/reset-password` | Password recovery (better-auth emails the link) | `src/app/{forgot,reset}-password.tsx` |
 | `/privacy` · `/terms` | Legal pages (linked from the marketing footer) | `src/app/{privacy,terms}.tsx` |
-| `/app` | Inbox (active space's walkthrough list) | `src/app/app.tsx` |
+| `/app` | Inbox — ALL spaces, filter rail (status/space/project/search over one `walkthroughs.inbox` query) | `src/app/app.tsx` + `src/components/inbox/rail.tsx` |
+| `/upload` | Desktop intake: drop a clip → distill → upload (reuses capture lib + phone components) | `src/app/upload.tsx` |
 | `/walkthroughs/:walkthroughId` | The viewer (`/gripes/:id` 302s here) | `src/app/walkthrough.tsx` |
-| `/projects` · `/team` | Projects (any space) · Members/Invites/seats (team spaces) | `src/app/{projects,team}.tsx` |
+| `/projects` · `/team` | Projects (ALL spaces, grouped; create w/ space select) · "Teams" — every team (roster/invites/seats per team, New team lives HERE) | `src/app/{projects,team}.tsx` |
 | `/connect` | Connect a coding agent — one button mints a token and fills in `claude mcp add`; tokens/disconnect are reference below | `src/app/connect.tsx` |
 | `/recorder` | Install + one-click-link the extension (detects install, mints token, handshake) | `src/app/recorder.tsx` |
 | `/phone` | Phone guide + share-target intake — OS-recorded clips distilled in-browser and uploaded | `src/app/phone.tsx` |

@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 import {
+  memberTeamIds,
   requireSpaceAccess,
   requireTeamRole,
   requireViewAccess,
@@ -27,7 +28,11 @@ import {
   presignGet,
 } from './storage'
 import { protectedProcedure, publicProcedure, router } from './trpc'
-import { getWalkthroughDetail } from './walkthroughs-api'
+import {
+  getWalkthroughDetail,
+  WALKTHROUGH_STATUSES,
+  type WalkthroughStatus,
+} from './walkthroughs-api'
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000
 
@@ -43,6 +48,22 @@ const toSpace = (teamId: string | null, selfId: string): SpaceOwner =>
 /** Prisma `where` fragment selecting exactly one space's rows. */
 const spaceWhere = (s: SpaceOwner) =>
   s.teamId ? { teamId: s.teamId } : { teamId: null, userId: s.userId }
+
+/**
+ * Prisma `where` fragment for every space the caller reaches at once — their
+ * personal rows plus each of their teams'. The cross-space reads (the inbox,
+ * the project list behind it) share it so they can't drift apart.
+ */
+const reachWhere = (userId: string, teamIds: string[]) => ({
+  OR: [{ teamId: null, userId }, { teamId: { in: teamIds } }],
+})
+
+/**
+ * `status` is a plain column, so a row hands back a bare string; the cross-space
+ * reads ship the union the client switches on. Anything unrecognized reads open.
+ */
+const asStatus = (s: string): WalkthroughStatus =>
+  WALKTHROUGH_STATUSES.find((v) => v === s) ?? 'open'
 
 /**
  * The move core shared by walkthroughs.move and admin.moveWalkthrough: quota
@@ -554,6 +575,47 @@ const projectsRouter = router({
       }))
     }),
 
+  /**
+   * Every project the caller reaches — their personal space plus each team they
+   * belong to. Membership is the whole access check: the `where` can only match
+   * spaces they're in, so there's nothing left to authorize per row.
+   */
+  all: protectedProcedure.query(async ({ ctx }) => {
+    const me = ctx.session.user.id
+    const teamIds = await memberTeamIds(me)
+    const rows = await prisma.project.findMany({
+      where: reachWhere(me, teamIds),
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        teamId: true,
+        // The space's name off the relation, so a list spanning several teams
+        // costs no extra query.
+        team: { select: { name: true } },
+        _count: { select: { walkthroughs: true } },
+      },
+    })
+    return (
+      rows
+        .map((p) => ({
+          id: p.id,
+          name: p.name,
+          slug: p.slug,
+          teamId: p.teamId,
+          spaceName: p.team?.name ?? 'Personal',
+          walkthroughCount: p._count.walkthroughs,
+        }))
+        // Personal leads; teams follow alphabetically, projects by name within one.
+        .sort(
+          (a, b) =>
+            Number(a.teamId !== null) - Number(b.teamId !== null) ||
+            a.spaceName.localeCompare(b.spaceName) ||
+            a.name.localeCompare(b.name)
+        )
+    )
+  }),
+
   create: protectedProcedure
     .input(
       z.object({
@@ -679,6 +741,40 @@ const walkthroughsRouter = router({
         uploadedByName: g.uploadedBy?.name ?? null,
       }))
     }),
+
+  /**
+   * `list` widened across every space the caller reaches — personal plus each
+   * team — for the one inbox that spans them. Same finalized-only rule and same
+   * 200-row ceiling; each row names its space so the list stays readable when
+   * it interleaves. The `where` is the access check (see projects.all).
+   */
+  inbox: protectedProcedure.query(async ({ ctx }) => {
+    const me = ctx.session.user.id
+    const teamIds = await memberTeamIds(me)
+    const rows = await prisma.walkthrough.findMany({
+      where: { ...reachWhere(me, teamIds), finalizedAt: { not: null } },
+      orderBy: { recordedAt: 'desc' },
+      take: 200,
+      select: { ...walkthroughListSelect, teamId: true, team: { select: { name: true } } },
+    })
+    return rows.map((g) => ({
+      id: g.id,
+      slug: g.slug,
+      title: g.title,
+      origin: g.origin,
+      status: asStatus(g.status),
+      recordedAt: g.recordedAt.toISOString(),
+      durationMs: g.durationMs,
+      frameCount: g.frameCount,
+      errorCount: g.errorCount,
+      takeCount: g._count.takes,
+      projectId: g.projectId,
+      projectName: g.project?.name ?? null,
+      teamId: g.teamId,
+      spaceName: g.team?.name ?? 'Personal',
+      uploadedByName: g.uploadedBy?.name ?? null,
+    }))
+  }),
 
   get: protectedProcedure
     .input(z.object({ walkthroughId: z.string() }))

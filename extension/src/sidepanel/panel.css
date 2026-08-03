@@ -1272,10 +1272,20 @@ button.ticker.warn:hover {
   flex-direction: column;
   gap: 5px;
 }
+/* The percent on the left, the scale it is a percent of on the right. Tabular
+ * figures because both numbers change four times a second. */
 .prog-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
   font-family: var(--font-mono);
   font-size: var(--fs-0);
   color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.prog-bytes {
+  flex: none;
 }
 .bar {
   height: 3px;

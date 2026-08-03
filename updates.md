@@ -2,6 +2,42 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-08-03 — the app rethought: space is an attribute, not a mode
+Asked: "this page fucking sucks and its the main page… i have so many teams and projects…
+stop making me switch space at the top… i need this rebuilt… make sure the ui looks incredible."
+Plus: upload progress proportional (the 50 MB video stalled a file-counted bar) and a straight-up
+upload feature in the inbox.
+Done: **header SpaceSwitcher deleted.** New no-input `walkthroughs.inbox` + `projects.all`
+(server/router.ts — everything the session reaches across Personal + member teams, one query
+each, no N+1). Inbox rebuilt (`app.tsx` + `components/inbox/rail.tsx`): filter rail with honest
+counts (status "Needs attention" default / spaces incl. empty ones / projects incl. General,
+capped 8 + more), search, hairline rows (status ink · title · mono meta with space chip on
+All-spaces), skeleton/error/filtered-empty/first-run states, status+space persisted to
+`handback.inbox.filters`. **/upload** — desktop drop-zone intake reusing the capture pipeline +
+phone components (watchdog/cancel kept; pending-store/wake-lock deliberately not; caps mirror
+ingest 2/4 GB). Projects page cross-space grouped (create w/ space select); /team is now
+**Teams** — every team as a disclosure (roster/invites/seats, admin gates preserved), New team
+moved here from the dead switcher. Nav: Teams always visible. Extension 1.6.3: presigned PUTs
+fetch→XHR, byte-true bar + `41.2 of 180.5 MB` detail, 3 retries — published separately. e2e
+smoke.spec locators updated to the new copy but **UNVERIFIED** (.env still points at prod, so
+the suite wasn't run — run it after flipping DATABASE_URL back and re-baseline screenshots).
+Touched: server/router.ts, src/app/{app,layout,routes,upload,projects,team}.tsx,
+src/components/inbox/rail.tsx, extension/src/lib/upload.ts, extension/src/sidepanel/App.tsx +
+panel.css, extension/{package.json,public/manifest.json}, e2e/smoke.spec.ts, cliffnotes.md
+
+## 2026-08-03 — extension upload progress is byte-true (1.6.3)
+Asked: the panel counted files ("part 97 of 100") so the bar sat at ~99% for minutes while the
+last 50 MB video went up. Make progress byte-proportional and live during the big PUT.
+Done: presigned PUTs moved from fetch to XHR, ported BACK from `src/lib/capture/upload.ts` —
+`xhr.upload.onprogress` per file into an in-flight loaded map (bytesDone = settled sizes +
+in-flight loaded, so a retry never double-counts), emits throttled to 250 ms, 3 attempts with
+1s/3s backoff on a dead socket or 5xx and never on a 4xx (an expired presign won't heal).
+Declare/finalize stay on fetch; every request/response shape and error string unchanged.
+Panel label is now `uploading — 23%` with a right-aligned mono `41.2 of 180.5 MB`; the existing
+cobalt bar's width was already byte-driven and now actually moves. Version 1.6.2 → 1.6.3.
+Touched: extension/src/lib/upload.ts, extension/src/sidepanel/{App.tsx,panel.css},
+extension/{package.json,public/manifest.json}, cliffnotes.md
+
 ## 2026-08-03 — /phone: keyframes best-effort + the iOS speed pass
 Asked: second iPhone run died in frame extraction ("that file can't be read as a recording on
 this phone") after a slow "reading" stage; "it can't be this slow for a 30 second video…

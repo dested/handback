@@ -18,8 +18,9 @@ export function WalkthroughHeader({ walkthrough }: { walkthrough: Walkthrough })
         queryClient.invalidateQueries({
           queryKey: trpc.walkthroughs.get.queryKey({ walkthroughId: walkthrough.id }),
         })
-        // The inbox lists titles too.
+        // The inbox lists titles too — both readers of them.
         queryClient.invalidateQueries({ queryKey: trpc.walkthroughs.list.queryKey() })
+        queryClient.invalidateQueries({ queryKey: trpc.walkthroughs.inbox.queryKey() })
       },
     })
   )
