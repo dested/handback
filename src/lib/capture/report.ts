@@ -727,7 +727,7 @@ export function buildManifestTxt(session: Session, recordings: Recording[], url?
     ])
     rows.push([
       `${dir}/frames/`,
-      `${rec.frames.length} keyframes, NN-mmss.jpg (the mmss is time inside this part's own ${rec.videoFile}, not a position in report.md's timeline) — 0.5s candidates + live dedup, deduped from ${rec.sampled} sampled`,
+      `${rec.frames.length} keyframes, NN-mmss.jpg (the mmss is time inside this part's own ${rec.videoFile}, not a position in report.md's timeline) — 1s candidates + dedup, deduped from ${rec.sampled} sampled`,
     ])
     if (sheets) {
       rows.push([

@@ -2,6 +2,25 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-08-03 — /phone: keyframes best-effort + the iOS speed pass
+Asked: second iPhone run died in frame extraction ("that file can't be read as a recording on
+this phone") after a slow "reading" stage; "it can't be this slow for a 30 second video…
+i think we have to offload it". Desktop run of the same flow worked end to end.
+Done: **frame extraction can no longer kill or block a run** — extractFrames+makeGrids sit in
+an atomic try/catch (frame files truncated back out on failure) and the take degrades to zero
+frames; video + transcript + report always ship, done screen says so. Speed: distill now REUSES
+the row's probe via `ClipInput.probe` (the clip was being fully decoded twice — the 1-minute
+"reading"), candidate cadence 500 ms → 1 s floor (post-hoc seeks pay real decode latency;
+60/min candidates still feed the 40/min budget; MANIFEST wording follows), per-seek
+requestVideoFrameCallback dropped for seeked+one rAF (150 ms hidden-tab grace kept). iOS
+readiness: `readyVideo` primes with muted play/pause and accepts canplay|loadeddata; one failed
+seek skips the candidate, three consecutive rethrow into the degrade. Cliffnotes gotcha updated:
+the 1 s cadence is a LEGITIMATE divergence from the extension's 500 ms live sampling. The
+durable iOS answer — raw clip up first, server-side ffmpeg keyframes — needs a Drydock change
+(ffmpeg in the image, 576 MiB ceiling) and is parked pending Sal's call.
+Touched: src/lib/capture/{types,distill,media,frames,report}.ts, src/app/phone.tsx,
+src/components/phone/clip-list.tsx, cliffnotes.md
+
 ## 2026-08-02 — /phone capture made un-losable
 Asked: a real phone walkthrough was lost — the client died during local processing. Harden the
 flow so a clip that reached us can't be lost short of explicit discard.

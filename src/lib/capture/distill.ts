@@ -63,6 +63,9 @@ export async function distillAndUpload(
   const stop = () => {
     if (opts.signal?.aborted) throw new Error('cancelled')
   }
+  /** Cancellation travels as an error like any other; it is the one nothing may swallow. */
+  const cancelled = (error: unknown): boolean =>
+    Boolean(opts.signal?.aborted) || (error instanceof Error && error.message === 'cancelled')
   /** Local progress within one clip, scaled onto the whole run. -1 stays -1. */
   const report = (stage: CaptureStage, clipIdx: number, local: number, detail?: string) => {
     const pct = local < 0 ? -1 : (clipIdx + Math.min(1, Math.max(0, local))) / count
@@ -78,6 +81,7 @@ export async function distillAndUpload(
   const ordered = clips
     .map((clip, position) => ({
       file: clip.file,
+      probe: clip.probe,
       position,
       at: Number.isFinite(clip.file.lastModified) ? clip.file.lastModified : 0,
     }))
@@ -105,10 +109,15 @@ export async function distillAndUpload(
     const dir = recDirName(index)
     const label = count > 1 ? `clip ${index} of ${count}` : file.name
 
+    // Reading a clip is the most expensive thing that happens before any real
+    // work does — a minute per clip on an iPhone, because readying a blob-URL
+    // video there is slow. The picker already paid it, so when it hands its
+    // probe over the pipeline takes it rather than decoding the file twice.
     report('probe', i, -1, label)
-    const probe = await probeClip(file)
-    // The poster is for a picker screen; nothing here shows one.
-    if (probe.posterUrl) URL.revokeObjectURL(probe.posterUrl)
+    const probe = entry.probe ?? (await probeClip(file))
+    // The poster is for a picker screen; nothing here shows one. A borrowed
+    // probe's poster belongs to whoever lent it — only revoke our own.
+    if (!entry.probe && probe.posterUrl) URL.revokeObjectURL(probe.posterUrl)
 
     // Audio first, frames second, and the order is load-bearing. Decoding the
     // audio pulls the whole file in as an ArrayBuffer and then holds a Float32
@@ -149,48 +158,65 @@ export async function distillAndUpload(
     }
     stop()
 
-    let frames: RecordingFrame[] = []
-    let frameBlobs = new Map<number, Blob>()
+    // Keyframes and the contact sheets drawn from them are best-effort, and they
+    // are the only stage that is. A phone decoder that will not step through a
+    // long recording — the iOS case this exists for — costs the walkthrough its
+    // stills; it must not cost the walkthrough. Video, transcript and report all
+    // ship regardless, and the take degrades to zero frames.
+    //
+    // The rollback is the whole stage at once: half a set of frames with no
+    // sheets would leave report.md citing grid files nobody wrote.
+    let kept: RecordingFrame[] = []
     let sampled = 0
-    if (probe.hasVideo) {
-      const total = mmss(probe.durationMs)
-      report('frames', i, 0, `0:00 of ${total}`)
-      const extracted = await extractFrames(file, probe.durationMs, {
-        signal: opts.signal,
-        onProgress: (fraction) =>
-          report('frames', i, fraction, `${mmss(fraction * probe.durationMs)} of ${total}`),
-      })
-      frames = extracted.frames
-      frameBlobs = extracted.blobs
-      sampled = extracted.sampled
-    }
-    stop()
-
-    // Only frames whose JPEG exists ship, and the take carries only those — the
-    // report's citations, the sheets and the declared counts then all describe
-    // what is actually in the upload.
-    const kept: RecordingFrame[] = []
-    const gridFrames: GridFrame[] = []
-    for (const frame of frames) {
-      const blob = frameBlobs.get(frame.index)
-      if (!blob) continue
-      files.push({ path: `${dir}/${frame.file}`, blob, contentType: contentTypeFor(frame.file) })
-      kept.push(frame)
-      gridFrames.push({ blob, label: frame.file.split('/').pop() ?? frame.file })
-    }
-    // `files` owns every surviving blob now; the extractor's own map does not.
-    frameBlobs = new Map()
-    frames = []
-
-    if (gridFrames.length) {
-      report('sheets', i, 0, label)
-      // Nine at a time in frame order — exactly how report.ts maps a frame to its sheet.
-      for (const [n, sheet] of (await makeGrids(gridFrames)).entries()) {
-        const path = sheetFile(n + 1, `${dir}/`)
-        files.push({ path, blob: sheet, contentType: contentTypeFor(path) })
+    const framesMark = files.length
+    try {
+      let frames: RecordingFrame[] = []
+      let frameBlobs = new Map<number, Blob>()
+      if (probe.hasVideo) {
+        const total = mmss(probe.durationMs)
+        report('frames', i, 0, `0:00 of ${total}`)
+        const extracted = await extractFrames(file, probe.durationMs, {
+          signal: opts.signal,
+          onProgress: (fraction) =>
+            report('frames', i, fraction, `${mmss(fraction * probe.durationMs)} of ${total}`),
+        })
+        frames = extracted.frames
+        frameBlobs = extracted.blobs
+        sampled = extracted.sampled
       }
-      // The sheets are drawn; these were only ever the source pixels.
-      gridFrames.length = 0
+      stop()
+
+      // Only frames whose JPEG exists ship, and the take carries only those — the
+      // report's citations, the sheets and the declared counts then all describe
+      // what is actually in the upload.
+      const gridFrames: GridFrame[] = []
+      for (const frame of frames) {
+        const blob = frameBlobs.get(frame.index)
+        if (!blob) continue
+        files.push({ path: `${dir}/${frame.file}`, blob, contentType: contentTypeFor(frame.file) })
+        kept.push(frame)
+        gridFrames.push({ blob, label: frame.file.split('/').pop() ?? frame.file })
+      }
+      // `files` owns every surviving blob now; the extractor's own map does not.
+      frameBlobs = new Map()
+      frames = []
+
+      if (gridFrames.length) {
+        report('sheets', i, 0, label)
+        // Nine at a time in frame order — exactly how report.ts maps a frame to its sheet.
+        for (const [n, sheet] of (await makeGrids(gridFrames)).entries()) {
+          const path = sheetFile(n + 1, `${dir}/`)
+          files.push({ path, blob: sheet, contentType: contentTypeFor(path) })
+        }
+        // The sheets are drawn; these were only ever the source pixels.
+        gridFrames.length = 0
+      }
+    } catch (error) {
+      if (cancelled(error)) throw error
+      files.length = framesMark
+      kept = []
+      sampled = 0
+      report('frames', i, 1, 'keyframes unavailable on this phone — shipping video + transcript')
     }
     stop()
 

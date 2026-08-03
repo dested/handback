@@ -191,6 +191,7 @@ export function PhonePage() {
       durationMs: 0,
       hasVideo: false,
       posterUrl: null,
+      probe: null,
     }))
     setClips((prev) => [...prev, ...added])
     for (const clip of added) {
@@ -385,7 +386,11 @@ export function PhonePage() {
     try {
       const shipped = await withToken((token) =>
         distillAndUpload(
-          clips.map((clip) => ({ file: clip.file })),
+          // The row's own read goes with the file: reading a clip is a minute of
+          // an iPhone's life, and the pipeline should not spend it twice.
+          clips.map((clip) =>
+            clip.probe ? { file: clip.file, probe: clip.probe } : { file: clip.file }
+          ),
           {
             token,
             teamId: destination.teamId,
@@ -666,6 +671,13 @@ export function PhonePage() {
             </p>
           )}
 
+          {result.frameCount === 0 && clips.some((clip) => clip.hasVideo) && (
+            <p className="text-muted-foreground text-sm">
+              shipped without keyframes — this phone couldn't decode the video, so the clip itself
+              carries the picture
+            </p>
+          )}
+
           <div className="flex flex-wrap items-center gap-3">
             <Link to={result.url} className={cn(buttonVariants())}>
               Open the walkthrough
@@ -730,6 +742,7 @@ async function probeInto(
               durationMs: probe.durationMs,
               hasVideo: probe.hasVideo,
               posterUrl: probe.posterUrl,
+              probe,
             }
           : entry
       )

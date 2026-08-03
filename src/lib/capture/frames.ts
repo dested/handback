@@ -1,28 +1,29 @@
 import { pad2, mmssFile } from './format'
-import {
-  hiddenVideo,
-  LOAD_TIMEOUT_MS,
-  releaseVideo,
-  seekTo,
-  toJpeg,
-  UNREADABLE,
-  waitFor,
-} from './media'
+import { hiddenVideo, readyVideo, releaseVideo, seekTo, toJpeg, UNREADABLE } from './media'
 import type { RecordingFrame } from './types'
 
 /**
  * The recorder's dedup, run after the fact. `extension/src/sidepanel/recorder.ts`
  * samples a live screen share every 500 ms and decides keep/drop as it goes;
  * here the recording already exists, so the same decision is made by seek-stepping
- * the file. Every constant and the keep/drop rule are that file's, unchanged —
- * a walkthrough distilled on a phone has to look like one distilled in Chrome.
+ * the file. The keep/drop rule and every constant it reads are that file's,
+ * unchanged — a walkthrough distilled on a phone has to look like one distilled
+ * in Chrome. The **cadence** is not: see STEP_FLOOR_MS.
  *
  * What is *not* ported: forced keyframes. A phone clip has no clicks, no
  * navigations and no page events to force one, so the only reasons here are
  * 'start', 'change' and 'beat'.
  */
 
-const SAMPLE_MS = 500 // candidate cadence — the recorder's live sampling interval
+/**
+ * Candidate cadence. The extension's 500 ms is free — it reads a frame that a
+ * live screen share was going to paint anyway. A seek-step pays a full decode
+ * per candidate, and on iOS that is the whole cost of the run: at 500 ms a
+ * thirty-second clip asks the phone for sixty decodes to keep frames the budget
+ * below caps at forty a minute. One second still oversamples the budget by 50%
+ * and halves the work.
+ */
+const STEP_FLOOR_MS = 1000
 const SIG_SIZE = 64 // 64×64 RGB cells — fine enough that a sprite-sized change still flips whole cells
 const PIX_TOL = 25 // a cell counts as changed if any channel moves more than this
 const DEDUP_THRESHOLD = 8 // cells that must change for a frame to be new (~0.2% of 4096)
@@ -34,12 +35,19 @@ const MAX_FRAME_BUDGET = 600
 const MAX_FRAME_W = 1920
 const JPEG_QUALITY = 0.9
 /**
- * A live recorder pays 500 ms of wall clock per candidate; a seek-step pays a
- * decode, and an hour-long phone clip at 500 ms is 7200 of them. Cap the
- * candidate count and let the step stretch — the budget below thins the result
- * to the same shape either way.
+ * Past half an hour even a one-second step is thousands of decodes. Cap the
+ * candidate count and let the step stretch past the floor — the budget below
+ * thins the result to the same shape either way.
  */
 const MAX_CANDIDATES = 1800
+/**
+ * A single seek that doesn't land is a decoder hiccup — skip the candidate and
+ * keep the frames we can get. Three in a row is a decoder that will not step
+ * this file at all, and at SEEK_TIMEOUT_MS apiece the remaining candidates are
+ * hours of waiting for nothing. Give up and let the caller ship the take
+ * frameless. Three *from the start* is the iOS case this exists for.
+ */
+const MAX_SEEK_FAILURES = 3
 
 /** How many keyframes a take of this length may keep after dedup. Uniform thinning
  *  past this point, so survivors stay spread across the whole recording. */
@@ -95,7 +103,7 @@ export async function extractFrames(
   const url = URL.createObjectURL(file)
   const video = hiddenVideo(url)
   try {
-    await waitFor(video, ['loadeddata'], LOAD_TIMEOUT_MS, UNREADABLE)
+    await readyVideo(video, UNREADABLE)
 
     const sigCanvas = document.createElement('canvas')
     sigCanvas.width = SIG_SIZE
@@ -108,11 +116,19 @@ export async function extractFrames(
     /** Signatures of the KEPT frames only — that ring *is* the dedup window. */
     const sigs: Uint8ClampedArray[] = []
     let lastKeptT = 0
-    const stepMs = Math.max(SAMPLE_MS, Math.ceil(durationMs / MAX_CANDIDATES))
+    const stepMs = Math.max(STEP_FLOOR_MS, Math.ceil(durationMs / MAX_CANDIDATES))
+    let missedSeeks = 0
 
     for (let t = 0; t < durationMs; t += stepMs) {
       if (opts.signal?.aborted) throw new Error('cancelled')
-      await seekTo(video, t / 1000, "couldn't read frames from that video")
+      try {
+        await seekTo(video, t / 1000, "couldn't read frames from that video")
+        missedSeeks = 0
+      } catch (error) {
+        if (opts.signal?.aborted) throw new Error('cancelled')
+        if (++missedSeeks >= MAX_SEEK_FAILURES) throw error
+        continue
+      }
       opts.onProgress?.(t / durationMs)
       if (!video.videoWidth || !video.videoHeight) continue
 

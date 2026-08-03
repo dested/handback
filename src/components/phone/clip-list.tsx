@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Mic, Plus, X } from 'lucide-react'
 import { Button } from '~/components/ui/button'
 import { mmss } from '~/lib/capture/format'
+import type { ClipProbe } from '~/lib/capture/probe'
 
 /** One picked file, from the moment it is picked — `probing` until we know what it is. */
 export type Clip = {
@@ -19,6 +20,12 @@ export type Clip = {
   hasVideo: boolean
   /** An objectURL this component only renders; the page owns revoking it. */
   posterUrl: string | null
+  /**
+   * The read this row was drawn from, kept whole so the pipeline can be handed
+   * it instead of decoding the file a second time. Null until the probe lands;
+   * a probe that fails takes the clip with it.
+   */
+  probe: ClipProbe | null
 }
 
 export const CLIP_ACCEPT = 'video/*,audio/*'

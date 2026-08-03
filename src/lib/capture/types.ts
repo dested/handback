@@ -10,6 +10,8 @@
  *    read exactly these fields.
  */
 
+import type { ClipProbe } from './probe'
+
 // ── the public surface ─────────────────────────────────────────────────────
 
 export type CaptureStage =
@@ -31,9 +33,14 @@ export interface StageProgress {
   detail?: string
 }
 
-/** One recorded file the human picked. */
+/**
+ * One recorded file the human picked. `probe` is the read the picker already
+ * did: on iOS, readying a blob-URL video costs the better part of a minute, so
+ * a caller that has one hands it over rather than making the pipeline pay twice.
+ */
 export interface ClipInput {
   file: File
+  probe?: ClipProbe
 }
 
 export interface DistillResult {

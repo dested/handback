@@ -348,7 +348,12 @@ reaches the container on a plain push.
   `version_added: false` on Chrome Android / Safari iOS / everything mobile (checked 2026-08-02).
   /phone therefore rides the OS screen recorders; any "record live in the PWA" idea is dead on
   arrival. `src/lib/capture/` is a deliberate duplicated port of the extension pipeline —
-  **change the pipeline in either place, mirror it in the other** (decisions.md 2026-08-02).
+  **change the pipeline in either place, mirror it in the other** (decisions.md 2026-08-02) —
+  with ONE legitimate divergence: candidate cadence. The extension samples live at 500 ms
+  (free); the phone seek-steps at a 1 s floor (each candidate costs a real decode on iOS), and
+  its MANIFEST says "1s candidates" accordingly. Phone keyframes are also **best-effort**: a
+  frame-extraction failure degrades the take to zero frames (video + transcript still ship),
+  never fails the run.
   The SW caches nothing and must stay that way (SSR staleness > offline); its share stash
   (IDB `handback-share`/`pending`/`current`) is a contract between `public/sw.js` and
   `src/lib/pwa.ts` — change both together. `externally_connectable` etc. are unaffected; the
