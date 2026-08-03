@@ -177,12 +177,15 @@ src/
     space.tsx           SpaceProvider/useActiveSpace — Personal + teams; active space in
                         localStorage `handback.activeSpace` ('personal' | teamId); never null
     pwa.ts              SW registration, deferred install prompt, share-stash pickup
-                        (takeSharedMedia — one-shot read of IDB 'handback-share')
+                        (peekSharedMedia reads WITHOUT deleting; clearSharedMedia is the only
+                        delete, called once the walkthrough is uploaded or discarded)
     capture/            THE phone distill pipeline — a deliberate PORT of the extension's
                         (see decisions.md 2026-08-02): frames (dedup+budget), grids, audio→WAV,
                         transcribe/polish clients, report/MANIFEST/recording.json builders,
-                        two-phase upload, distill.ts orchestrator. Public surface: types/probe/
-                        context/distill. Mirror any extension pipeline change here
+                        two-phase upload (XHR PUTs — byte progress + 3-try retry), distill.ts
+                        orchestrator, pending.ts (the crash-survivable run: IDB 'handback-phone').
+                        Public surface: types/probe/context/distill/pending. Mirror any extension
+                        pipeline change here
     trpc.tsx / auth-client.ts / utils.ts
   styles/app.css        ALL design tokens (light only) + .rule/.stamp/.ink-underline utilities
 public/                 manifest.webmanifest (PWA: standalone, share_target, shortcut) · sw.js
@@ -350,6 +353,16 @@ reaches the container on a plain push.
   (IDB `handback-share`/`pending`/`current`) is a contract between `public/sw.js` and
   `src/lib/pwa.ts` — change both together. `externally_connectable` etc. are unaffected; the
   phone token lives in `localStorage handback.phone.token` and re-mints itself on 401.
+- **A clip that reached /phone must be un-losable short of explicit discard** (2026-08-02, after
+  a real walkthrough died mid-distill). Two stores hold it and **neither is consumed by reading**:
+  the share stash (`handback-share`, written by the SW) and the pending run
+  (`handback-phone`/`run`/`current`, written by `src/lib/capture/pending.ts` on every intake change
+  and at send start). Both are deleted in exactly two places — after `finalize` returns, and on an
+  explicit discard/start-over. A share auto-starts the run (sharing *was* sending; a second
+  "Send to Handback" button is what made people think it had already gone), so the working screen
+  carries the `to {space} · {title}` line and Cancel is the way back to intake. A reload with no
+  `?shared=1` offers **resume**, never auto-resumes — after a crash the person decides. Don't add
+  a read path that deletes, and don't make either store the sole copy.
 - **The rename has two frozen edges.** S3 keys stay `orgs/<orgId>/gripes/<id>/…`
   (`server/storage.ts` — renaming the prefix orphans every uploaded object) and
   `/api/ingest/gripes*` aliases stay registered (Recorder ≤1.2.x posts them). MCP tools have NO

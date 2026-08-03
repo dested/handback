@@ -9,12 +9,15 @@
 import type { CaptureStage, StageProgress } from '~/lib/capture/types'
 import { cn } from '~/lib/utils'
 
+// The order is the pipeline's, and the pipeline puts the audio before the frames
+// on purpose (distill.ts: the decode spike must not coexist with 600 JPEGs).
+// These rows follow it, or the dots march backwards mid-clip.
 const ROWS: { label: string; stages: CaptureStage[] }[] = [
   { label: 'reading clips', stages: ['probe'] },
-  { label: 'distilling keyframes', stages: ['frames', 'sheets'] },
   { label: 'reading the audio', stages: ['audio'] },
   { label: 'transcribing', stages: ['transcribe'] },
   { label: 'cleaning up wording', stages: ['polish'] },
+  { label: 'distilling keyframes', stages: ['frames', 'sheets'] },
   { label: 'building the report', stages: ['build'] },
   { label: 'uploading', stages: ['declare', 'upload', 'finalize'] },
 ]
@@ -48,9 +51,14 @@ export function StageList({ progress }: { progress: StageProgress | null }) {
               )}
             />
             <span className="min-w-0 flex-1 truncate">{row.label}</span>
+            {/* The detail is where it is up to; the percentage is how far that
+                is through the whole run. A row that can say both says both —
+                a lone percentage is what makes a long stage look wedged. */}
             {active && progress && (
-              <span className="text-muted-foreground shrink-0 text-xs">
-                {progress.pct >= 0 ? `${Math.round(progress.pct * 100)}%` : (progress.detail ?? '')}
+              <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
+                {progress.detail ?? ''}
+                {progress.detail && progress.pct >= 0 && ' · '}
+                {progress.pct >= 0 && `${Math.round(progress.pct * 100)}%`}
               </span>
             )}
           </li>

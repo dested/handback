@@ -100,15 +100,21 @@ function openShareDb(): Promise<IDBDatabase> {
   })
 }
 
-function readAndClear(db: IDBDatabase): Promise<unknown> {
+function readShare(db: IDBDatabase): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(SHARE_STORE, 'readonly')
+    const get = tx.objectStore(SHARE_STORE).get(SHARE_KEY)
+    tx.oncomplete = () => resolve(get.result)
+    tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error)
+  })
+}
+
+function deleteShare(db: IDBDatabase): Promise<void> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(SHARE_STORE, 'readwrite')
-    const store = tx.objectStore(SHARE_STORE)
-    const get = store.get(SHARE_KEY)
-    get.onsuccess = () => {
-      store.delete(SHARE_KEY)
-    }
-    tx.oncomplete = () => resolve(get.result)
+    tx.objectStore(SHARE_STORE).delete(SHARE_KEY)
+    tx.oncomplete = () => resolve()
     tx.onerror = () => reject(tx.error)
     tx.onabort = () => reject(tx.error)
   })
@@ -128,17 +134,39 @@ function toSharedMedia(value: unknown): SharedMedia | null {
   }
 }
 
-/** Reads the media the share sheet stashed, clearing it so it is consumed once. */
-export async function takeSharedMedia(): Promise<SharedMedia | null> {
+/**
+ * Reads the media the share sheet stashed WITHOUT consuming it. Reading used to
+ * delete in the same transaction, which meant a tab the OS killed mid-distill
+ * took the only copy of the clip with it. The stash now outlives the read and is
+ * dropped only by `clearSharedMedia`, once the walkthrough is safely uploaded or
+ * the person discards it. `public/sw.js` overwrites `current` on every share, so
+ * a stale stash is replaced by the next one rather than accumulating.
+ */
+export async function peekSharedMedia(): Promise<SharedMedia | null> {
   if (typeof indexedDB === 'undefined') return null
   try {
     const db = await openShareDb()
     try {
-      return toSharedMedia(await readAndClear(db))
+      return toSharedMedia(await readShare(db))
     } finally {
       db.close()
     }
   } catch {
     return null
+  }
+}
+
+/** Drops the stash. The only caller is the moment the clip is provably safe (or discarded). */
+export async function clearSharedMedia(): Promise<void> {
+  if (typeof indexedDB === 'undefined') return
+  try {
+    const db = await openShareDb()
+    try {
+      await deleteShare(db)
+    } finally {
+      db.close()
+    }
+  } catch {
+    // A stash we can't delete is harmless — the next share overwrites it.
   }
 }

@@ -1,6 +1,6 @@
 import { decodeMono } from './audio'
 import { containerFor } from './container'
-import { recDirName } from './format'
+import { mmss, recDirName } from './format'
 import { extractFrames } from './frames'
 import { makeGrids, type GridFrame } from './grids'
 import { polishTranscript } from './polish'
@@ -45,6 +45,11 @@ export interface DistillOptions {
   title: string
   onProgress: (p: StageProgress) => void
   signal?: AbortSignal
+}
+
+/** One decimal, no unit — the caller writes the "MB" once for the pair. */
+function megabytes(bytes: number): string {
+  return (bytes / (1024 * 1024)).toFixed(1)
 }
 
 export async function distillAndUpload(
@@ -105,44 +110,11 @@ export async function distillAndUpload(
     // The poster is for a picker screen; nothing here shows one.
     if (probe.posterUrl) URL.revokeObjectURL(probe.posterUrl)
 
-    let frames: RecordingFrame[] = []
-    let frameBlobs = new Map<number, Blob>()
-    let sampled = 0
-    if (probe.hasVideo) {
-      report('frames', i, 0, label)
-      const extracted = await extractFrames(file, probe.durationMs, {
-        signal: opts.signal,
-        onProgress: (fraction) => report('frames', i, fraction, label),
-      })
-      frames = extracted.frames
-      frameBlobs = extracted.blobs
-      sampled = extracted.sampled
-    }
-    stop()
-
-    // Only frames whose JPEG exists ship, and the take carries only those — the
-    // report's citations, the sheets and the declared counts then all describe
-    // what is actually in the upload.
-    const kept: RecordingFrame[] = []
-    const gridFrames: GridFrame[] = []
-    for (const frame of frames) {
-      const blob = frameBlobs.get(frame.index)
-      if (!blob) continue
-      files.push({ path: `${dir}/${frame.file}`, blob, contentType: contentTypeFor(frame.file) })
-      kept.push(frame)
-      gridFrames.push({ blob, label: frame.file.split('/').pop() ?? frame.file })
-    }
-
-    if (gridFrames.length) {
-      report('sheets', i, 0, label)
-      // Nine at a time in frame order — exactly how report.ts maps a frame to its sheet.
-      for (const [n, sheet] of (await makeGrids(gridFrames)).entries()) {
-        const path = sheetFile(n + 1, `${dir}/`)
-        files.push({ path, blob: sheet, contentType: contentTypeFor(path) })
-      }
-    }
-    stop()
-
+    // Audio first, frames second, and the order is load-bearing. Decoding the
+    // audio pulls the whole file in as an ArrayBuffer and then holds a Float32
+    // channel of it — a spike measured in hundreds of MB on a long clip. Six
+    // hundred JPEG blobs are a comparable pile. Overlapping the two is what kills
+    // the tab, so the spike is taken and released before a single frame exists.
     report('audio', i, -1, label)
     let audio = await decodeMono(file)
     let transcript: TranscriptSegment[] = []
@@ -153,7 +125,7 @@ export async function distillAndUpload(
         signal: opts.signal,
         onProgress: (fraction) => report('transcribe', i, fraction, label),
       })
-      // Megabytes per minute of clip; the next one needs the room.
+      // Megabytes per minute of clip; the frames below need the room.
       audio = null
       if (heard) {
         transcribed = true
@@ -174,6 +146,51 @@ export async function distillAndUpload(
         takePolished = true
         polished = true
       }
+    }
+    stop()
+
+    let frames: RecordingFrame[] = []
+    let frameBlobs = new Map<number, Blob>()
+    let sampled = 0
+    if (probe.hasVideo) {
+      const total = mmss(probe.durationMs)
+      report('frames', i, 0, `0:00 of ${total}`)
+      const extracted = await extractFrames(file, probe.durationMs, {
+        signal: opts.signal,
+        onProgress: (fraction) =>
+          report('frames', i, fraction, `${mmss(fraction * probe.durationMs)} of ${total}`),
+      })
+      frames = extracted.frames
+      frameBlobs = extracted.blobs
+      sampled = extracted.sampled
+    }
+    stop()
+
+    // Only frames whose JPEG exists ship, and the take carries only those — the
+    // report's citations, the sheets and the declared counts then all describe
+    // what is actually in the upload.
+    const kept: RecordingFrame[] = []
+    const gridFrames: GridFrame[] = []
+    for (const frame of frames) {
+      const blob = frameBlobs.get(frame.index)
+      if (!blob) continue
+      files.push({ path: `${dir}/${frame.file}`, blob, contentType: contentTypeFor(frame.file) })
+      kept.push(frame)
+      gridFrames.push({ blob, label: frame.file.split('/').pop() ?? frame.file })
+    }
+    // `files` owns every surviving blob now; the extractor's own map does not.
+    frameBlobs = new Map()
+    frames = []
+
+    if (gridFrames.length) {
+      report('sheets', i, 0, label)
+      // Nine at a time in frame order — exactly how report.ts maps a frame to its sheet.
+      for (const [n, sheet] of (await makeGrids(gridFrames)).entries()) {
+        const path = sheetFile(n + 1, `${dir}/`)
+        files.push({ path, blob: sheet, contentType: contentTypeFor(path) })
+      }
+      // The sheets are drawn; these were only ever the source pixels.
+      gridFrames.length = 0
     }
     stop()
 
@@ -223,12 +240,15 @@ export async function distillAndUpload(
     token: opts.token,
     teamId: opts.teamId,
     projectId: opts.projectId,
+    signal: opts.signal,
     onProgress: (p) => {
       if (p.phase === 'upload') {
         opts.onProgress({
           stage: 'upload',
           pct: p.bytesTotal ? p.bytesDone / p.bytesTotal : 0,
-          detail: `${p.done} of ${p.total} files`,
+          // Megabytes, not files: one video is 99% of the bytes and 1 of ~600
+          // rows, so a file count reads as stuck for the whole upload.
+          detail: `${megabytes(p.bytesDone)} of ${megabytes(p.bytesTotal)} MB`,
         })
         return
       }

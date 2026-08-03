@@ -44,6 +44,8 @@ export interface UploadOptions {
   teamId: string | null
   projectId: string | null
   onProgress?: (p: UploadProgress) => void
+  /** Aborts every in-flight PUT and rejects with `cancelled`. */
+  signal?: AbortSignal
 }
 
 /** Same table as `cli/push.ts`, so a file pushed either way declares the same type. */
@@ -59,6 +61,18 @@ const CONTENT_TYPES: Record<string, string> = {
 
 /** Four at a time: a walkthrough is mostly small JPEGs, and the video wants the bandwidth. */
 const UPLOAD_CONCURRENCY = 4
+
+/**
+ * A phone on a moving train drops a connection mid-PUT and that is not a lost
+ * walkthrough. Three tries per file, backing off, but only for the failures that
+ * can heal: a dead socket or a 5xx. A 403 is an expired or wrong presign and
+ * will read the same way in three seconds, so it fails straight through.
+ */
+const PUT_ATTEMPTS = 3
+const PUT_BACKOFF_MS = [1000, 3000]
+
+/** The video is the whole upload on this path, so bytes are the only honest progress. */
+const PROGRESS_INTERVAL_MS = 250
 
 /**
  * Refused before a byte moves. The server enforces its own caps, but a phone on
@@ -128,6 +142,86 @@ function declaration(
   }
 }
 
+function cancelled(): Error {
+  return new Error('cancelled')
+}
+
+function isCancelled(error: unknown): boolean {
+  return error instanceof Error && error.message === 'cancelled'
+}
+
+/** `explain()`'s wording, for a transport that has no `Response` to read it off. */
+function putFailed(path: string, status: number, body: string): Error {
+  const detail = body.trim().slice(0, 200)
+  const where = status ? `(${status})` : '(no connection)'
+  return new Error(`upload of ${path} failed ${where}${detail ? `: ${detail}` : ''}`)
+}
+
+/** Resolves after `ms`, or rejects the moment the run is cancelled. */
+function backoff(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(cancelled())
+      return
+    }
+    const timer = window.setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    function onAbort() {
+      window.clearTimeout(timer)
+      reject(cancelled())
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+/** The status and body of one PUT attempt. A transport failure throws instead. */
+interface PutAttempt {
+  status: number
+  body: string
+}
+
+/**
+ * One presigned PUT over XHR rather than fetch, for exactly one reason: fetch
+ * cannot report how far an upload has got, so a 180 MB video showed the person
+ * a still spinner for four minutes and then either worked or didn't.
+ */
+function putOnce(
+  url: string,
+  contentType: string,
+  blob: Blob,
+  onBytes: (loaded: number) => void,
+  live: Set<XMLHttpRequest>
+): Promise<PutAttempt> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    live.add(xhr)
+    const settle = () => live.delete(xhr)
+    xhr.open('PUT', url, true)
+    // The content-type is signed; no auth header may ride along on a presign.
+    xhr.setRequestHeader('content-type', contentType)
+    xhr.upload.onprogress = (event) => onBytes(event.loaded)
+    xhr.onload = () => {
+      settle()
+      resolve({ status: xhr.status, body: xhr.responseText ?? '' })
+    }
+    xhr.onerror = () => {
+      settle()
+      reject(new Error('network'))
+    }
+    xhr.ontimeout = () => {
+      settle()
+      reject(new Error('network'))
+    }
+    xhr.onabort = () => {
+      settle()
+      reject(cancelled())
+    }
+    xhr.send(blob)
+  })
+}
+
 /**
  * Push one walkthrough. Throws with a readable message on any failure — the
  * caller keeps the clips and offers to try again, because a half-uploaded
@@ -156,6 +250,7 @@ export async function uploadWalkthrough(
   const report = (p: Partial<UploadProgress> & { phase: UploadProgress['phase'] }) =>
     onProgress?.({ done: 0, total: files.length, bytesDone: 0, bytesTotal, ...p })
 
+  if (opts.signal?.aborted) throw cancelled()
   report({ phase: 'declare' })
   const declareRes = await fetch(INGEST.declare, {
     method: 'POST',
@@ -172,26 +267,84 @@ export async function uploadWalkthrough(
   const byPath = new Map(files.map((f) => [f.path, f]))
   const queue = [...uploads]
   let done = 0
-  let bytesDone = 0
+  /** Bytes of the files that finished. In-flight bytes are added on top, live. */
+  let settledBytes = 0
+  /** Per-file `loaded` while a PUT is running, so the total never double-counts a retry. */
+  const inFlight = new Map<string, number>()
+  const live = new Set<XMLHttpRequest>()
+  let lastEmit = 0
+
+  const emit = (force: boolean) => {
+    const now = Date.now()
+    if (!force && now - lastEmit < PROGRESS_INTERVAL_MS) return
+    lastEmit = now
+    let bytesDone = settledBytes
+    for (const loaded of inFlight.values()) bytesDone += loaded
+    report({ phase: 'upload', done, total: uploads.length, bytesDone })
+  }
+
+  // One abort takes down every socket at once; the workers then unwind on the
+  // `cancelled` their own PUT rejects with.
+  const stopAll = () => {
+    for (const xhr of live) xhr.abort()
+  }
+  opts.signal?.addEventListener('abort', stopAll)
+
   report({ phase: 'upload', total: uploads.length })
   const worker = async () => {
     for (let job = queue.shift(); job; job = queue.shift()) {
       const file = byPath.get(job.path)
       if (!file) throw new Error(`the server asked for a file we don't have: ${job.path}`)
-      // Presigned PUT: the content-type is signed, and no auth header may ride along.
-      const res = await fetch(job.url, {
-        method: 'PUT',
-        headers: { 'content-type': job.contentType },
-        body: file.blob,
-      })
-      if (!res.ok) throw await explain(`upload of ${job.path}`, res)
-      done++
-      bytesDone += file.blob.size
-      report({ phase: 'upload', done, total: uploads.length, bytesDone })
+      if (opts.signal?.aborted) throw cancelled()
+
+      for (let attempt = 1; ; attempt++) {
+        inFlight.set(job.path, 0)
+        let outcome: PutAttempt
+        try {
+          outcome = await putOnce(
+            job.url,
+            job.contentType,
+            file.blob,
+            (loaded) => {
+              inFlight.set(job.path, loaded)
+              emit(false)
+            },
+            live
+          )
+        } catch (error) {
+          inFlight.delete(job.path)
+          if (isCancelled(error)) throw error
+          // A dead socket is the retryable case; the last attempt still fails.
+          if (attempt >= PUT_ATTEMPTS) throw putFailed(job.path, 0, '')
+          await backoff(PUT_BACKOFF_MS[attempt - 1] ?? 3000, opts.signal)
+          continue
+        }
+
+        if (outcome.status >= 200 && outcome.status < 300) {
+          inFlight.delete(job.path)
+          settledBytes += file.blob.size
+          done++
+          emit(true)
+          break
+        }
+
+        inFlight.delete(job.path)
+        // A 4xx won't heal — an expired presign reads the same in three seconds.
+        if (outcome.status < 500 || attempt >= PUT_ATTEMPTS) {
+          throw putFailed(job.path, outcome.status, outcome.body)
+        }
+        await backoff(PUT_BACKOFF_MS[attempt - 1] ?? 3000, opts.signal)
+      }
     }
   }
-  await Promise.all(Array.from({ length: UPLOAD_CONCURRENCY }, worker))
+  try {
+    await Promise.all(Array.from({ length: UPLOAD_CONCURRENCY }, worker))
+  } finally {
+    opts.signal?.removeEventListener('abort', stopAll)
+    stopAll()
+  }
 
+  const bytesDone = settledBytes
   report({ phase: 'finalize', done, total: uploads.length, bytesDone })
   const finalizeRes = await fetch(finalizePath(walkthroughId), {
     method: 'POST',

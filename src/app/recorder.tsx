@@ -9,7 +9,7 @@
 // The page renders on the server, where there is no window and no extension.
 
 import { useCallback, useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Check, Copy } from 'lucide-react'
 import { Step, autoTokenName } from '~/components/setup-step'
@@ -192,6 +192,15 @@ export function RecorderPage() {
   // mount so a local dev session shows its own origin.
   const [origin, setOrigin] = useState('https://handback.dev')
   useEffect(() => setOrigin(window.location.origin), [])
+
+  // A phone can't run a Chrome extension — its recorder page is /phone. The
+  // desktop markup still SSRs (no window to ask); the swap happens on mount.
+  const navigate = useNavigate()
+  useEffect(() => {
+    const ua = navigator.userAgent
+    const mobile = /Android|iPhone|iPod/.test(ua) || (navigator.maxTouchPoints > 1 && /iPad|Macintosh/.test(ua) && 'ontouchend' in document)
+    if (mobile) navigate('/phone', { replace: true })
+  }, [navigate])
 
   // null until mount decides — the server has no window to ask.
   const [inChrome, setInChrome] = useState<boolean | null>(null)

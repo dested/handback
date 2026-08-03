@@ -2,6 +2,30 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-08-02 — /phone capture made un-losable
+Asked: a real phone walkthrough was lost — the client died during local processing. Harden the
+flow so a clip that reached us can't be lost short of explicit discard.
+Done: share stash no longer deletes on read (`peekSharedMedia`/`clearSharedMedia`); new
+`capture/pending.ts` persists the whole run (files included) to IDB `handback-phone` on every
+intake change and at send start, cleared only after finalize or a discard. A share now
+auto-starts the run instead of showing a second Send button (working screen gained the
+`to {space} · {title}` line; Cancel returns to intake); a reload with no `?shared=1` offers a
+violet "didn't finish uploading" resume callout — resume or discard, never automatic. S3 PUTs
+moved from fetch to XHR for real byte progress (throttled ~4/s across the 4-way pool) with 3
+attempts on network/5xx and 1s/3s backoff, never on 403; abort tears down in-flight XHRs. Added
+a screen wake lock (re-acquired on visibilitychange), a beforeunload guard, and a 15s watchdog
+that fails a run silent for 2 min instead of spinning forever. Memory-order fix in distill.ts:
+audio decode + transcribe + polish now run BEFORE frame extraction so the ArrayBuffer spike
+never coexists with 600 JPEGs (stage rows reordered to match); frames report `m:ss of m:ss` and
+upload reports MB-of-MB. Per-seek timeout 10s → 20s for slow phone decoders. Also: return-to-
+visible resets the watchdog clock (a thawed iOS tab must not be killed before the pipeline
+resumes), /recorder on a mobile UA redirects to /phone, and the iOS picker step explains
+Photos' "Preparing…" dialog. Root cause of the lost run (iPhone, 5-min clip): prod logs show
+context fetched then silence — the client died in local processing, almost certainly a WebKit
+memory kill; bucket CORS verified fine (PUT allowed for handback.dev). Typecheck + build clean.
+Touched: src/lib/pwa.ts, src/lib/capture/{pending,upload,distill,media}.ts, src/app/phone.tsx,
+src/components/phone/{stages,guide}.tsx, src/app/recorder.tsx
+
 ## 2026-08-02 — app header works on a phone
 Asked: "the header doesnt work on mobile" (found while taking /phone live).
 Done: `AppHeader` was one non-wrapping flex row (wordmark + switcher + up to six tabs + sign

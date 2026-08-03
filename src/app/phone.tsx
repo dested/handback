@@ -31,13 +31,20 @@ import { fetchContext, type ServerContext } from '~/lib/capture/context'
 import { distillAndUpload } from '~/lib/capture/distill'
 import { mmss } from '~/lib/capture/format'
 import { probeClip } from '~/lib/capture/probe'
+import {
+  clearPendingRun,
+  loadPendingRun,
+  savePendingRun,
+  type PendingRun,
+} from '~/lib/capture/pending'
 import { AuthError, type DistillResult, type StageProgress } from '~/lib/capture/types'
 import {
   canInstall,
+  clearSharedMedia,
   isStandalone,
   onInstallableChange,
+  peekSharedMedia,
   promptInstall,
-  takeSharedMedia,
 } from '~/lib/pwa'
 import { useActiveSpace } from '~/lib/space'
 import { useTRPC } from '~/lib/trpc'
@@ -55,6 +62,17 @@ const CLIP_LIMIT = 2 * 1024 * 1024 * 1024
 const TOTAL_LIMIT = 4 * 1024 * 1024 * 1024
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/**
+ * How long the pipeline may go silent before we call it dead. Every stage
+ * reports something at least every few seconds, so two minutes of nothing means
+ * a decoder that will not come back — and an eternal spinner is worse than a
+ * button, because the clip is safe in the pending store either way.
+ */
+const STALL_MS = 120_000
+const WATCHDOG_MS = 15_000
+const STALL_MESSAGE =
+  'the phone paused the work for too long — tap try again, it picks up from your clip'
 
 type Phase = 'guide' | 'intake' | 'working' | 'done' | 'failed'
 
@@ -84,6 +102,13 @@ export function PhonePage() {
   const [result, setResult] = useState<DistillResult | null>(null)
   const [failure, setFailure] = useState<string | null>(null)
   const abort = useRef<AbortController | null>(null)
+  /** A run recovered from storage, waiting on the person to say resume or discard. */
+  const [resumable, setResumable] = useState(false)
+  /** The watchdog aborts the same controller Cancel does; this is how send() tells them apart. */
+  const stalled = useRef(false)
+  /** Wall clock of the last thing the pipeline said. The watchdog reads it. */
+  const heardAt = useRef(0)
+  const wakeLock = useRef<WakeLockSentinel | null>(null)
 
   const { spaces, space, setActiveSpace } = useActiveSpace()
   const [destination, setDestination] = useState<Destination>({ teamId: null, projectId: null })
@@ -181,6 +206,7 @@ export function PhonePage() {
     })
   }, [])
 
+  /** Empties the page. Nothing here is recoverable afterwards, so it clears both stores. */
   const reset = useCallback(() => {
     setClips((prev) => {
       for (const clip of prev) if (clip.posterUrl) URL.revokeObjectURL(clip.posterUrl)
@@ -188,11 +214,28 @@ export function PhonePage() {
     })
     setClipError(null)
     setShareMissed(false)
+    setResumable(false)
     setTitle('')
     setProgress(null)
     setResult(null)
     setFailure(null)
+    void clearPendingRun()
+    void clearSharedMedia()
     setPhase('guide')
+  }, [])
+
+  /** The resume callout's quiet half: the person is done with this walkthrough. */
+  const discard = useCallback(() => {
+    setClips((prev) => {
+      for (const clip of prev) if (clip.posterUrl) URL.revokeObjectURL(clip.posterUrl)
+      return []
+    })
+    setClipError(null)
+    setResumable(false)
+    setTitle('')
+    void clearPendingRun()
+    void clearSharedMedia()
+    setPhase('intake')
   }, [])
 
   const intakeWith = useCallback(
@@ -203,8 +246,24 @@ export function PhonePage() {
     [addFiles]
   )
 
-  // The share target: the service worker stashed the clip and bounced the OS
-  // back here with ?shared=1. The stash is one-shot, so this runs exactly once.
+  /**
+   * Armed by a share that arrived with clips, disarmed by the effect below the
+   * moment they have finished probing. A ref rather than state because arming it
+   * must not paint, and because the guard has to survive the render that adding
+   * the clips causes.
+   */
+  const autoStart = useRef(false)
+
+  // Two ways onto this page, handled once.
+  //
+  // A share (?shared=1) means the person already pressed send — on their phone
+  // it was the share sheet, and asking them to press "Send to Handback" a second
+  // time is asking them to do the thing they thought they just did. So a share
+  // with clips skips intake entirely and starts the run itself.
+  //
+  // Without ?shared=1 we look for a run that died: a walkthrough that reached
+  // this page and never finished. It is NOT auto-resumed — after a crash the
+  // person decides, because the crash may well have been this page.
   const consumed = useRef(false)
   const [searchParams] = useSearchParams()
   useEffect(() => {
@@ -212,21 +271,48 @@ export function PhonePage() {
     consumed.current = true
     const shared = searchParams.get('shared') === '1'
     const shareFailed = searchParams.get('error') === 'share'
-    if (!shared) {
-      if (searchParams.get('new') === '1') setPhase('intake')
-      return
-    }
     let live = true
-    void takeSharedMedia().then((media) => {
-      if (!live) return
-      if (media && media.files.length) {
-        addFiles(media.files)
-        if (media.title) setTitle(media.title)
-        if (shareFailed) setShareMissed(true)
-      } else {
-        setShareMissed(true)
+
+    if (!shared) {
+      if (searchParams.get('new') === '1') {
+        setPhase('intake')
+        return
       }
-      setPhase('intake')
+      void loadPendingRun().then((run: PendingRun | null) => {
+        if (!live || !run) return
+        addFiles(run.files)
+        setTitle(run.title)
+        // A recovered run remembers where it was going; the active space must
+        // not quietly redirect it somewhere else.
+        chosen.current = true
+        setDestination({ teamId: run.teamId, projectId: run.projectId })
+        setResumable(true)
+        setPhase('intake')
+      })
+      return () => {
+        live = false
+      }
+    }
+
+    void peekSharedMedia().then((media) => {
+      if (!live) return
+      const files = media?.files ?? []
+      if (files.length) {
+        addFiles(files)
+        if (media?.title) setTitle(media.title)
+      }
+      // An empty stash, or a share the service worker never got to intercept:
+      // show the notice and let them pick the clip rather than start a run that
+      // may be missing the only thing in it.
+      if (shareFailed || !files.length) {
+        setShareMissed(true)
+        setPhase('intake')
+        return
+      }
+      // Sharing was the send. Go straight to work; Cancel is how someone
+      // changes their mind about the destination or the title.
+      autoStart.current = true
+      setPhase('working')
     })
     return () => {
       live = false
@@ -270,18 +356,32 @@ export function PhonePage() {
     [space.teamId, setActiveSpace]
   )
 
+  const destinationName = spaces.find((s) => s.teamId === destination.teamId)?.name ?? 'Personal'
   const probing = clips.some((clip) => clip.probing)
   const totalBytes = clips.reduce((sum, clip) => sum + clip.file.size, 0)
   const totalMs = clips.reduce((sum, clip) => sum + clip.durationMs, 0)
   const oversized = clips.some((clip) => clip.file.size > CLIP_LIMIT) || totalBytes > TOTAL_LIMIT
 
+  const sendTitle = title.trim() || placeholder
+
   const send = useCallback(async () => {
     if (!clips.length) return
     const controller = new AbortController()
     abort.current = controller
+    stalled.current = false
+    heardAt.current = Date.now()
     setProgress(null)
     setFailure(null)
     setPhase('working')
+    // Written before the first byte of work, so a tab killed one second in still
+    // leaves something to resume from.
+    void savePendingRun({
+      files: clips.map((clip) => clip.file),
+      title,
+      teamId: destination.teamId,
+      projectId: destination.projectId,
+      savedAt: Date.now(),
+    })
     try {
       const shipped = await withToken((token) =>
         distillAndUpload(
@@ -290,15 +390,26 @@ export function PhonePage() {
             token,
             teamId: destination.teamId,
             projectId: destination.projectId,
-            title: title.trim() || placeholder,
-            onProgress: setProgress,
+            title: sendTitle,
+            onProgress: (update) => {
+              heardAt.current = Date.now()
+              setProgress(update)
+            },
             signal: controller.signal,
           }
         )
       )
+      // Finalize returned: the walkthrough is in the space. Only now is it safe
+      // to let go of the copies that were keeping it recoverable.
+      void clearPendingRun()
+      void clearSharedMedia()
+      setResumable(false)
       setResult(shipped)
       setPhase('done')
     } catch (error) {
+      // The watchdog aborts through the same controller Cancel does, and it has
+      // already said its piece.
+      if (stalled.current) return
       // Cancelling is not a failure — the clips are still sitting there.
       if (controller.signal.aborted || (error instanceof Error && error.message === 'cancelled')) {
         setPhase('intake')
@@ -315,7 +426,108 @@ export function PhonePage() {
     } finally {
       abort.current = null
     }
-  }, [clips, destination, title, placeholder, withToken])
+  }, [clips, destination, title, sendTitle, withToken])
+
+  // Everything below keeps a run alive on a device that would rather it didn't.
+
+  // The intake as it stands, saved on every change. A share that lands while the
+  // phone is nearly out of memory can die before the person sees anything at
+  // all, so the copy has to exist before the run does.
+  useEffect(() => {
+    if (phase !== 'intake' || !clips.length) return
+    void savePendingRun({
+      files: clips.map((clip) => clip.file),
+      title,
+      teamId: destination.teamId,
+      projectId: destination.projectId,
+      savedAt: Date.now(),
+    })
+  }, [phase, clips, title, destination])
+
+  // The auto-start. Arming happens in the share pickup; firing waits here until
+  // the clips it added are in state and done probing, because send() reads them
+  // from state. Disarming before the call is what keeps it to one run — the ref
+  // survives the renders that adding and probing the clips cause.
+  useEffect(() => {
+    if (!autoStart.current) return
+    if (clips.some((clip) => clip.probing)) return
+    autoStart.current = false
+    if (!clips.length) {
+      // Every shared file failed to read; clipError already says why.
+      setPhase('intake')
+      return
+    }
+    void send()
+  }, [clips, send])
+
+  // The screen must not sleep mid-distill: a locked phone throttles timers and
+  // suspends the decoder, and the run stops making progress. A denied lock is
+  // fine — it costs the person a slower run, never the walkthrough.
+  useEffect(() => {
+    if (phase !== 'working') return
+    let live = true
+    const acquire = async () => {
+      if (!live || wakeLock.current) return
+      if (typeof navigator === 'undefined' || !('wakeLock' in navigator)) return
+      try {
+        const sentinel = await navigator.wakeLock.request('screen')
+        if (!live) {
+          void sentinel.release().catch(() => {})
+          return
+        }
+        // The browser drops the lock whenever the tab hides; this keeps the ref honest.
+        sentinel.addEventListener('release', () => {
+          if (wakeLock.current === sentinel) wakeLock.current = null
+        })
+        wakeLock.current = sentinel
+      } catch {
+        // Denied, unsupported, or refused on a battery saver. Not our problem.
+      }
+    }
+    const onVisibility = () => {
+      if (document.visibilityState !== 'visible') return
+      // Coming back from a freeze, the watchdog's clock and the pipeline thaw
+      // together — reset the clock first or it kills a run that was about to
+      // resume.
+      heardAt.current = Date.now()
+      void acquire()
+    }
+    void acquire()
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      live = false
+      document.removeEventListener('visibilitychange', onVisibility)
+      const held = wakeLock.current
+      wakeLock.current = null
+      if (held) void held.release().catch(() => {})
+    }
+  }, [phase])
+
+  // Leaving mid-distill throws the work away, and on a phone "leaving" is one
+  // stray back-swipe. The browser writes its own wording; all we can do is ask.
+  useEffect(() => {
+    if (phase !== 'working') return
+    const guard = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+    }
+    window.addEventListener('beforeunload', guard)
+    return () => window.removeEventListener('beforeunload', guard)
+  }, [phase])
+
+  // A stage that has gone quiet for two minutes is a decoder that isn't coming
+  // back. Turn the spinner into a button — the clips are in the pending store,
+  // so "try again" is a promise we can keep.
+  useEffect(() => {
+    if (phase !== 'working') return
+    const timer = window.setInterval(() => {
+      if (Date.now() - heardAt.current <= STALL_MS) return
+      stalled.current = true
+      abort.current?.abort()
+      setFailure(STALL_MESSAGE)
+      setPhase('failed')
+    }, WATCHDOG_MS)
+    return () => window.clearInterval(timer)
+  }, [phase])
 
   return (
     <div className="max-w-3xl space-y-12">
@@ -349,6 +561,23 @@ export function PhonePage() {
             <p className="text-muted-foreground text-sm">
               the share didn't carry a file — pick the clip below instead
             </p>
+          )}
+
+          {resumable && (
+            <div className="border-review/40 bg-review-wash space-y-3 rounded-md border p-4">
+              <div className="flex items-center gap-3">
+                <span className="bg-review size-2 shrink-0 rounded-full" />
+                <p className="text-sm font-medium">This walkthrough didn't finish uploading.</p>
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <Button type="button" size="sm" onClick={() => void send()}>
+                  Resume upload
+                </Button>
+                <Button type="button" variant="ghost" size="sm" onClick={discard}>
+                  discard
+                </Button>
+              </div>
+            </div>
           )}
 
           <DestinationControl
@@ -396,10 +625,20 @@ export function PhonePage() {
 
       {phase === 'working' && (
         <section className="space-y-6">
-          <p className="text-muted-foreground font-mono text-sm">
-            {clips.length} {clips.length === 1 ? 'clip' : 'clips'} · {mmss(totalMs)}
-          </p>
+          <div className="space-y-1">
+            <p className="text-muted-foreground font-mono text-sm">
+              {clips.length} {clips.length === 1 ? 'clip' : 'clips'} · {mmss(totalMs)}
+            </p>
+            {/* A share skips intake entirely, so this line is the only place the
+                person sees where it is going — and Cancel is how they change it. */}
+            <p className="text-muted-foreground truncate font-mono text-sm">
+              to {destinationName} · {sendTitle}
+            </p>
+          </div>
           <StageList progress={progress} />
+          <p className="text-muted-foreground font-mono text-xs">
+            keep this screen open — the phone pauses the work if you leave
+          </p>
           {!isCommitted(progress) && (
             <Button type="button" variant="outline" onClick={() => abort.current?.abort()}>
               Cancel

@@ -199,6 +199,10 @@ function IosSteps({ onFiles }: { onFiles: (files: File[]) => void }) {
         <Button type="button" onClick={picker.open}>
           Choose from Photos
         </Button>
+        <p className="text-muted-foreground mt-3 text-sm leading-relaxed">
+          If Photos says <em>Preparing…</em>, that's iOS fetching the clip — give it a moment
+          before it hands the file over.
+        </p>
       </Step>
     </>
   )

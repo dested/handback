@@ -5,8 +5,15 @@
  * whole folder stays importable from an SSR render.
  */
 
-/** A seek that never lands means a container we can't step through. Give up rather than wedge. */
-export const SEEK_TIMEOUT_MS = 10000
+/**
+ * A seek that never lands means a container we can't step through. Give up
+ * rather than wedge — but slowly: a phone decoder under memory pressure can take
+ * well past ten seconds on a single seek, and a run that dies there loses the
+ * clip for a reason that was only ever "the hardware is busy". The timer freezes
+ * with the tab when the screen goes off and resumes with it, which is the
+ * behaviour we want.
+ */
+export const SEEK_TIMEOUT_MS = 20000
 /** Metadata for a file already on the device is instant; this is only a wedge guard. */
 export const LOAD_TIMEOUT_MS = 30000
 /** After 'seeked' the decoder usually has the frame; rVFC says so for certain. Don't wait long for it. */
