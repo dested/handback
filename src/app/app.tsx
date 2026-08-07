@@ -13,7 +13,7 @@
 
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { X } from 'lucide-react'
 import {
   CLEARED_FILTERS,
@@ -339,6 +339,35 @@ function Row({
   hydrated: boolean
   showSpaceChip: boolean
 }) {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const [editing, setEditing] = useState(false)
+
+  const rename = useMutation(
+    trpc.walkthroughs.rename.mutationOptions({
+      onSettled: () => {
+        // Every surface that lists titles — the inbox itself, the flat list, and
+        // the walkthrough it belongs to.
+        queryClient.invalidateQueries({ queryKey: trpc.walkthroughs.inbox.queryKey() })
+        queryClient.invalidateQueries({ queryKey: trpc.walkthroughs.list.queryKey() })
+        queryClient.invalidateQueries({
+          queryKey: trpc.walkthroughs.get.queryKey({ walkthroughId: row.id }),
+        })
+      },
+    })
+  )
+
+  // The in-flight title stands in until the refetch lands, so the row reads as
+  // renamed the instant it's submitted and snaps back on its own if it fails.
+  const title = rename.isPending ? (rename.variables?.title ?? row.title) : row.title
+
+  function commit(next: string) {
+    const trimmed = next.trim()
+    setEditing(false)
+    if (!trimmed || trimmed === row.title) return
+    rename.mutate({ walkthroughId: row.id, title: trimmed })
+  }
+
   const ink = statusInk(row.status)
   const when = hydrated ? relativeTime(row.recordedAt, Date.now()) : shortDate(row.recordedAt)
 
@@ -357,16 +386,63 @@ function Row({
   ]
 
   return (
-    <Link
-      to={`/walkthroughs/${row.id}`}
-      className="hover:bg-muted/40 -mx-3 block rounded-sm px-3 py-4 transition-colors">
+    // A stretched Link covers the row for navigation (an <a> can't hold the
+    // rename button or the input), and the interactive controls sit above it
+    // with `relative z-10`. While editing the overlay is gone, so nothing here
+    // navigates by accident.
+    <div className="hover:bg-muted/40 group relative -mx-3 rounded-sm px-3 py-4 transition-colors">
+      {!editing && (
+        <Link to={`/walkthroughs/${row.id}`} aria-label={title} className="absolute inset-0" />
+      )}
       <div className="flex items-baseline gap-3">
         <span className="flex shrink-0 items-center gap-1.5">
           <span className={cn('size-[7px] shrink-0 rounded-full', ink.dot)} />
           <span className={cn('text-xs font-medium', ink.text)}>{ink.label}</span>
         </span>
-        <span className="min-w-0 flex-1 truncate font-medium">{row.title}</span>
-        <span className="text-muted-foreground shrink-0 font-mono text-xs">{when}</span>
+        {editing ? (
+          <form
+            className="relative z-10 flex min-w-0 flex-1 items-center gap-2"
+            onSubmit={(e) => {
+              e.preventDefault()
+              const input = e.currentTarget.elements.namedItem('title')
+              commit(input instanceof HTMLInputElement ? input.value : '')
+            }}>
+            <input
+              name="title"
+              autoFocus
+              defaultValue={title}
+              aria-label="Title"
+              className="border-input bg-background focus-visible:border-ring min-w-0 flex-1 rounded-md border px-2 py-1 text-sm font-medium outline-none"
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') setEditing(false)
+              }}
+            />
+            <button
+              type="submit"
+              className="text-primary shrink-0 text-xs font-medium underline underline-offset-4">
+              Save
+            </button>
+            <button
+              type="button"
+              className="text-muted-foreground hover:text-foreground shrink-0 text-xs"
+              onClick={() => setEditing(false)}>
+              Cancel
+            </button>
+          </form>
+        ) : (
+          <>
+            <span className="min-w-0 flex-1 truncate font-medium">{title}</span>
+            <button
+              type="button"
+              // Hover-revealed on a fine pointer to keep rows quiet; always
+              // shown where there is no hover (touch), so it stays reachable.
+              className="text-muted-foreground hover:text-foreground relative z-10 shrink-0 text-xs opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 [@media(pointer:coarse)]:opacity-100"
+              onClick={() => setEditing(true)}>
+              Rename
+            </button>
+            <span className="text-muted-foreground shrink-0 font-mono text-xs">{when}</span>
+          </>
+        )}
       </div>
       <p className="text-muted-foreground mt-1.5 truncate font-mono text-xs">
         {meta.map((part, i) => (
@@ -376,7 +452,8 @@ function Row({
           </Fragment>
         ))}
       </p>
-    </Link>
+      {rename.error && <p className="text-destructive mt-1 text-xs">{rename.error.message}</p>}
+    </div>
   )
 }
 

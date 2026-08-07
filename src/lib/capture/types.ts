@@ -8,6 +8,14 @@
  *    because `extension/` is a separate npm workspace, and they must not drift:
  *    the report, the per-take JSON, the declare body and the cloud viewer all
  *    read exactly these fields.
+ *
+ * EXTRACTION NOTE (2026-08-06): the generic half of this folder (probe, media,
+ * frames, grids, audio, timeline, report, container, format, slug, distill) is
+ * extracted to github.com/dested/video-to-prompt and will EVENTUALLY be deleted
+ * here in favor of that package. Until the cutover, mirror any pipeline change
+ * in all three places: this folder, the extension, and the library
+ * (decisions.md 2026-08-06). Handback-specific plumbing (api/upload/context/
+ * pending, transcribe/polish clients) stays in this repo permanently.
  */
 
 import type { ClipProbe } from './probe'

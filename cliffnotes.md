@@ -1,7 +1,7 @@
 # Handback — CliffNotes
 
 > Living map of the project. Read this before any coding session.
-> Last updated: 2026-08-01. Visual language → `ui.md` · why → `decisions.md` ·
+> Last updated: 2026-08-06. Visual language → `ui.md` · why → `decisions.md` ·
 > log → `updates.md`.
 >
 > **Naming:** the product noun is **walkthrough** (renamed from "gripe" 2026-08-01, owner's
@@ -51,6 +51,18 @@ the Gripe extension.
 - **Publish a recorder build:** `bun run publish:extension` (build → zip → upload) →
   `releases/recorder/`; `/recorder` serves the newest within 60s. Steps also run standalone:
   `build:extension` / `zip:extension` / `bun cli/publish-recorder.ts`
+- **Chrome Web Store zip:** `bun run pack:store` → `extension/handback-recorder-store.zip`.
+  Same build, but `scripts/pack-store.mjs` strips the manifest `key` (Web Store rejects it) into a
+  staging copy — source/`dist` keep `key` so the local + self-hosted ID stays `gmggneb…ifdci`.
+  **Stripping `key` means the Web Store assigned the store build its OWN id
+  `bdhajcllnjcnihcbobhaecldgjlhfdhd` — NOT `gmggneb…`** (the pre-submission assumption was wrong;
+  see decisions.md 2026-08-07). `src/app/recorder.tsx` now pings BOTH ids (`EXTENSION_IDS`) and
+  links whichever answers. Also guards description ≤132 chars.
+- **Web Store listing packet:** `extension/store-listing/` — `LISTING.md` (all form fields:
+  summary, description, single purpose, per-permission justifications, data disclosures) + 4×
+  1280×800 screenshots, 440×280 + 1440×560 promo tiles, 128 icon. Images are the real side-panel
+  build framed on-brand, rendered by `scratchpad/render-store.mjs` (Playwright via `channel:chrome`
+  over the `preview.mjs` harness). Dev console can't be automated — Chrome blocks scripting it.
 - **Extension:** `bun run build:extension` (root) or `cd extension && npm run build` →
   load-unpacked `extension/dist`;
   `npm run preview` → http://localhost:8777/gallery.html (layout harness, no Chrome needed)
@@ -137,10 +149,11 @@ src/
                         preview). Two numbered steps; tools, "Putting it to work", disconnect
                         instructions and "Your API tokens" (list + revoke, no create form) are
                         unnumbered reference below. Codex is a "soon" tab.
-    recorder.tsx        /recorder — THE recorder onboarding: install (Web Store button behind
-                        a STORE_URL constant, zip/load-unpacked until then), live install ping,
-                        one-click Link (token minted + handed over, nothing pasted). Two numbered
-                        steps; "Then just record" is unnumbered
+    recorder.tsx        /recorder — THE recorder onboarding: install (STORE_URL now set → "Add to
+                        Chrome" button; zip/load-unpacked collapses behind a disclosure), live
+                        install ping across BOTH extension ids (`EXTENSION_IDS`: store + self-hosted),
+                        one-click Link to whichever id answered (token minted + handed over, nothing
+                        pasted). Two numbered steps; "Then just record" is unnumbered
     phone.tsx           /phone — Handback on the phone: guide (per-OS: Android install+share,
                         iOS A2HS+Photos picker, desktop "open this on your phone") AND the
                         share-target intake: clips → in-browser distill → upload. Mints its own
@@ -191,7 +204,10 @@ src/
                         two-phase upload (XHR PUTs — byte progress + 3-try retry), distill.ts
                         orchestrator, pending.ts (the crash-survivable run: IDB 'handback-phone').
                         Public surface: types/probe/context/distill/pending. Mirror any extension
-                        pipeline change here
+                        pipeline change here. **Its generic half is extracted to
+                        github.com/dested/video-to-prompt (G:\code\video-to-prompt) and will
+                        eventually be consumed from there instead — until then any pipeline change
+                        mirrors THREE ways: here, extension, library (decisions.md 2026-08-06)**
     trpc.tsx / auth-client.ts / utils.ts
   styles/app.css        ALL design tokens (light only) + .rule/.stamp/.ink-underline utilities
 public/                 manifest.webmanifest (PWA: standalone, share_target, shortcut) · sw.js
@@ -232,7 +248,7 @@ extension/              Handback Recorder — the Chrome MV3 extension (own npm 
 | `/join/:inviteId` | Invite accept | `src/app/join.tsx` |
 | `/forgot-password` · `/reset-password` | Password recovery (better-auth emails the link) | `src/app/{forgot,reset}-password.tsx` |
 | `/privacy` · `/terms` | Legal pages (linked from the marketing footer) | `src/app/{privacy,terms}.tsx` |
-| `/app` | Inbox — ALL spaces, filter rail (status/space/project/search over one `walkthroughs.inbox` query) | `src/app/app.tsx` + `src/components/inbox/rail.tsx` |
+| `/app` | Inbox — ALL spaces, filter rail (status/space/project/search over one `walkthroughs.inbox` query); rows rename inline (hover-revealed "Rename", stretched-link overlay so the row still navigates) via `walkthroughs.rename` | `src/app/app.tsx` + `src/components/inbox/rail.tsx` |
 | `/upload` | Desktop intake: drop a clip → distill → upload (reuses capture lib + phone components) | `src/app/upload.tsx` |
 | `/walkthroughs/:walkthroughId` | The viewer (`/gripes/:id` 302s here) | `src/app/walkthrough.tsx` |
 | `/projects` · `/team` | Projects (ALL spaces, grouped; create w/ space select) · "Teams" — every team (roster/invites/seats per team, New team lives HERE) | `src/app/{projects,team}.tsx` |
@@ -356,7 +372,8 @@ reaches the container on a plain push.
   `version_added: false` on Chrome Android / Safari iOS / everything mobile (checked 2026-08-02).
   /phone therefore rides the OS screen recorders; any "record live in the PWA" idea is dead on
   arrival. `src/lib/capture/` is a deliberate duplicated port of the extension pipeline —
-  **change the pipeline in either place, mirror it in the other** (decisions.md 2026-08-02) —
+  **change the pipeline anywhere, mirror it everywhere: capture/, the extension, AND the
+  extracted dested/video-to-prompt library** (decisions.md 2026-08-02 + 2026-08-06) —
   with ONE legitimate divergence: candidate cadence. The extension samples live at 500 ms
   (free); the phone seek-steps at a 1 s floor (each candidate costs a real decode on iOS), and
   its MANIFEST says "1s candidates" accordingly. Phone keyframes are also **best-effort**: a
@@ -614,16 +631,21 @@ reaches the container on a plain push.
   don't remove either fold until no old installs remain. **Recorder ≤1.5.x uploads land in the
   uploader's PERSONAL space** (their declares carry no teamId): teammates won't see them until the
   install updates — `walkthroughs.move` is the fix-up, /recorder's version nag is the cure.
-- **The extension's ID is pinned** by the `key` in `manifest.json` →
-  `gmggnebbenlmpakojgocnjfcnpmifdci`, identical unpacked and (on first upload) in the Web Store.
-  `/recorder` deep-links through it: page → `chrome.runtime.sendMessage(ID, handback:ping|link)`,
-  answered by `onMessageExternal` in the background, which stamps `serverUrl` from
-  **`sender.origin`** — never trust a URL in the payload. `externally_connectable` allows only
-  handback.dev + localhost; a new origin (staging etc.) must be added there or the page can't see
-  the extension at all. `chrome.runtime` is *absent* on the page until a matching extension is
-  installed — absence means "not installed", not "not Chrome".
-- **When the Web Store listing lands, set `STORE_URL`** in `src/app/recorder.tsx` — the zip/
-  load-unpacked instructions collapse behind it automatically.
+- **The extension ships under TWO ids, and `/recorder` must speak to both.** The `key` in
+  `manifest.json` pins the local-unpacked + self-hosted zip build to
+  `gmggnebbenlmpakojgocnjfcnpmifdci`; the **Web Store build has its own id
+  `bdhajcllnjcnihcbobhaecldgjlhfdhd`** because `pack-store.mjs` strips the `key` (Web Store rejects
+  it) and Chrome then generates a fresh id. The pre-submission belief that both would be `gmggneb…`
+  was wrong (decisions.md 2026-08-07). So `recorder.tsx` holds `EXTENSION_IDS = [store, self-hosted]`,
+  pings each in turn (`chrome.runtime.sendMessage(id, handback:ping)`), and links whichever answered —
+  never a single hardcoded id again. Both are answered by `onMessageExternal` in the background, which
+  stamps `serverUrl` from **`sender.origin`** — never trust a URL in the payload. `externally_connectable`
+  allows only handback.dev + localhost; a new origin (staging etc.) must be added there or the page
+  can't see the extension at all. `chrome.runtime` is *absent* on the page until a matching extension
+  is installed — absence means "not installed", not "not Chrome". If Chrome ever reassigns the store id
+  (e.g. a fresh listing), add the new one to `EXTENSION_IDS`.
+- **`STORE_URL` is set** in `src/app/recorder.tsx` (the live listing) → the install step renders the
+  "Add to Chrome" button and the zip/load-unpacked walk collapses behind a disclosure automatically.
 - **A push to `main` does NOT ship the extension.** Deploy only moves the web app/server; the
   recorder reaches users through `releases/recorder/` in the bucket. So before (or right after) any
   push that touched `extension/`: bump the version if behavior changed, then

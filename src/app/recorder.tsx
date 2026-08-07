@@ -17,10 +17,22 @@ import { Button } from '~/components/ui/button'
 import { useCopy } from '~/components/viewer/use-copy'
 import { useTRPC } from '~/lib/trpc'
 
-/** Fixed by the `key` in extension/public/manifest.json — same ID unpacked and in the Web Store. */
-const EXTENSION_ID = 'gmggnebbenlmpakojgocnjfcnpmifdci'
-/** Set when the Chrome Web Store listing goes live; null renders the zip path instead. */
-const STORE_URL: string | null = null
+/**
+ * The extension answers from one of two IDs depending on how it got installed,
+ * and this page can't know which the visitor has — so it pings both and links
+ * whichever answers.
+ *  - Web Store: `pack-store.mjs` strips the manifest `key`, so Chrome assigns
+ *    the store its own ID (below). This is the ID almost everyone now has.
+ *  - Self-hosted zip / load-unpacked: keeps the `key`, which pins it to the
+ *    fixed ID. Still what dev and the `/download/recorder` zip produce.
+ */
+const EXTENSION_IDS = [
+  'bdhajcllnjcnihcbobhaecldgjlhfdhd', // Chrome Web Store
+  'gmggnebbenlmpakojgocnjfcnpmifdci', // self-hosted zip / load-unpacked (manifest `key`)
+] as const
+/** The live Chrome Web Store listing; null would render the zip path instead. */
+const STORE_URL: string | null =
+  'https://chromewebstore.google.com/detail/handback-recorder/bdhajcllnjcnihcbobhaecldgjlhfdhd'
 /**
  * Served by this app, not by GitHub: the repo is private, so its release links
  * 404 for exactly the people we hand them to. Signed-in only, and it redirects
@@ -74,7 +86,7 @@ const NO_ANSWER = 'no answer from the extension'
  * reload. Silence is the normal answer (nothing installed), so every failure
  * mode resolves null rather than throwing.
  */
-function pingExtension(): Promise<Presence | null> {
+function pingId(extensionId: string): Promise<Presence | null> {
   return new Promise((resolve) => {
     const runtime = window.chrome?.runtime
     if (!runtime) {
@@ -82,7 +94,7 @@ function pingExtension(): Promise<Presence | null> {
       return
     }
     try {
-      runtime.sendMessage(EXTENSION_ID, { type: 'handback:ping' }, (response) => {
+      runtime.sendMessage(extensionId, { type: 'handback:ping' }, (response) => {
         // Reading lastError is what stops Chrome logging "unchecked
         // runtime.lastError" every two seconds while nothing is installed.
         if (window.chrome?.runtime?.lastError) {
@@ -97,8 +109,22 @@ function pingExtension(): Promise<Presence | null> {
   })
 }
 
+/**
+ * Try every ID we might be installed under and stop at the first that answers.
+ * The winning ID rides back with the presence so linking can target the same
+ * install rather than guessing. Missing IDs resolve near-instantly (lastError),
+ * so walking the short list every couple of seconds is cheap.
+ */
+async function pingExtension(): Promise<{ presence: Presence; id: string } | null> {
+  for (const id of EXTENSION_IDS) {
+    const presence = await pingId(id)
+    if (presence) return { presence, id }
+  }
+  return null
+}
+
 /** Hands the extension a freshly minted token. It answers, or it didn't hear us. */
-function linkExtension(apiToken: string): Promise<LinkResult> {
+function linkExtension(apiToken: string, extensionId: string): Promise<LinkResult> {
   return new Promise((resolve) => {
     const runtime = window.chrome?.runtime
     if (!runtime) {
@@ -107,7 +133,7 @@ function linkExtension(apiToken: string): Promise<LinkResult> {
     }
     try {
       runtime.sendMessage(
-        EXTENSION_ID,
+        extensionId,
         { type: 'handback:link', apiToken },
         (response) => {
           if (window.chrome?.runtime?.lastError) {
@@ -205,6 +231,9 @@ export function RecorderPage() {
   // null until mount decides — the server has no window to ask.
   const [inChrome, setInChrome] = useState<boolean | null>(null)
   const [presence, setPresence] = useState<Presence | null>(null)
+  // Which ID answered the last ping — what linking must message. null when
+  // nothing is installed.
+  const [extensionId, setExtensionId] = useState<string | null>(null)
   const [checked, setChecked] = useState(false)
 
   useEffect(() => {
@@ -219,7 +248,8 @@ export function RecorderPage() {
     const poll = async () => {
       const found = await pingExtension()
       if (!live) return
-      setPresence(found)
+      setPresence(found?.presence ?? null)
+      setExtensionId(found?.id ?? null)
       setChecked(true)
     }
     void poll()
@@ -289,7 +319,7 @@ export function RecorderPage() {
             ? 'Linked. Pick your destination in the recorder panel when you send.'
             : 'One click hands the recorder a key to your account — no tokens to copy. Pick where each recording goes (Personal or a team) in the panel when you send.'
         }>
-        <LinkStep origin={origin} presence={presence} />
+        <LinkStep origin={origin} presence={presence} extensionId={extensionId} />
       </Step>
 
       <Recording />
@@ -312,7 +342,15 @@ function isLinked(presence: Presence | null, origin: string): boolean {
     : (presence.orgs?.length ?? 0) > 0 || (presence.linked && presence.serverUrl === origin)
 }
 
-function LinkStep({ origin, presence }: { origin: string; presence: Presence | null }) {
+function LinkStep({
+  origin,
+  presence,
+  extensionId,
+}: {
+  origin: string
+  presence: Presence | null
+  extensionId: string | null
+}) {
   const trpc = useTRPC()
   const [phase, setPhase] = useState<Phase>('idle')
   const [minted, setMinted] = useState<string | null>(null)
@@ -321,7 +359,10 @@ function LinkStep({ origin, presence }: { origin: string; presence: Presence | n
     trpc.tokens.create.mutationOptions({
       onSuccess: async (result) => {
         setMinted(result.token)
-        const outcome = await linkExtension(result.token)
+        // extensionId is set whenever presence is (same ping), and the button is
+        // disabled until presence arrives — but fall back to the first known ID
+        // rather than message an empty string if they ever race.
+        const outcome = await linkExtension(result.token, extensionId ?? EXTENSION_IDS[0])
         setPhase(outcome.ok ? 'linked' : 'failed')
       },
       onError: () => setPhase('idle'),

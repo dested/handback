@@ -2,6 +2,34 @@
 
 > ADR-lite: what was decided, why, what was rejected. Append-only.
 
+## 2026-08-07 — The Web Store build has its OWN id; /recorder pings both ids (supersedes the ID claim in 2026-07-30)
+**Why:** the 2026-07-30 handshake decision assumed the extension's `key`-pinned id
+(`gmggnebbenlmpakojgocnjfcnpmifdci`) would carry into the Web Store "on first upload". That was
+wrong: `pack-store.mjs` strips `key` (the Web Store rejects it), so Chrome generated the published
+listing its own id **`bdhajcllnjcnihcbobhaecldgjlhfdhd`**. A page hardcoding only `gmggneb…` can't
+reach a store install at all — the ping never answers, the one-click link silently no-ops.
+The fix keeps both installs first-class: `src/app/recorder.tsx` holds `EXTENSION_IDS = [store,
+self-hosted]`, pings each until one answers, and links whichever id responded (the winning id rides
+back with the presence). The self-hosted zip / load-unpacked build still resolves to `gmggneb…` via
+the retained `key`, so dev and `/download/recorder` are unaffected.
+**Rejected:** re-pointing the single hardcoded id at the store id (breaks dev + self-hosted
+load-unpacked, which keep `key`); shipping the store build WITHOUT stripping `key` to force the
+`gmggneb…` id (the Web Store hard-rejects a `key` field — not an option); a content-script handshake
+on handback.dev to sidestep ids (the very thing 2026-07-30 already rejected).
+
+## 2026-08-06 — The distill pipeline is extracted to dested/video-to-prompt (public); Handback's copy stays for now
+**Why:** the video→prompt logic (probe, keyframe dedup, contact sheets, audio→WAV, unified-timeline
+report/MANIFEST builders) is wanted in other projects, so it now lives as a standalone browser-only
+library at github.com/dested/video-to-prompt (`G:\code\video-to-prompt`) with pluggable
+Transcriber/Polisher hooks and report wording behind `ReportOptions` (npm publish later).
+`src/lib/capture/` is NOT deleted: the phone pipeline just stabilized and swapping it for the
+package deserves its own on-device QA pass. Until that swap, the mirror rule triples — any pipeline
+change must land in `src/lib/capture/`, the extension, AND the library. **The standing plan is to
+delete the generic halves of `src/lib/capture/` and consume the package**; Handback-specific
+plumbing (upload/api/context/pending, the transcribe/polish HTTP clients) stays here either way.
+**Rejected:** cutting Handback over to the package immediately (re-QA cost now, for zero feature
+gain), a private monorepo package (the library is meant to be public and eventually npm).
+
 ## 2026-08-03 — Space is an attribute, not a mode
 **Why:** the header SpaceSwitcher forced everyone to browse one space at a time, and the owner —
 who has many teams and projects — called the resulting inbox unusable and the switching senseless

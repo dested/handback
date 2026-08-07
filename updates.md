@@ -2,6 +2,47 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-08-07 — Web Store live: dual extension-id handshake + set STORE_URL; inbox inline rename
+Asked: extension is deployed to the Chrome Web Store — update the website; make it easy to
+name/rename handbacks. Found the published store id is `bdhajcll…`, NOT the `key`-pinned
+`gmggneb…` the /recorder page hardcoded (pack-store strips `key` → Chrome mints a fresh id), so a
+store install could never answer the one-click link. Fixed: `recorder.tsx` now pings `EXTENSION_IDS`
+= [store, self-hosted] and links whichever answers; `STORE_URL` set → "Add to Chrome" button, zip
+walk collapses. Rename: `walkthroughs.rename` already shipped in the viewer — added inline rename to
+each inbox row (hover-revealed "Rename", stretched-link overlay keeps the row navigable). typecheck
+green. Extension NOT re-published (no extension/ behavior change). See decisions.md 2026-08-07.
+Touched: src/app/recorder.tsx, src/app/app.tsx, extension/scripts/pack-store.mjs, cliffnotes.md,
+decisions.md
+
+## 2026-08-06 — extract video-to-prompt library (new repo)
+Asked: move the video→prompt logic into a standalone public repo for reuse; leave Handback's copy
+in place with notes. Created github.com/dested/video-to-prompt (`G:\code\video-to-prompt`): the
+generic pipeline from src/lib/capture (probe/media/frames/grids/audio/timeline/report/container/
+format/slug) with upload/auth stripped, pluggable Transcriber/Polisher, ReportOptions for product
+wording; typecheck+build green, full cliffnotes kit + README. Handback unchanged except notes —
+see decisions.md 2026-08-06 (triple-mirror rule until the cutover).
+Touched: decisions.md, cliffnotes.md, src/lib/capture/types.ts (extraction note)
+
+## 2026-08-05 — Chrome Web Store listing packet (copy + images)
+Asked: go to the dev console and "fill this out fully — images, descriptions, all that." The console
+can't be driven (Chrome blocks scripting the Web Store: "extensions gallery cannot be scripted"), so
+built a paste-ready packet instead at `extension/store-listing/`: `LISTING.md` (summary, description,
+single purpose, per-permission justifications drawn from the real background/content code, data
+disclosures mapped from `src/app/privacy.tsx`, the three certifications, privacy URL) + 6 images. The
+4× 1280×800 screenshots are the actual side-panel build (`preview.mjs` harness modes home/long/rec)
+captured with Playwright (`channel:chrome`) and framed on-brand (ReturnMark, Fraunces, cobalt/paper);
+plus 440×280 tile and 1440×560 marquee. Render script kept in scratchpad. Left the console fill for
+the owner to do by hand.
+
+## 2026-08-05 — Chrome Web Store upload fixes (manifest key + description)
+Asked: Web Store push rejected — "description too long: 150 (max 132)" and "key field is not
+allowed in manifest"; make the changes and re-bundle. Done: shortened `manifest.description` to
+128 chars (kept the "you sign off" arc). Left `key` in `public/manifest.json` on purpose — it pins
+the local/self-hosted ID to the published `gmggneb…ifdci` that `src/app/recorder.tsx` hardcodes as
+`EXTENSION_ID`. Added `extension/scripts/pack-store.mjs` + `pack:store` script that stages `dist`,
+strips only `key`, guards description ≤132, and zips → `extension/handback-recorder-store.zip`
+(the file to upload). Existing `zip:extension`/self-host flow keeps the key untouched.
+
 ## 2026-08-03 — the app rethought: space is an attribute, not a mode
 Asked: "this page fucking sucks and its the main page… i have so many teams and projects…
 stop making me switch space at the top… i need this rebuilt… make sure the ui looks incredible."
