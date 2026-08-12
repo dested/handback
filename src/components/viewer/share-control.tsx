@@ -3,6 +3,7 @@
 // beside it, `turn off` kills the link, and minting again rotates it (which is
 // also how a leaked link dies without going dark first).
 
+import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '~/components/ui/button'
 import { useTRPC } from '~/lib/trpc'
@@ -19,12 +20,30 @@ export function ShareControl({ walkthrough }: { walkthrough: Walkthrough }) {
       queryKey: trpc.walkthroughs.get.queryKey({ walkthroughId: walkthrough.id }),
     })
 
-  const share = useMutation(trpc.walkthroughs.share.mutationOptions({ onSettled: invalidate }))
-  const unshare = useMutation(trpc.walkthroughs.unshare.mutationOptions({ onSettled: invalidate }))
+  // Turn-off must win the race against every cached copy of the old token —
+  // the mutation's own result AND the not-yet-refetched row. Without this the
+  // revoke lands server-side while the link stays on screen ("turn off didn't
+  // work"), and only a reload tells the truth.
+  const [revoked, setRevoked] = useState(false)
+
+  const share = useMutation(
+    trpc.walkthroughs.share.mutationOptions({
+      onMutate: () => setRevoked(false),
+      onSettled: invalidate,
+    })
+  )
+  const unshare = useMutation(
+    trpc.walkthroughs.unshare.mutationOptions({
+      onSuccess: () => setRevoked(true),
+      onSettled: invalidate,
+    })
+  )
 
   // The freshly-minted token stands in until the refetch lands, so Copy works
-  // the instant the button says the link exists.
-  const token = share.data?.shareToken ?? walkthrough.shareToken
+  // the instant the button says the link exists. A mint in flight shows the
+  // minting state, never a stale predecessor.
+  const minted = share.isPending ? null : (share.data?.shareToken ?? null)
+  const token = revoked ? null : (minted ?? walkthrough.shareToken)
   const busy = share.isPending || unshare.isPending
 
   if (!token) {
