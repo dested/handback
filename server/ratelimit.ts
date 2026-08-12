@@ -81,6 +81,14 @@ export function rateLimit(
   }
 }
 
+/**
+ * The same fixed window, callable from tRPC procedures (which never see an
+ * express `req`). Returns seconds to wait when refused, null when allowed.
+ */
+export function checkLimit(name: string, key: string, rule: LimitRule): number | null {
+  return consume(`${name}:${key}`, rule, Date.now())
+}
+
 /** Test seam: drop every window. Never called in production code. */
 export function resetRateLimits(): void {
   buckets.clear()

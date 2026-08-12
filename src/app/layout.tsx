@@ -20,6 +20,11 @@ const APP_PREFIXES = [
   '/walkthroughs',
   '/team',
   '/projects',
+  // '/record' before '/recorder' is not just tidiness: the guard is a
+  // `startsWith`, and without its own entry '/record' matches nothing here
+  // ('/record' does not start with '/recorder') and falls through to the
+  // marketing shell — no app header, no max-w-6xl container, no padding.
+  '/record',
   '/recorder',
   '/phone',
   '/upload',
@@ -125,8 +130,15 @@ function AppHeader({ email }: { email: string }) {
           <NavLink to="/team" className={tab}>
             Teams
           </NavLink>
+          {/* Record is the verb, Extension is the install. They used to be one
+              tab called "Recorder", which stopped being true the moment the
+              website could record on its own — and "Record"/"Recorder" side by
+              side reads as a typo. */}
+          <NavLink to="/record" className={tab}>
+            Record
+          </NavLink>
           <NavLink to="/recorder" className={tab}>
-            Recorder
+            Extension
           </NavLink>
           <NavLink to="/connect" className={tab}>
             Connect

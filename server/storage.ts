@@ -80,10 +80,21 @@ export async function presignPut(
   )
 }
 
-export async function presignGet(key: string): Promise<string> {
-  return getSignedUrl(s3, new GetObjectCommand({ Bucket: env.S3_BUCKET, Key: key }), {
-    expiresIn: GET_TTL_SECONDS,
-  })
+export async function presignGet(key: string, opts?: { downloadAs?: string }): Promise<string> {
+  return getSignedUrl(
+    s3,
+    new GetObjectCommand({
+      Bucket: env.S3_BUCKET,
+      Key: key,
+      // Signed into the URL, so following the link saves a named file instead
+      // of playing in a tab — the Download button on a shared video needs it
+      // (the `download` attribute is ignored cross-origin).
+      ...(opts?.downloadAs
+        ? { ResponseContentDisposition: `attachment; filename="${opts.downloadAs}"` }
+        : {}),
+    }),
+    { expiresIn: GET_TTL_SECONDS }
+  )
 }
 
 /**

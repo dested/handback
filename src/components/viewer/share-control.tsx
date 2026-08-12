@@ -1,0 +1,60 @@
+// Share link controls for a walkthrough the viewer is a member of. Off: one
+// quiet button that mints the token. On: the /w URL reads in mono with Copy
+// beside it, `turn off` kills the link, and minting again rotates it (which is
+// also how a leaked link dies without going dark first).
+
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { Button } from '~/components/ui/button'
+import { useTRPC } from '~/lib/trpc'
+import type { Walkthrough } from './types'
+import { useCopy } from './use-copy'
+
+export function ShareControl({ walkthrough }: { walkthrough: Walkthrough }) {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const { copied, copy } = useCopy()
+
+  const invalidate = () =>
+    queryClient.invalidateQueries({
+      queryKey: trpc.walkthroughs.get.queryKey({ walkthroughId: walkthrough.id }),
+    })
+
+  const share = useMutation(trpc.walkthroughs.share.mutationOptions({ onSettled: invalidate }))
+  const unshare = useMutation(trpc.walkthroughs.unshare.mutationOptions({ onSettled: invalidate }))
+
+  // The freshly-minted token stands in until the refetch lands, so Copy works
+  // the instant the button says the link exists.
+  const token = share.data?.shareToken ?? walkthrough.shareToken
+  const busy = share.isPending || unshare.isPending
+
+  if (!token) {
+    return (
+      <Button
+        variant="outline"
+        disabled={busy}
+        onClick={() => share.mutate({ walkthroughId: walkthrough.id })}>
+        {share.isPending ? 'Creating link…' : 'Share link'}
+      </Button>
+    )
+  }
+
+  const url = `${window.location.origin}/w/${token}`
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="border-border bg-muted/30 text-muted-foreground max-w-64 truncate rounded-md border px-2 py-1.5 font-mono text-xs">
+        {url}
+      </span>
+      <Button variant="outline" onClick={() => copy(url)}>
+        {copied ? 'Copied' : 'Copy link'}
+      </Button>
+      <button
+        type="button"
+        className="text-muted-foreground hover:text-destructive text-sm"
+        disabled={busy}
+        onClick={() => unshare.mutate({ walkthroughId: walkthrough.id })}>
+        {unshare.isPending ? 'turning off…' : 'turn off'}
+      </button>
+    </div>
+  )
+}

@@ -2,6 +2,95 @@
 
 > ADR-lite: what was decided, why, what was rejected. Append-only.
 
+## 2026-08-12 — Human handback is a Walkthrough `kind`, not a second model
+**Why:** owner's call (asked directly). A video recorded *for a person* shares everything an
+agent walkthrough has — spaces, quota, inbox, S3 layout, admin — and differs only in artifact
+(pristine `final.mp4` instead of distill) and audience (hidden from agent lists; `get` by id
+still answers so one can be pointed at an agent deliberately). `kind: 'agent' | 'human'` on the
+row keeps one pipeline and one review surface.
+**Rejected:** a separate "clip" model (duplicate quota/admin/S3 plumbing), not storing it at all
+(share links need a server).
+
+## 2026-08-12 — mediabunny is the media engine; the editor UI is ours
+**Why:** the in-browser editor needs demux/decode/encode/mux (read MediaRecorder webm, render a
+cut list to H.264+AAC MP4, remux cueless webm so previews can seek). mediabunny does exactly that
+over WebCodecs — pure TS, zero deps, ~20 KB tree-shaken, hardware encode. No npm library exists
+for the editor UI itself (the auto-jump-cut world is SaaS apps), so the timeline/transcript
+surface is built here.
+**Rejected:** ffmpeg.wasm (~30 MB, needs cross-origin isolation, software-slow), server-side
+ffmpeg (576 MiB container hard cap), off-the-shelf editor UIs (none exist as libraries).
+
+## 2026-08-12 — The editor is transcript-first; there is still no timeline selection
+**Why:** the 2026-08-01 verdict ("just the scrobble… no selection") killed the panel timeline's
+selection model as unusable. The web editor doesn't reintroduce it: the *transcript* is the edit
+surface — delete a line to cut its seconds, silences are chips between lines, one Tighten slider
+(threshold) re-runs the silence pass. Cuts are proposed only where the RMS envelope is silent
+AND no words overlap, so app sound effects survive tightening. Preview plays the EDL by skipping
+cuts; the render is exact.
+**Rejected:** a classic NLE timeline with range selection (the exact interaction the owner
+named unusable), auto-only editing (no way to remove *content*).
+
+## 2026-08-12 — A human handback uploads its render, never its raw takes
+**Why:** the deliverable is the tight cut. Raw 30 fps pristine takes are huge against the
+2 GB/walkthrough · 20 GB/org caps, and they stay in the browser's IDB for the session anyway.
+Upload = `final.mp4` + `transcript.json` (lines re-timed onto the edited clock) + `edit.json`
+(the EDL, order-capable, so re-editing is possible the day raw sources are retained). The EDL
+`segments` array is the render's input in output order — full segment reorder is already legal
+downstream; the UI just doesn't produce it yet (owner: "remove only + take reorder, but get
+ready for the full thing soon").
+**Rejected:** uploading raw takes alongside (quota), re-encoding nothing and uploading webm
+(doesn't play everywhere a link gets pasted; Safari).
+
+## 2026-08-12 — The website records on its own; the extension keeps the on-page half
+**Why:** owner's directive — "make it so users can run a Handback recording straight from the
+website, where they don't have to open up the Chrome extension… but they can do it without the
+extension if they so choose." The extension is a real install barrier for the person who *saw* the
+bug, who is usually not the person who set Handback up. Screen capture in a desktop tab is the same
+web platform the extension's recorder already uses, so `/record` runs a port of it
+(`src/lib/capture/live.ts`) and hands the result to the pipeline `/phone` and `/upload` already
+share: same dedup constants, same `frameBudget`, same audio mix + mic-only shadow for Whisper, same
+`report.md`/`MANIFEST.txt`/`recording.json`, same declare/PUT/finalize. **This does not soften the
+2026-08-02 mobile verdict** — that was about phones, and it still holds.
+**The gap is accepted, not worked around:** console/network events, pointer crosshairs and
+click/nav forced keyframes come from scripts injected into the *recorded* page, which no page can do
+to another origin. A web take ships `events: []`, `errorCount: 0`, no `pointer`, and only
+`start`/`change`/`beat` — the set /phone already produces, which everything downstream reads.
+/recorder now says this out loud above its install steps, so nobody picks the weaker tool by
+accident.
+**Rejected:** a same-origin content-script-ish shim that only records handback.dev (the thing people
+need to record is their *own* app); reimplementing live dictation with `webkitSpeechRecognition`
+(it never wrote the shipped transcript — Whisper does — and a mic level tap answers the question it
+really answered); making `/record` replace `/recorder` (the extension is still strictly better where
+it can run); reusing the extension's `handback-recorder` IndexedDB (same origin, and its worker owns
+that schema — `/record` gets `handback-web-recorder`).
+
+## 2026-08-12 — A web take is persisted chunk-by-chunk, unlike a /upload distill
+**Why:** `/upload` deliberately has no pending store, on the reasoning that a desktop tab doesn't get
+OOM-killed and a clip can always be re-distilled. Recording breaks that reasoning in half: the
+narration happened *once*, and twenty minutes of capture is hundreds of MB that must not sit in the
+JS heap. So `/record` writes every MediaRecorder chunk and every keyframe to IndexedDB as it
+arrives, exactly as the extension does, and a take found still marked `recording` on the next visit
+is reassembled from its chunks into the video it never got (`recoverTake`) rather than discarded.
+Deletion happens in exactly two places — after `finalize` returns, and on an explicit discard —
+which is the same rule the phone's share stash follows.
+**Rejected:** holding chunks in memory until Stop (a long take dies before it can upload); no
+recovery path at all (the one thing a recorder must never do is lose the take); auto-resuming a
+recovered take without asking (after a crash the person decides — /phone's rule).
+
+## 2026-08-12 — The floating HUD is Document PiP, opened by its own click
+**Why:** the extension's panel is browser chrome, so it stays on screen while you drive the app
+you're narrating; a tab does not, and the clock, frame count and Stop button vanish the moment you
+switch to the thing you're recording. Document PiP is a real same-origin document that floats above
+everything, and React renders straight into it. It is opened by a separate `pop out` button because
+**`requestWindow()` needs its own user gesture and the Record click is spent on the share picker** —
+the exact constraint the puck hit (2026-08-01). Sharing the entire screen captures the PiP window,
+but it captures the extension's side panel too (it lives inside the Chrome window), so that is
+parity rather than a regression.
+**Rejected:** auto-opening it on Record (the gesture is already spent — this is written down);
+keeping the HUD only in the page (the recorder is invisible during the actual recording, which is
+most of the session); a `position: fixed` in-page overlay (still dies the moment the tab loses
+focus — it solves nothing).
+
 ## 2026-08-12 — Takes record app audio + raw mic, mixed; transcription hears a mic-only shadow
 **Why:** a walkthrough's evidence is often *sound* — the app's own audio (what's in the narrator's
 headphones), the narrator, and the room/second voice. Chrome's default mic pipeline (echo

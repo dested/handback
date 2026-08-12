@@ -2,7 +2,9 @@ import { initTRPC, TRPCError } from '@trpc/server'
 import type { CreateExpressContextOptions } from '@trpc/server/adapters/express'
 import { auth, type Session } from './auth'
 
-export type Context = { session: Session | null }
+// `ip` feeds the rate limit on the few public procedures (share views); null
+// (the SSR loopback caller) skips the limit rather than pooling under one key.
+export type Context = { session: Session | null; ip: string | null }
 
 export async function createContext({ req }: CreateExpressContextOptions): Promise<Context> {
   const headers = new Headers()
@@ -15,7 +17,7 @@ export async function createContext({ req }: CreateExpressContextOptions): Promi
     }
   }
   const session = await auth.api.getSession({ headers })
-  return { session }
+  return { session, ip: req.ip ?? null }
 }
 
 const t = initTRPC.context<Context>().create()

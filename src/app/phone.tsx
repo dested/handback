@@ -18,15 +18,14 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { useMutation } from '@tanstack/react-query'
 import { AddClips, ClipList, type Clip } from '~/components/phone/clip-list'
 import { DestinationControl, type Destination } from '~/components/phone/destination'
 import { PhoneGuide, type Platform } from '~/components/phone/guide'
 import { StageList, isCommitted } from '~/components/phone/stages'
-import { autoTokenName } from '~/components/setup-step'
 import { Button, buttonVariants } from '~/components/ui/button'
 import { Input } from '~/components/ui/input'
 import { Label } from '~/components/ui/label'
+import { useCaptureToken } from '~/lib/capture-token'
 import { fetchContext, type ServerContext } from '~/lib/capture/context'
 import { distillAndUpload } from '~/lib/capture/distill'
 import { mmss } from '~/lib/capture/format'
@@ -47,15 +46,7 @@ import {
   promptInstall,
 } from '~/lib/pwa'
 import { useActiveSpace } from '~/lib/space'
-import { useTRPC } from '~/lib/trpc'
 import { cn } from '~/lib/utils'
-
-/**
- * The phone's own key to the account, minted on first use and kept here. It is
- * the same kind of token /connect and /recorder hand out; this page just never
- * shows it to anyone, because there is nothing on a phone to paste it into.
- */
-const TOKEN_KEY = 'handback.phone.token'
 
 /** Refused before a byte moves — a phone that starts a 3 GB upload just dies quietly instead. */
 const CLIP_LIMIT = 2 * 1024 * 1024 * 1024
@@ -120,44 +111,7 @@ export function PhonePage() {
   const [ctxFailed, setCtxFailed] = useState(false)
   const [ctxAttempt, setCtxAttempt] = useState(0)
 
-  const trpc = useTRPC()
-  const createToken = useMutation(trpc.tokens.create.mutationOptions())
-  // Held in a ref so the token helpers below are stable enough to sit in effect
-  // deps without re-running them on every render of this fairly busy page.
-  const mint = useRef(createToken.mutateAsync)
-  useEffect(() => {
-    mint.current = createToken.mutateAsync
-  })
-
-  const mintToken = useCallback(async (): Promise<string> => {
-    const created = await mint.current({
-      name: autoTokenName('Phone', navigator.userAgent, new Date()),
-    })
-    localStorage.setItem(TOKEN_KEY, created.token)
-    return created.token
-  }, [])
-
-  /**
-   * Every call into the pipeline goes through here. A token can die between
-   * sessions — revoked, or the account signed out elsewhere — and the person
-   * holding the phone can do nothing useful with that news, so a dead token is
-   * silently replaced and the work retried once. Only a second failure is worth
-   * telling them about.
-   */
-  const withToken = useCallback(
-    async <T,>(run: (token: string) => Promise<T>): Promise<T> => {
-      const stored = localStorage.getItem(TOKEN_KEY)
-      const token = stored ?? (await mintToken())
-      try {
-        return await run(token)
-      } catch (error) {
-        if (!(error instanceof AuthError)) throw error
-        localStorage.removeItem(TOKEN_KEY)
-        return run(await mintToken())
-      }
-    },
-    [mintToken]
-  )
+  const withToken = useCaptureToken('Phone')
 
   useEffect(() => {
     setPlatform(detectPlatform(navigator.userAgent, navigator.maxTouchPoints))

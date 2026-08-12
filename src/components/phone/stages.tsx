@@ -12,7 +12,12 @@ import { cn } from '~/lib/utils'
 // The order is the pipeline's, and the pipeline puts the audio before the frames
 // on purpose (distill.ts: the decode spike must not coexist with 600 JPEGs).
 // These rows follow it, or the dots march backwards mid-clip.
-const ROWS: { label: string; stages: CaptureStage[] }[] = [
+export interface StageRow {
+  label: string
+  stages: CaptureStage[]
+}
+
+const ROWS: StageRow[] = [
   { label: 'reading clips', stages: ['probe'] },
   { label: 'reading the audio', stages: ['audio'] },
   { label: 'transcribing', stages: ['transcribe'] },
@@ -22,6 +27,24 @@ const ROWS: { label: string; stages: CaptureStage[] }[] = [
   { label: 'uploading', stages: ['declare', 'upload', 'finalize'] },
 ]
 
+/**
+ * `/record`'s rows. Same pipeline minus its first step: a take's keyframes were
+ * kept live as it recorded, so nothing is ever read off a picked clip and a
+ * "reading clips" row would sit dark for the whole run. The keyframes row stays
+ * — the frames still have to come back off disk and become contact sheets.
+ */
+export const RECORD_ROWS: StageRow[] = ROWS.filter((row) => !row.stages.includes('probe'))
+
+/**
+ * A human handback's rows: no keyframes and no report — the video is the
+ * deliverable and nothing is distilled from it. What remains is the transcript
+ * work and the upload. (The pipeline never emits `frames`/`sheets`/`build` on
+ * this path, so the rows go too — a permanently dark row reads as stuck.)
+ */
+export const HUMAN_RECORD_ROWS: StageRow[] = RECORD_ROWS.filter(
+  (row) => !row.stages.includes('frames') && !row.stages.includes('build')
+)
+
 /** The stages past which cancelling would leave a half-declared walkthrough behind. */
 const COMMITTED: CaptureStage[] = ['declare', 'upload', 'finalize']
 
@@ -29,12 +52,18 @@ export function isCommitted(progress: StageProgress | null): boolean {
   return progress !== null && COMMITTED.includes(progress.stage)
 }
 
-export function StageList({ progress }: { progress: StageProgress | null }) {
-  const current = progress ? ROWS.findIndex((row) => row.stages.includes(progress.stage)) : -1
+export function StageList({
+  progress,
+  rows = ROWS,
+}: {
+  progress: StageProgress | null
+  rows?: StageRow[]
+}) {
+  const current = progress ? rows.findIndex((row) => row.stages.includes(progress.stage)) : -1
 
   return (
     <ul className="divide-border divide-y">
-      {ROWS.map((row, i) => {
+      {rows.map((row, i) => {
         const active = i === current
         const done = current > i
         return (

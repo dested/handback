@@ -182,6 +182,14 @@ model Walkthrough {
   title        String
   origin       String? // site origin the walkthrough was recorded on
   status       String    @default("open") // open | in_review | resolved
+  // Who the walkthrough is FOR. 'agent' = distilled raw material (frames +
+  // report, video quality irrelevant); 'human' = the edited video IS the
+  // deliverable (final.mp4 primary, no distill, hidden from agent lists).
+  kind         String    @default("agent") // agent | human
+  // Token-guarded public watch link (/w/<token>). The token is the whole
+  // credential, like an unaddressed invite; null = not shared.
+  shareToken   String?   @unique @map("share_token")
+  sharedAt     DateTime? @map("shared_at")
   recordedAt   DateTime  @map("recorded_at")
   uploadedAt   DateTime  @default(now()) @map("uploaded_at")
   uploadedById String?   @map("uploaded_by_id")

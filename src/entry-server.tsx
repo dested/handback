@@ -25,7 +25,7 @@ export async function render(req: express.Request): Promise<{
 
   const trpcServer = createTRPCOptionsProxy({
     router: appRouter,
-    ctx: { session },
+    ctx: { session, ip: null },
     queryClient,
   })
 

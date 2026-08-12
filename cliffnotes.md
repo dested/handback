@@ -81,7 +81,7 @@ Bun ≥1.3 · Express 5 + Vite SSR (one `server.ts` dev+prod) · React Router 7 
 `RouteObject[]`) · tRPC v11 (`@trpc/tanstack-react-query`, `.queryOptions()`) · Prisma 7 + Postgres
 (pg adapter) · better-auth (email+password) · Tailwind v4 tokens-in-CSS + shadcn-style primitives ·
 AWS S3 (`@aws-sdk/client-s3`, presigned URLs) · `@modelcontextprotocol/sdk` (stdio MCP) ·
-Playwright e2e. Inherited from dested/sal-starter — its conventions (server-only `./server/*`,
+`mediabunny` (WebCodecs demux/mux — the human-handback editor's engine) · Playwright e2e. Inherited from dested/sal-starter — its conventions (server-only `./server/*`,
 `~/*`→`src/*` alias, JSON-safe tRPC returns) still hold.
 
 ## Directory structure
@@ -149,11 +149,15 @@ src/
                         preview). Two numbered steps; tools, "Putting it to work", disconnect
                         instructions and "Your API tokens" (list + revoke, no create form) are
                         unnumbered reference below. Codex is a "soon" tab.
+    record.tsx          /record — THE extension-free recorder: hero → live HUD → takes list +
+                        destination + send. Resumes whatever is still in IDB on mount (a take
+                        left mid-recording is rebuilt from its chunks). Nav label "Record"
     recorder.tsx        /recorder — THE recorder onboarding: install (STORE_URL now set → "Add to
                         Chrome" button; zip/load-unpacked collapses behind a disclosure), live
                         install ping across BOTH extension ids (`EXTENSION_IDS`: store + self-hosted),
                         one-click Link to whichever id answered (token minted + handed over, nothing
                         pasted). Two numbered steps; "Then just record" is unnumbered
+    watch.tsx           /w/:shareToken — public watch page (walkthroughs.shared, rate-limited)
     phone.tsx           /phone — Handback on the phone: guide (per-OS: Android install+share,
                         iOS A2HS+Photos picker, desktop "open this on your phone") AND the
                         share-target intake: clips → in-browser distill → upload. Mints its own
@@ -191,7 +195,13 @@ src/
                         RecorderPanelMock — the hero's extension panel)
     viewer/             take-section, filmstrip, transcript-panel, events-panel, report-panel,
                         walkthrough-header, walkthrough-controls, status-control, types, format,
-                        use-copy
+                        use-copy · final-cut.tsx (the human handback's player: final.mp4 +
+                        transcript.json, shared by viewer and /w) · share-control.tsx (mint/copy/
+                        revoke the /w link)
+    edit/               editor.tsx — THE transcript-first editor for human handbacks: delete a
+                        line to cut its seconds, silence gap chips (veto-able), Tighten slider,
+                        EDL preview player (skips cuts live), take ↑/↓ reorder. No timeline
+                        selection — that stays dead (decisions.md 2026-08-01 + 2026-08-12)
   lib/
     space.tsx           SpaceProvider/useActiveSpace — Personal + teams; active space in
                         localStorage `handback.activeSpace` ('personal' | teamId); never null
@@ -208,6 +218,20 @@ src/
                         github.com/dested/video-to-prompt (G:\code\video-to-prompt) and will
                         eventually be consumed from there instead — until then any pipeline change
                         mirrors THREE ways: here, extension, library (decisions.md 2026-08-06)**
+                        live.ts / live-store.ts / live-upload.ts are the WEB RECORDER (/record):
+                        the extension's capture engine ported to a page (no content script, so no
+                        events/pointer/click+nav frames), its IDB `handback-web-recorder`, and the
+                        take-set → file-set → upload tail. live.ts imports the dedup constants and
+                        `cellDiff` from frames.ts — one copy on this side of the repo
+    capture-token.ts    useCaptureToken(kind) — the mint/re-mint-on-401 hb_ token helper shared by
+                        /phone, /upload and /record (was copy-pasted in each)
+    edit/               THE human-handback edit engine (web-only, NOT part of the mirrored
+                        distill pipeline): edl.ts (EditState = takeOrder + cuts; derived
+                        EditSegment[] is order-capable — full reorder is legal downstream even
+                        though the UI only removes + reorders takes), silence.ts (RMS envelope
+                        ∩ no-words → proposed cuts), remux.ts (mediabunny stream-copy so cueless
+                        MediaRecorder webm can seek), render.ts (EDL → H.264+AAC final.mp4 via
+                        mediabunny/WebCodecs, hardware encode, odd-dimension canvas fallback)
     trpc.tsx / auth-client.ts / utils.ts
   styles/app.css        ALL design tokens (light only) + .rule/.stamp/.ink-underline utilities
 public/                 manifest.webmanifest (PWA: standalone, share_target, shortcut) · sw.js
@@ -254,7 +278,9 @@ extension/              Handback Recorder — the Chrome MV3 extension (own npm 
 | `/walkthroughs/:walkthroughId` | The viewer (`/gripes/:id` 302s here) | `src/app/walkthrough.tsx` |
 | `/projects` · `/team` | Projects (ALL spaces, grouped; create w/ space select) · "Teams" — every team (roster/invites/seats per team, New team lives HERE) | `src/app/{projects,team}.tsx` |
 | `/connect` | Connect a coding agent — one button mints a token and fills in `claude mcp add`; tokens/disconnect are reference below | `src/app/connect.tsx` |
-| `/recorder` | Install + one-click-link the extension (detects install, mints token, handshake) | `src/app/recorder.tsx` |
+| `/record` | **Record with no extension** — live `getDisplayMedia` capture in the page. Kind picker: **for an agent** (distill pipeline) or **for a person** (pristine 30 fps capture → transcript-first editor → mediabunny MP4 render → share link). Multi-take, crash-recoverable, optional always-on-top Document PiP HUD | `src/app/record.tsx` |
+| `/w/:shareToken` | **Public watch page** for a shared walkthrough — no session, the token IS the credential; plays `final.mp4` + transcript (falls back to takes) | `src/app/watch.tsx` |
+| `/recorder` | Install + one-click-link the extension (detects install, mints token, handshake). Nav label is **"Extension"**; the nav's "Record" is `/record` | `src/app/recorder.tsx` |
 | `/phone` | Phone guide + share-target intake — OS-recorded clips distilled in-browser and uploaded | `src/app/phone.tsx` |
 | `POST /share-target` | PWA share sheet target — SW intercepts + stashes; Express fallback 303s to /phone | `public/sw.js` · `server.ts` |
 | `/admin` (+ `/users[/:id]`, `/teams[/:id]`, `/walkthroughs`, `/usage`) | Platform-admin console — sidebar shell, overview stats, users + drill-down, teams + seat editor, platform feed, per-space usage (admins only; nav link hidden otherwise) | `src/app/admin/*` |
@@ -369,10 +395,12 @@ reaches the container on a plain push.
 
 - **ui.md is law**: light only, no dark mode, no orange. Status colors fixed (open=cobalt,
   in_review=violet, resolved=green).
-- **No mobile browser can capture the screen — settled, don't revisit.** `getDisplayMedia` is
+- **No *mobile* browser can capture the screen — settled, don't revisit.** `getDisplayMedia` is
   `version_added: false` on Chrome Android / Safari iOS / everything mobile (checked 2026-08-02).
   /phone therefore rides the OS screen recorders; any "record live in the PWA" idea is dead on
-  arrival. `src/lib/capture/` is a deliberate duplicated port of the extension pipeline —
+  arrival. **This is a statement about phones, not about the API**: a desktop tab has had screen
+  capture for years, which is what `/record` is (`src/lib/capture/live.ts`, 2026-08-12). Don't read
+  this bullet as "the website never captures". `src/lib/capture/` is a deliberate duplicated port of the extension pipeline —
   **change the pipeline anywhere, mirror it everywhere: capture/, the extension, AND the
   extracted dested/video-to-prompt library** (decisions.md 2026-08-02 + 2026-08-06) —
   with ONE legitimate divergence: candidate cadence. The extension samples live at 500 ms
@@ -384,6 +412,18 @@ reaches the container on a plain push.
   (IDB `handback-share`/`pending`/`current`) is a contract between `public/sw.js` and
   `src/lib/pwa.ts` — change both together. `externally_connectable` etc. are unaffected; the
   phone token lives in `localStorage handback.phone.token` and re-mints itself on 401.
+- **The web recorder is the extension's engine minus the content script, and the gap is a fixed
+  list.** `src/lib/capture/live.ts` is a port of `extension/src/sidepanel/recorder.ts` — same picker
+  constraints, same 64×64 dedup, same Web Audio mix + mic-only shadow, same length-scaled
+  `frameBudget`, same chunk-to-IDB persistence. What a page cannot have, because it comes from
+  scripts injected into the *recorded* origin: console/network `events` (so `errorCount` is always
+  0 and polish gets no error context), `pointer` on frames and the crosshair drawn from it, and the
+  `click`/`nav` forced keyframes — leaving `start`/`change`/`beat`, exactly /phone's set. **A fourth
+  client now mirrors the pipeline**: any dedup/report/upload change lands in `src/lib/capture/`, the
+  extension, the video-to-prompt library, AND `live.ts` — though `live.ts` at least imports its
+  dedup constants and `cellDiff` from `frames.ts` rather than copying them, so keep that.
+  Its IDB is **`handback-web-recorder`**, deliberately not the extension's `handback-recorder`:
+  same origin, and the extension's worker owns that schema.
 - **A clip that reached /phone must be un-losable short of explicit discard** (2026-08-02, after
   a real walkthrough died mid-distill). Two stores hold it and **neither is consumed by reading**:
   the share stash (`handback-share`, written by the SW) and the pending run
@@ -686,6 +726,33 @@ reaches the container on a plain push.
   `DATABASE_URL=postgres://…/handback_test bunx prisma db push` or sign-up 500s with a
   ColumnNotFound that surfaces as a blank "Sign up failed".
 
+## Gotchas & hard rules (continued — 2026-08-12 human handback)
+
+- **A walkthrough has a `kind`, and 'human' changes the contract.** `kind: 'human'` = the edited
+  video IS the deliverable: declare carries `kind` (absent = 'agent' — every old recorder),
+  agent lists (`listWalkthroughs`, MCP, ingest GET) filter it out while `get` by id still
+  answers, the viewer renders `final.mp4` + `transcript.json` via `FinalCut` instead of takes,
+  and its upload carries NO raw takes, NO report.md, NO frames (decisions.md 2026-08-12 ×4).
+  `walkthroughs.get/list/inbox` all return `kind` — don't add a surface that ignores it.
+- **The share token is the whole credential.** `Walkthrough.shareToken` (18 random bytes,
+  base64url) unlocks `/w/<token>` via the public `walkthroughs.shared` procedure — same trust
+  model as an unaddressed invite. Re-sharing ROTATES the token (that's the leak recovery);
+  `unshare` nulls it. The procedure is IP rate-limited via `checkLimit` (ratelimit.ts's
+  tRPC-callable face) using `Context.ip` — SSR's loopback caller has `ip: null`, which SKIPS
+  the limit; don't route real user traffic through a null-ip context.
+- **Pristine capture is the same engine with three switches.** `LiveRecorder`'s `pristine` flag:
+  30 fps ideal (vs 10), `videoBitsPerSecond` ≈ 4 bits/px/s clamped [6, 16] Mbps, and NO keyframe
+  sampling loop. Everything else (mix, mic shadow, chunk persistence, recovery) is byte-identical
+  — `src/lib/edit/` is deliberately NOT mirrored into the extension/phone/library pipeline.
+- **The editor's cut proposals need both silences AND no words.** `silence.ts` proposes a cut
+  only where the RMS envelope (adaptive threshold from the take's own distribution — raw audio,
+  no NS, every room differs) is quiet AND no padded transcript line overlaps. Words always win.
+  Vetoed silence chips stay vetoed across Tighten re-runs (matched by take + ~position).
+- **final.mp4 downloads through a second presign.** `presignGet(key, { downloadAs })` signs a
+  `ResponseContentDisposition` — the `download` attribute is ignored cross-origin, so the
+  Download button needs the URL itself to say attachment. `get`/`shared` return it as
+  `downloadUrl`.
+
 ## Status
 
 - **Done (2026-07-29, day one)** — schema + S3 + two-phase ingest + push CLI (verified with a real
@@ -765,6 +832,14 @@ reaches the container on a plain push.
   unchanged ingest API (multi-clip → rec-NN, voice-note mode, iOS picker path). Live in-PWA
   screen capture confirmed impossible on mobile; design + limitations in
   `plans/2026-08-02-phone-pwa.md`. On-device QA still pending (needs a real phone).
+- **Done (2026-08-12, later)** — **human handback** (`plans/2026-08-12-human-handback.md`, all
+  four waves): `Walkthrough.kind` + `shareToken` (schema pushed NOWHERE yet — prod gets it via
+  predeploy `db push` on the next main push; local dev + `handback_test` need it by hand),
+  token-guarded `/w/:shareToken` watch page, share/unshare/shared procedures, /record kind
+  picker + pristine capture, transcript-first editor (`src/lib/edit/`, `components/edit/`),
+  mediabunny MP4 render + upload (`final.mp4`/`transcript.json`/`edit.json`), share-on-success.
+  Typecheck + build green; **no live browser run** (the `.env`-points-at-prod hazard again) —
+  the whole record→edit→render→share loop wants a human at a keyboard.
 - **Next** — **deploy, then re-test the loop**: `/mcp` and `/connect` only exist locally until the
   next push to `main`, so the command `/connect` prints for handback.dev 404s until then. Sal's
   Drydock/DNS checklist in the rename plan (zone, project, S3 via
@@ -793,3 +868,7 @@ reaches the container on a plain push.
 - `plans/2026-08-02-phone-pwa.md` — **done** (code); on-device QA outstanding. The platform
   verdict (no mobile screen capture, ever), the OS-recorder + share-target design, and the
   honest limitations list for /phone.
+- `plans/2026-08-12-web-recorder.md` — **done**. The extension-free `/record` path: what ports,
+  the two accepted divergences, the pop-out gesture rule.
+- `plans/2026-08-12-human-handback.md` — **done** (code; live run pending). The kind split,
+  share links, the transcript-first editor, the mediabunny decision, and the four waves.

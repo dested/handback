@@ -2,6 +2,37 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-08-12 — Human handback: pristine video, in-browser tight edit, share links
+Asked: record video *for a person* (not an agent), auto-tighten pauses in a browser editor, share
+it. Built per plans/2026-08-12-human-handback.md: `Walkthrough.kind` + token-guarded share links
+(`/w/:token` public watch page, `walkthroughs.share/unshare/shared`, human walkthroughs hidden
+from agent/MCP lists); /record kind picker with pristine capture (30 fps, area-scaled bitrate, no
+keyframe sampling); transcript-first editor (delete lines to cut, silence chips from RMS+transcript
+agreement, Tighten slider, EDL preview, take reorder); mediabunny render → final.mp4 + edit.json +
+re-timed transcript.json upload; done screen mints share link + downloads the MP4 locally.
+Typecheck + build green. NOT live-verified (`.env` still points at prod — same hazard as the
+web-recorder plan); local + `handback_test` DBs still need `db:push` for kind/shareToken.
+Touched: prisma/schema.prisma, server/{router,ingest,walkthroughs-api,storage,trpc,ratelimit}.ts,
+src/app/{routes,watch,walkthrough,record,app}.tsx, src/components/{viewer/*,edit/editor,record/*,
+phone/stages}.tsx, src/lib/capture/{live,live-store,live-upload,upload}.ts, src/lib/edit/*
+
+## 2026-08-12 — /record: recording from the website, no extension
+Asked: run a Handback recording straight from the site, the same way the extension does, for people
+who won't install it. Built `/record` — `capture/live.ts` (the extension's `Recorder` ported to a
+page: same picker constraints, 64×64 dedup, audio mix + mic-only shadow, frameBudget, chunks to
+IDB), `live-store.ts` (IDB `handback-web-recorder`, take recovery), `live-upload.ts` (takes → the
+same file set → declare/PUT/finalize). Multi-take, per-take delete + renumber, discard arming,
+resume-after-crash, always-on-top Document PiP HUD (its own click — the puck's gesture rule). The
+content-script half is absent by construction: no events/pointer/click+nav frames, documented
+everywhere. Nav split "Recorder" → **Record** (/record) + **Extension** (/recorder); /recorder and
+the empty inbox link across. Extracted the thrice-copied token helper to `lib/capture-token.ts`;
+exported the dedup constants + `cellDiff` from `frames.ts` so live.ts shares one copy.
+Touched: src/app/{record,recorder,upload,phone,app,layout,routes}.tsx, src/components/record/*,
+src/components/phone/stages.tsx, src/lib/capture-token.ts, src/lib/capture/{live,live-store,
+live-upload,frames}.ts. typecheck + build + prettier green. **Not verified live** — `.env`'s
+`DATABASE_URL` is pointed at PROD, so no dev server was started; see
+plans/2026-08-12-web-recorder.md.
+
 ## 2026-08-12 — silent-loopback detection + PickGate share-dialog portrait (extension 1.7.2)
 Asked (after testing 1.7.0): system audio still missing → diagnosed as Windows loopback routing,
 not code; then "remove the diag stuff, make the picking screen better". Kept as product: a level

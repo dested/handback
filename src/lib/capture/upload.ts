@@ -43,6 +43,13 @@ export interface UploadOptions {
   /** null = the token owner's personal space. */
   teamId: string | null
   projectId: string | null
+  /** 'human' = the video is the deliverable (hidden from agent lists, viewer
+   *  plays the render). Absent = 'agent', the default the server also assumes. */
+  kind?: 'agent' | 'human'
+  /** Overrides the declared walkthrough duration. The human path sends the
+   *  edited render's length — the sum of raw takes would overstate what a
+   *  viewer actually watches. Take rows keep their real (source) durations. */
+  durationMs?: number
   onProgress?: (p: UploadProgress) => void
   /** Aborts every in-flight PUT and rejects with `cancelled`. */
   signal?: AbortSignal
@@ -130,9 +137,10 @@ function declaration(
     ...(opts.projectId ? { projectId: opts.projectId } : {}),
     // Which space this lands in: absent = the token owner's personal one.
     ...(opts.teamId ? { teamId: opts.teamId } : {}),
+    ...(opts.kind ? { kind: opts.kind } : {}),
     // The first take's own clock, not when the phone opened the form.
     recordedAt: first ? first.startedAt : new Date(session.createdAt).toISOString(),
-    durationMs: takes.reduce((sum, t) => sum + t.durationMs, 0),
+    durationMs: opts.durationMs ?? takes.reduce((sum, t) => sum + t.durationMs, 0),
     frameCount: takes.reduce((sum, t) => sum + t.frameCount, 0),
     // A phone clip has no console tap, so there is nothing to count either way.
     errorCount: 0,

@@ -17,6 +17,7 @@ import { SPACE_MAX_WALKTHROUGHS, SPACE_QUOTA_BYTES } from './ingest'
 import { log } from './logger'
 import { briefFrameLimit, formatWalkthrough } from './mcp-format'
 import { prisma } from './prisma'
+import { checkLimit } from './ratelimit'
 import { latestRecorderRelease } from './releases'
 import {
   copyObject,
@@ -686,6 +687,7 @@ const walkthroughListSelect = {
   title: true,
   origin: true,
   status: true,
+  kind: true,
   recordedAt: true,
   uploadedAt: true,
   durationMs: true,
@@ -728,6 +730,7 @@ const walkthroughsRouter = router({
         title: g.title,
         origin: g.origin,
         status: g.status,
+        kind: g.kind,
         recordedAt: g.recordedAt.toISOString(),
         uploadedAt: g.uploadedAt.toISOString(),
         durationMs: g.durationMs,
@@ -763,6 +766,7 @@ const walkthroughsRouter = router({
       title: g.title,
       origin: g.origin,
       status: asStatus(g.status),
+      kind: g.kind,
       recordedAt: g.recordedAt.toISOString(),
       durationMs: g.durationMs,
       frameCount: g.frameCount,
@@ -801,6 +805,11 @@ const walkthroughsRouter = router({
         title: g.title,
         origin: g.origin,
         status: g.status,
+        kind: g.kind,
+        // The whole credential for /w/<token>; null = not shared. Members only
+        // ever see it here (the admin read-only path passes through too — a
+        // platform admin can already reach every file of the walkthrough).
+        shareToken: g.shareToken,
         recordedAt: g.recordedAt.toISOString(),
         uploadedAt: g.uploadedAt.toISOString(),
         durationMs: g.durationMs,
@@ -810,6 +819,16 @@ const walkthroughsRouter = router({
         bytes: Number(g.bytes),
         project: g.project,
         uploadedByName: g.uploadedBy?.name ?? null,
+        // Present when an edited render was uploaded (human handbacks) — signed
+        // with a content-disposition so Download saves a named file.
+        downloadUrl: await (async () => {
+          const finalFile = g.files.find((f) => f.path === 'final.mp4')
+          return finalFile
+            ? presignGet(walkthroughKey(spaceId(space), g.id, finalFile.path), {
+                downloadAs: `${g.slug}.mp4`,
+              })
+            : null
+        })(),
         takes: g.takes.map((t) => ({
           id: t.id,
           index: t.index,
@@ -963,6 +982,102 @@ const walkthroughsRouter = router({
       await deletePrefix(walkthroughPrefix(spaceId(g), input.walkthroughId))
       await prisma.walkthrough.delete({ where: { id: input.walkthroughId } })
       return { ok: true }
+    }),
+
+  /**
+   * Mint (or re-mint) the share token — the whole credential behind /w/<token>,
+   * same trust model as an unaddressed invite link. Re-sharing rotates the
+   * token, which is also how an accidentally-leaked link is killed and replaced
+   * in one move; `unshare` kills it outright.
+   */
+  share: protectedProcedure
+    .input(z.object({ walkthroughId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const g = await prisma.walkthrough.findUnique({
+        where: { id: input.walkthroughId },
+        select: { teamId: true, userId: true, finalizedAt: true },
+      })
+      if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
+      await requireSpaceAccess(ctx.session.user.id, g)
+      // An unfinalized walkthrough has nothing watchable behind the link.
+      if (!g.finalizedAt) throw new TRPCError({ code: 'BAD_REQUEST' })
+      const shareToken = randomBytes(18).toString('base64url')
+      await prisma.walkthrough.update({
+        where: { id: input.walkthroughId },
+        data: { shareToken, sharedAt: new Date() },
+      })
+      return { shareToken }
+    }),
+
+  unshare: protectedProcedure
+    .input(z.object({ walkthroughId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const g = await prisma.walkthrough.findUnique({
+        where: { id: input.walkthroughId },
+        select: { teamId: true, userId: true },
+      })
+      if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
+      await requireSpaceAccess(ctx.session.user.id, g)
+      await prisma.walkthrough.update({
+        where: { id: input.walkthroughId },
+        data: { shareToken: null, sharedAt: null },
+      })
+      return { ok: true }
+    }),
+
+  /**
+   * The public read behind /w/<token> — no session, the token is the whole
+   * credential (128+ bits, unguessable; the IP rate limit is defense in depth,
+   * not the lock). Returns the same presigned-per-file shape the viewer gets,
+   * minus anything member-only, so the watch page can reuse the viewer's
+   * reading of takes and transcripts. Presigns expire in 1h; the page refetches.
+   */
+  shared: publicProcedure
+    .input(z.object({ token: z.string().min(8).max(80) }))
+    .query(async ({ ctx, input }) => {
+      if (ctx.ip !== null) {
+        const wait = checkLimit('share-view', ctx.ip, { window: 3600, max: 240 })
+        if (wait !== null) throw new TRPCError({ code: 'TOO_MANY_REQUESTS' })
+      }
+      const g = await prisma.walkthrough.findUnique({
+        where: { shareToken: input.token },
+        include: {
+          takes: { orderBy: { index: 'asc' } },
+          files: { where: { status: 'uploaded' }, orderBy: { path: 'asc' } },
+        },
+      })
+      if (!g || !g.finalizedAt) throw new TRPCError({ code: 'NOT_FOUND' })
+      const space: SpaceOwner = { teamId: g.teamId, userId: g.userId }
+      // The edited render, when there is one — a human handback's primary
+      // artifact. Signed a second time with a content-disposition so Download
+      // saves a named file instead of playing in the tab.
+      const finalFile = g.files.find((f) => f.path === 'final.mp4')
+      return {
+        title: g.title,
+        kind: g.kind,
+        recordedAt: g.recordedAt.toISOString(),
+        durationMs: g.durationMs,
+        downloadUrl: finalFile
+          ? await presignGet(walkthroughKey(spaceId(space), g.id, finalFile.path), {
+              downloadAs: `${g.slug}.mp4`,
+            })
+          : null,
+        takes: g.takes.map((t) => ({
+          id: t.id,
+          index: t.index,
+          dir: t.dir,
+          durationMs: t.durationMs,
+          videoPath: t.videoPath,
+        })),
+        files: await Promise.all(
+          g.files.map(async (f) => ({
+            path: f.path,
+            size: f.size,
+            contentType: f.contentType,
+            url: await presignGet(walkthroughKey(spaceId(space), g.id, f.path)),
+          }))
+        ),
+      }
     }),
 })
 
@@ -1583,7 +1698,10 @@ const adminRouter = router({
           message: `Team is at its ${t.seatLimit} seats — raise the limit first`,
         })
       }
-      const u = await prisma.user.findUnique({ where: { email: input.email }, select: { id: true } })
+      const u = await prisma.user.findUnique({
+        where: { email: input.email },
+        select: { id: true },
+      })
       if (!u) throw new TRPCError({ code: 'BAD_REQUEST', message: 'No account with that email' })
       const existing = await prisma.membership.findUnique({
         where: { teamId_userId: { teamId: t.id, userId: u.id } },

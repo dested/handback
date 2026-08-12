@@ -132,17 +132,13 @@ function linkExtension(apiToken: string, extensionId: string): Promise<LinkResul
       return
     }
     try {
-      runtime.sendMessage(
-        extensionId,
-        { type: 'handback:link', apiToken },
-        (response) => {
-          if (window.chrome?.runtime?.lastError) {
-            resolve({ ok: false, error: NO_ANSWER })
-            return
-          }
-          resolve(readLinkResult(response))
+      runtime.sendMessage(extensionId, { type: 'handback:link', apiToken }, (response) => {
+        if (window.chrome?.runtime?.lastError) {
+          resolve({ ok: false, error: NO_ANSWER })
+          return
         }
-      )
+        resolve(readLinkResult(response))
+      })
     } catch {
       resolve({ ok: false, error: NO_ANSWER })
     }
@@ -224,7 +220,9 @@ export function RecorderPage() {
   const navigate = useNavigate()
   useEffect(() => {
     const ua = navigator.userAgent
-    const mobile = /Android|iPhone|iPod/.test(ua) || (navigator.maxTouchPoints > 1 && /iPad|Macintosh/.test(ua) && 'ontouchend' in document)
+    const mobile =
+      /Android|iPhone|iPod/.test(ua) ||
+      (navigator.maxTouchPoints > 1 && /iPad|Macintosh/.test(ua) && 'ontouchend' in document)
     if (mobile) navigate('/phone', { replace: true })
   }, [navigate])
 
@@ -276,6 +274,17 @@ export function RecorderPage() {
           loud, and the recording, transcript, and console errors land in your Handback inbox as a
           brief an agent can act on.
         </p>
+        {/* The escape hatch, said before the install steps rather than after —
+            somebody who won't install an extension should not have to read two
+            numbered steps to find that out. */}
+        <p className="text-muted-foreground text-sm leading-relaxed">
+          Don't want to install anything?{' '}
+          <Link to="/record" className="text-primary underline underline-offset-4">
+            Record straight from this site
+          </Link>{' '}
+          instead — same keyframes, same transcript, same report. Only the on-page extras (drawing,
+          console errors, click keyframes) need the extension.
+        </p>
       </header>
 
       {inChrome === false && <NotChromeNotice />}
@@ -323,7 +332,6 @@ export function RecorderPage() {
       </Step>
 
       <Recording />
-
     </div>
   )
 }
@@ -599,8 +607,8 @@ function Recording() {
         <li className="flex gap-2">
           <span className="text-cobalt">·</span>
           <span>
-            Pin it: puzzle-piece icon in Chrome's toolbar → pin{' '}
-            <strong>Handback Recorder</strong>, then click it to open the side panel.
+            Pin it: puzzle-piece icon in Chrome's toolbar → pin <strong>Handback Recorder</strong>,
+            then click it to open the side panel.
           </span>
         </li>
         <li className="flex gap-2">
@@ -640,7 +648,6 @@ function NotChromeNotice() {
     </div>
   )
 }
-
 
 function CopyRow({ value }: { value: string }) {
   const { copied, copy } = useCopy()

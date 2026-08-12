@@ -24,16 +24,22 @@ import type { RecordingFrame } from './types'
  * and halves the work.
  */
 const STEP_FLOOR_MS = 1000
-const SIG_SIZE = 64 // 64×64 RGB cells — fine enough that a sprite-sized change still flips whole cells
-const PIX_TOL = 25 // a cell counts as changed if any channel moves more than this
-const DEDUP_THRESHOLD = 8 // cells that must change for a frame to be new (~0.2% of 4096)
-const DEDUP_WINDOW = 4 // vs the last N KEPT frames — A-B-A cutaways don't come back
-const BEAT_MS = 15000 // a minute of narration over a slowly-shifting screen must not produce zero frames
+/**
+ * The keep/drop vocabulary, exported because `live.ts` runs the same decision
+ * against a live screen share. One definition on this side of the repo — the
+ * mirror rule (decisions.md 2026-08-02/08-06) is hard enough with three
+ * codebases; it does not need a third copy inside this one.
+ */
+export const SIG_SIZE = 64 // 64×64 RGB cells — fine enough that a sprite-sized change still flips whole cells
+export const PIX_TOL = 25 // a cell counts as changed if any channel moves more than this
+export const DEDUP_THRESHOLD = 8 // cells that must change for a frame to be new (~0.2% of 4096)
+export const DEDUP_WINDOW = 4 // vs the last N KEPT frames — A-B-A cutaways don't come back
+export const BEAT_MS = 15000 // a minute of narration over a slowly-shifting screen must not produce zero frames
 const FRAMES_PER_MIN = 40
 const MIN_FRAME_BUDGET = 150
 const MAX_FRAME_BUDGET = 600
-const MAX_FRAME_W = 1920
-const JPEG_QUALITY = 0.9
+export const MAX_FRAME_W = 1920
+export const JPEG_QUALITY = 0.9
 /**
  * Past half an hour even a one-second step is thousands of decodes. Cap the
  * candidate count and let the step stretch past the floor — the budget below
@@ -60,7 +66,7 @@ export function frameBudget(durationMs: number): number {
  * Count of cells whose max channel delta exceeds PIX_TOL — the reference's
  * pct_diff, kept as a count.
  */
-function cellDiff(a: Uint8ClampedArray, b: Uint8ClampedArray): number {
+export function cellDiff(a: Uint8ClampedArray, b: Uint8ClampedArray): number {
   const cells = SIG_SIZE * SIG_SIZE
   let changed = 0
   for (let i = 0; i < cells; i++) {

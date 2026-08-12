@@ -12,25 +12,20 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useMutation } from '@tanstack/react-query'
 import { CLIP_ACCEPT, ClipList, type Clip } from '~/components/phone/clip-list'
 import { DestinationControl, type Destination } from '~/components/phone/destination'
 import { StageList, isCommitted } from '~/components/phone/stages'
-import { autoTokenName } from '~/components/setup-step'
 import { Button, buttonVariants } from '~/components/ui/button'
 import { Input } from '~/components/ui/input'
 import { Label } from '~/components/ui/label'
+import { useCaptureToken } from '~/lib/capture-token'
 import { fetchContext, type ServerContext } from '~/lib/capture/context'
 import { distillAndUpload } from '~/lib/capture/distill'
 import { mmss } from '~/lib/capture/format'
 import { probeClip } from '~/lib/capture/probe'
 import { AuthError, type DistillResult, type StageProgress } from '~/lib/capture/types'
 import { useActiveSpace } from '~/lib/space'
-import { useTRPC } from '~/lib/trpc'
 import { cn } from '~/lib/utils'
-
-/** Shared with /phone on purpose: one browser, one key to this account. */
-const TOKEN_KEY = 'handback.phone.token'
 
 /** Refused before a byte moves — these mirror server/ingest.ts's hard caps
  *  (2 GB/file, 4 GB/walkthrough); a bigger client allowance just means a
@@ -81,41 +76,7 @@ export function UploadPage() {
   const [ctxFailed, setCtxFailed] = useState(false)
   const [ctxAttempt, setCtxAttempt] = useState(0)
 
-  const trpc = useTRPC()
-  const createToken = useMutation(trpc.tokens.create.mutationOptions())
-  const mint = useRef(createToken.mutateAsync)
-  useEffect(() => {
-    mint.current = createToken.mutateAsync
-  })
-
-  const mintToken = useCallback(async (): Promise<string> => {
-    const created = await mint.current({
-      name: autoTokenName('Upload', navigator.userAgent, new Date()),
-    })
-    localStorage.setItem(TOKEN_KEY, created.token)
-    return created.token
-  }, [])
-
-  /**
-   * Every call into the pipeline goes through here. A token can die between
-   * sessions — revoked, or the account signed out elsewhere — so a dead token is
-   * silently replaced and the work retried once. Only a second failure is worth
-   * telling anyone about.
-   */
-  const withToken = useCallback(
-    async <T,>(run: (token: string) => Promise<T>): Promise<T> => {
-      const stored = localStorage.getItem(TOKEN_KEY)
-      const token = stored ?? (await mintToken())
-      try {
-        return await run(token)
-      } catch (error) {
-        if (!(error instanceof AuthError)) throw error
-        localStorage.removeItem(TOKEN_KEY)
-        return run(await mintToken())
-      }
-    },
-    [mintToken]
-  )
+  const withToken = useCaptureToken('Upload')
 
   useEffect(() => {
     const now = new Date()
@@ -375,8 +336,8 @@ export function UploadPage() {
             {clipError && <p className="text-destructive text-sm">{clipError}</p>}
             {oversized && (
               <p className="text-destructive text-sm">
-                that's more than a walkthrough can carry — keep each clip under 2 GB and the
-                set under 4 GB.
+                that's more than a walkthrough can carry — keep each clip under 2 GB and the set
+                under 4 GB.
               </p>
             )}
           </div>

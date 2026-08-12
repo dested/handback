@@ -96,6 +96,10 @@ const declareSchema = z.object({
   /** Destination space; absent = the token owner's personal space. The
    *  recorder's destination picker sends it. */
   teamId: z.string().max(60).optional(),
+  /** 'human' = the edited video is the deliverable (final.mp4 primary, no
+   *  distill) and the walkthrough is hidden from agent lists. Absent = 'agent',
+   *  which is every recorder that predates the split. */
+  kind: z.enum(['agent', 'human']).default('agent'),
   /** @deprecated Recorder ≤1.1.0 called `errorCount` this. Read when it's the only one sent. */
   eventCount: z.number().int().min(0).optional(),
   takes: z.array(takeSchema).min(1).max(200),
@@ -335,6 +339,7 @@ ingestRouter.post(DECLARE, declareLimit, async (req, res) => {
       slug: body.slug,
       title: body.title,
       origin: body.origin ?? null,
+      kind: body.kind,
       recordedAt: new Date(body.recordedAt),
       uploadedById: auth.userId,
       durationMs: body.durationMs,

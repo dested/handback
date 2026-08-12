@@ -5,6 +5,7 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
+import { FinalCut } from '~/components/viewer/final-cut'
 import { WalkthroughControls } from '~/components/viewer/walkthrough-controls'
 import { WalkthroughHeader } from '~/components/viewer/walkthrough-header'
 import { ReportPanel } from '~/components/viewer/report-panel'
@@ -43,6 +44,11 @@ export function WalkthroughPage() {
     )
   }
 
+  // A human handback's artifact is its edited render — one player, the
+  // narration beside it, no filmstrip/report scaffolding (there is no distill
+  // to show). Falls through to the take view if the render never uploaded.
+  const finalUrl = walkthrough.kind === 'human' ? urlByPath.get('final.mp4') : undefined
+
   return (
     <div className="space-y-8">
       <div className="space-y-5">
@@ -50,19 +56,31 @@ export function WalkthroughPage() {
         <WalkthroughControls walkthrough={walkthrough} />
       </div>
 
-      {walkthrough.takes.map((take) => (
-        <div key={take.id} className="rule pt-8">
-          <TakeSection take={take} urlByPath={urlByPath} />
+      {finalUrl ? (
+        <div className="rule pt-8">
+          <FinalCut
+            videoUrl={finalUrl}
+            transcriptUrl={urlByPath.get('transcript.json')}
+            downloadUrl={walkthrough.downloadUrl}
+          />
         </div>
-      ))}
+      ) : (
+        <>
+          {walkthrough.takes.map((take) => (
+            <div key={take.id} className="rule pt-8">
+              <TakeSection take={take} urlByPath={urlByPath} />
+            </div>
+          ))}
 
-      {walkthrough.takes.length === 0 && (
-        <p className="rule text-muted-foreground pt-8 text-sm">No takes were uploaded.</p>
+          {walkthrough.takes.length === 0 && (
+            <p className="rule text-muted-foreground pt-8 text-sm">No takes were uploaded.</p>
+          )}
+
+          <div className="rule pt-8">
+            <ReportPanel walkthroughId={walkthrough.id} url={urlByPath.get('report.md')} />
+          </div>
+        </>
       )}
-
-      <div className="rule pt-8">
-        <ReportPanel walkthroughId={walkthrough.id} url={urlByPath.get('report.md')} />
-      </div>
     </div>
   )
 }

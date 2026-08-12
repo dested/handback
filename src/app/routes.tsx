@@ -25,12 +25,14 @@ import { PrivacyPage } from './privacy'
 import { ResetPasswordPage } from './reset-password'
 import { PhonePage } from './phone'
 import { ProjectsPage } from './projects'
+import { RecordPage } from './record'
 import { RecorderPage } from './recorder'
 import { SignInPage, safeNext } from './sign-in'
 import { SignUpPage } from './sign-up'
 import { TeamPage } from './team'
 import { TermsPage } from './terms'
 import { UploadPage } from './upload'
+import { WatchPage } from './watch'
 
 // Per-request context populated by entry-server.tsx and handed to loaders via
 // createStaticHandler.query(req, { requestContext }). Only available SSR-side.
@@ -119,10 +121,16 @@ export const routes: RouteObject[] = [
       { path: 'reset-password', Component: ResetPasswordPage },
       { path: 'privacy', Component: PrivacyPage },
       { path: 'terms', Component: TermsPage },
+      // Public watch page for a shared walkthrough — the token IS the
+      // credential, so no loader guard; walkthroughs.shared resolves or 404s.
+      { path: 'w/:shareToken', Component: WatchPage },
       { path: 'app', Component: InboxPage, loader: appLoader },
       { path: 'walkthroughs/:walkthroughId', Component: WalkthroughPage, loader: appLoader },
       { path: 'connect', Component: ConnectPage, loader: appLoader },
       { path: 'recorder', Component: RecorderPage, loader: appLoader },
+      // The extension-free path: live getDisplayMedia capture in the page,
+      // through the same pipeline. /recorder installs the recorder; this IS one.
+      { path: 'record', Component: RecordPage, loader: appLoader },
       // /phone is where the OS share sheet lands. A signed-out share must come
       // back here after auth or the stashed clip is orphaned — so this loader,
       // alone, carries the full URL through sign-in as ?next=.

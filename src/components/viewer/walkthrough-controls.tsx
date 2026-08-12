@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Button } from '~/components/ui/button'
 import { useActiveSpace } from '~/lib/space'
 import { useTRPC } from '~/lib/trpc'
+import { ShareControl } from './share-control'
 import { StatusControl } from './status-control'
 import type { Walkthrough } from './types'
 import { useCopy } from './use-copy'
@@ -177,9 +178,15 @@ export function WalkthroughControls({ walkthrough }: { walkthrough: Walkthrough 
           </select>
         )}
 
-        <Button variant="outline" onClick={() => copy(agentBrief(walkthrough))}>
-          {copied ? 'Copied' : 'Copy agent brief'}
-        </Button>
+        {/* A human handback is FOR a person — the share link is its point, and
+            an agent brief would tell an agent to pull a walkthrough that its
+            list deliberately hides. */}
+        {walkthrough.kind !== 'human' && (
+          <Button variant="outline" onClick={() => copy(agentBrief(walkthrough))}>
+            {copied ? 'Copied' : 'Copy agent brief'}
+          </Button>
+        )}
+        <ShareControl walkthrough={walkthrough} />
 
         {canDelete && (
           <Button

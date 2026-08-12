@@ -124,6 +124,10 @@ export async function listWalkthroughs(
     where: {
       ...spaceFilter,
       finalizedAt: { not: null },
+      // A human handback is a video for a person, not work for an agent — it
+      // never shows up in an agent's queue. `get` by id still answers, so a
+      // human can still point an agent at one deliberately.
+      kind: 'agent',
       ...(status ? { status } : {}),
     },
     orderBy: { recordedAt: 'desc' },

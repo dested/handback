@@ -321,6 +321,7 @@ export function InboxPage() {
 /** What a row needs to draw itself — the inbox payload, structurally. */
 type InboxRow = Filterable & {
   id: string
+  kind: string
   recordedAt: string
   durationMs: number
   errorCount: number
@@ -372,6 +373,11 @@ function Row({
   const when = hydrated ? relativeTime(row.recordedAt, Date.now()) : shortDate(row.recordedAt)
 
   const meta: ReactNode[] = [
+    // A human handback is a video for a person, not agent work — say so where
+    // the row's other facts live, in the same quiet chip voice as the space.
+    ...(row.kind === 'human'
+      ? [<span className="ring-border rounded px-1.5 ring-1 ring-inset">video</span>]
+      : []),
     showSpaceChip ? (
       <span className="ring-border rounded px-1.5 ring-1 ring-inset">{row.spaceName}</span>
     ) : (
@@ -497,16 +503,23 @@ function ConnectLine({ lastUsedAt }: { lastUsedAt: string | null }) {
   )
 }
 
-/** Nothing anywhere, in any space. Three ways in, one line each. */
+/** Nothing anywhere, in any space. Four ways in, one line each. */
 function FirstWalkthroughGuide() {
   return (
     <div className="border-border max-w-xl border-t pt-8">
       <h2 className="font-display text-2xl font-semibold">Nothing handed back yet.</h2>
       <p className="text-muted-foreground mt-3 text-sm leading-relaxed">
         A walkthrough is a narrated screen recording — a bug, review feedback, anything you'd rather
-        say than type. Three ways to make the first one:
+        say than type. Four ways to make the first one:
       </p>
       <div className="mt-6 space-y-3 text-sm leading-relaxed">
+        {/* First, because it is the only one that needs nothing installed. */}
+        <p>
+          <Link to="/record" className="text-primary underline underline-offset-4">
+            Record one right now
+          </Link>{' '}
+          — share a tab or your screen from this browser, nothing to install.
+        </p>
         <p>
           <Link to="/recorder" className="text-primary underline underline-offset-4">
             Install the recorder
