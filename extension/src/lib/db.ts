@@ -113,10 +113,16 @@ export async function deleteRecording(id: string) {
   const recording = await getRecording(id);
   if (recording) {
     const chunks = Array.from({ length: recording.chunks }, (_, i) => `${id}:chunk:${i + 1}`);
+    const micChunks = Array.from(
+      { length: recording.micChunks ?? 0 },
+      (_, i) => `${id}:micchunk:${i + 1}`,
+    );
     await Promise.all([
       ...recording.meta.frames.map((f) => blobs.delete(`${id}:frame:${f.index}`)),
       ...chunks.map((key) => blobs.delete(key)),
+      ...micChunks.map((key) => blobs.delete(key)),
       blobs.delete(`${id}:video`),
+      blobs.delete(`${id}:mic`),
     ]);
   }
   await tx(STORE.recordings, 'readwrite', (s) => s.delete(id));

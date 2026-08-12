@@ -681,6 +681,106 @@
   margin-top: 2px;
 }
 
+/* A portrait of Chrome's share dialog — the panel's one dark surface, dark
+ * because the thing it depicts is dark (same license the landing page's contact
+ * sheet holds). Everything in it is a ghost except the audio row, which wears
+ * the cobalt ring: that switch is the picture's whole reason to exist. */
+.sharemock {
+  width: 100%;
+  max-width: 280px;
+  margin: 6px 0 2px;
+  background: #202124;
+  border-radius: 10px;
+  padding: 12px 12px 11px;
+  box-shadow: 0 8px 22px rgb(24 22 18 / 0.25);
+}
+.sm-title {
+  color: #e8eaed;
+  font-size: var(--fs-0);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.sm-tabs {
+  display: flex;
+  margin-top: 9px;
+  border-bottom: 1px solid #3c4043;
+}
+.sm-tabs span {
+  flex: 1;
+  text-align: center;
+  color: #9aa0a6;
+  font-size: 10px;
+  padding: 4px 2px 6px;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+}
+.sm-tabs span.on {
+  color: #8ab4f8;
+  border-bottom-color: #8ab4f8;
+}
+.sm-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  background: #292a2d;
+  border-radius: 6px;
+  padding: 9px 10px;
+  margin: 9px 0;
+}
+.sm-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.sm-row i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #5f6368;
+  flex: none;
+}
+.sm-row b {
+  height: 5px;
+  border-radius: 3px;
+  background: #5f6368;
+  opacity: 0.65;
+}
+.sm-audio {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border-radius: 7px;
+  color: #e8eaed;
+  outline: 2px solid var(--cobalt);
+  outline-offset: 1px;
+}
+.sm-audio svg {
+  flex: none;
+}
+.sm-label {
+  flex: 1;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.sm-toggle {
+  width: 26px;
+  height: 14px;
+  border-radius: 7px;
+  background: #8ab4f8;
+  position: relative;
+  flex: none;
+}
+.sm-toggle i {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #202124;
+}
+
 /* ── While it runs ──────────────────────────────────────────────────────── */
 
 /* Three lines of unrelated type stacked 6px apart read as one mush. The meter, the

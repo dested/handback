@@ -34,8 +34,17 @@ export type Request =
   // the active gripe (or a fresh one) and answers with its part number.
   | { type: 'recording:start'; id: string; name: string; origin: string }
   // Fires every couple of seconds while recording — meta so far, plus how many
-  // 1s chunk blobs are on disk. Deliberately silent: no broadcast.
-  | { type: 'recording:progress'; id: string; meta: RecordingMeta; mime: string; chunks: number }
+  // 1s chunk blobs are on disk (video, and the mic-only shadow when one runs).
+  // Deliberately silent: no broadcast.
+  | {
+      type: 'recording:progress';
+      id: string;
+      meta: RecordingMeta;
+      mime: string;
+      chunks: number;
+      micChunks: number;
+      micMime: string;
+    }
   | { type: 'recording:finish'; id: string; meta: RecordingMeta }
   // getDisplayMedia was granted but the recorder never really started.
   | { type: 'recording:discard'; id: string }

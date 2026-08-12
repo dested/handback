@@ -397,14 +397,17 @@ chrome.runtime.onMessage.addListener((message: Request, _sender, sendResponse) =
           meta: message.meta,
           mime: message.mime,
           chunks: message.chunks,
+          micChunks: message.micChunks,
+          micMime: message.micMime,
         });
         return { ok: true };
       }
       case 'recording:finish': {
         const rec = await getRecording(message.id);
         if (!rec) return { ok: false };
-        // The chunk blobs are gone by now — the panel assembled the video from them.
-        await putRecording({ ...rec, state: 'done', chunks: 0, meta: message.meta });
+        // The chunk blobs are gone by now — the panel assembled the video (and
+        // the mic-only shadow, when one ran) from them.
+        await putRecording({ ...rec, state: 'done', chunks: 0, micChunks: 0, meta: message.meta });
         await setRecordingActive(false);
         await broadcast();
         return { ok: true };
@@ -427,6 +430,21 @@ chrome.runtime.onMessage.addListener((message: Request, _sender, sendResponse) =
           await blobs.set(`${message.id}:video`, new Blob(parts, { type: rec.mime }));
         }
         for (let n = 1; n <= rec.chunks; n++) await blobs.delete(`${message.id}:chunk:${n}`);
+        // The mic-only shadow gets the same reassembly, so a recovered take still
+        // transcribes from narration rather than the mixed track.
+        const micParts: Blob[] = [];
+        const micChunks = rec.micChunks ?? 0;
+        for (let n = 1; n <= micChunks; n++) {
+          const chunk = await blobs.get(`${message.id}:micchunk:${n}`);
+          if (chunk) micParts.push(chunk);
+        }
+        if (micParts.length) {
+          await blobs.set(
+            `${message.id}:mic`,
+            new Blob(micParts, { type: rec.micMime || 'audio/webm' }),
+          );
+        }
+        for (let n = 1; n <= micChunks; n++) await blobs.delete(`${message.id}:micchunk:${n}`);
         // The last kept frame is the only clock we have — the panel that knew the
         // real duration died before it could tell us.
         const last = rec.meta.frames[rec.meta.frames.length - 1];
@@ -435,6 +453,7 @@ chrome.runtime.onMessage.addListener((message: Request, _sender, sendResponse) =
           state: 'done',
           interrupted: true,
           chunks: 0,
+          micChunks: 0,
           meta: { ...rec.meta, durationMs: last ? last.t : rec.meta.durationMs },
         });
         await broadcast();

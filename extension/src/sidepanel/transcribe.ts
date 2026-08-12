@@ -4,7 +4,10 @@ import type { WorkerIn, WorkerOut } from './transcribeWorker';
 
 /**
  * Main-thread half of the post-recording transcription pass: decode the webm's
- * audio to a 16 kHz mono Float32Array, then get words out of it.
+ * audio to a 16 kHz mono Float32Array, then get words out of it. The caller
+ * hands in the mic-only shadow when the take has one (a take with system audio
+ * mixed into its video must not have that mix transcribed); the video webm
+ * itself otherwise — decodeAudioData doesn't care which.
  *
  * Two engines share that decode. By default the audio goes to the workspace and
  * comes back transcribed in seconds. On-device Whisper is the fallback — when
@@ -33,12 +36,12 @@ export interface TranscribeResult {
 }
 
 export async function transcribeRecording(
-  video: Blob,
+  media: Blob,
   opts: { serverUrl: string; apiToken: string; lang: string; onDevice: boolean },
   onProgress: (p: TranscribeProgress) => void,
 ): Promise<TranscribeResult | null> {
   onProgress({ stage: 'decode', pct: -1 }); // decoding takes real time on long recordings
-  const audio = await decode(video).catch(() => null);
+  const audio = await decode(media).catch(() => null);
   if (!audio) return null;
 
   if (!opts.onDevice && opts.apiToken) {
@@ -65,11 +68,11 @@ export async function transcribeRecording(
  * and an OfflineAudioContext resamples in `decodeAudioData` all the same without
  * claiming an output device or tripping the autoplay policy in a side panel.
  */
-async function decode(video: Blob): Promise<Float32Array<ArrayBuffer> | null> {
+async function decode(media: Blob): Promise<Float32Array<ArrayBuffer> | null> {
   const ctx = new OfflineAudioContext(1, 1, SAMPLE_RATE);
   try {
     // A mic-denied recording has no audio track at all, and decoding throws.
-    const buf = await ctx.decodeAudioData(await video.arrayBuffer());
+    const buf = await ctx.decodeAudioData(await media.arrayBuffer());
     const mono = new Float32Array(buf.length);
     for (let c = 0; c < buf.numberOfChannels; c++) {
       const channel = buf.getChannelData(c);

@@ -232,7 +232,8 @@ extension/              Handback Recorder — the Chrome MV3 extension (own npm 
                         injected.js relay
   src/sidepanel/        Panel app: Home.tsx (the nothing-open screen = the workspace: destination
                         row + switcher, the workspace's queue with status/project filters, sessions
-                        still on this machine), recorder (getDisplayMedia + dedup), transcription
+                        still on this machine), recorder (getDisplayMedia incl. system audio + raw
+                        mic, Web Audio mix + dedup — see the audio gotcha), transcription
                         (transcribeCloud.ts → the workspace; transcribeWorker.ts → on-device),
                         polish.ts (the cleanup pass, after transcription), Timeline editor
                         (a scrubber — see the gotcha), grids contact sheets, App.tsx orchestration
@@ -435,6 +436,19 @@ reaches the container on a plain push.
   as an interaction counter to every agent that saw it; **ingest still accepts a bare `eventCount`**
   from Recorder ≤1.1.0 and stores it as `errorCount`, so don't delete that fallback until the
   Web Store build is past 1.1.0 everywhere.
+- **A take's audio is three sources, two artifacts** (extension 1.7.0, 2026-08-12): the webm's one
+  audio track is app/system audio (getDisplayMedia `audio` + `systemAudio:'include'`) mixed with a
+  RAW mic (AEC/NS/AGC off, so the room and second voices survive — headphones assumed) through a
+  Web Audio graph, because MediaRecorder silently records only the first audio track it's handed.
+  Transcription must NOT hear that mix: takes with system audio run a mic-only shadow recorder
+  whose chunks (`<id>:micchunk:*`) are crash-persisted like the video's and assembled into
+  `<id>:mic`, which `runWhisper` prefers over `<id>:video`. Keep the three lifecycles in sync —
+  delete (db.ts), recover (background), finish/cancel (recorder.ts) all know both chunk families.
+  Chrome only offers "share audio" on tab/entire-screen pickers (never a window) and its absence
+  is silent — so the PickGate 'choosing' screen carries a dark ShareDialogMock portrait pointing
+  at the switch, and the HUD's app-audio line is 3-state (`none`/`silent`/`live`, an analyser tap
+  on the sys source): "shared but silent" = Windows is playing the sound on a device Chrome isn't
+  looping back. Don't remove either tell.
 - **Leaving a walkthrough is not ending one.** The panel has exactly two states now — the home
   screen and the open walkthrough — and `browsing` (App.tsx) is which one you're looking at. It is
   view state only: the session stays active in the worker, so a take started from the home screen

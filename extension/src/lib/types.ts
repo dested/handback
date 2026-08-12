@@ -132,6 +132,14 @@ export interface Recording {
   mime: string;
   /** Count of persisted 1s chunk blobs (`<id>:chunk:<n>`, n from 1) while state is 'recording'. */
   chunks: number;
+  /**
+   * The mic-only shadow recording (`<id>:micchunk:<n>` → `<id>:mic`), kept so
+   * transcription hears narration and not the app audio mixed into the video.
+   * Absent/0 on takes with no system audio — there the video's track IS the mic.
+   */
+  micChunks?: number;
+  /** MediaRecorder mime of the mic-only chunks. */
+  micMime?: string;
   meta: RecordingMeta;
 }
 

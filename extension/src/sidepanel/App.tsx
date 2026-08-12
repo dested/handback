@@ -448,9 +448,13 @@ export function App() {
     async (id: string) => {
       const video = await blobs.get(`${id}:video`);
       if (!video) return;
+      // Takes with system audio carry a mic-only shadow — transcribe that, or
+      // Whisper writes the app's own sound into the narration. The mixed webm
+      // is the fallback for takes that never had one.
+      const narration = (await blobs.get(`${id}:mic`)) ?? video;
       const l = activeLink(settingsRef.current);
       const result = await transcribeRecording(
-        video,
+        narration,
         {
           serverUrl: l?.serverUrl ?? '',
           apiToken: l?.apiToken ?? '',
@@ -631,7 +635,17 @@ export function App() {
     setPageDock(Boolean(r.scope));
     // Seed the live readout so the pick screen hands straight to it — the recorder's
     // first real emit is a sample-tick away, and a blank Home must not flash between.
-    setRecUpdate((u) => u ?? { elapsedMs: 0, frameCount: 0, segmentCount: 0, interim: '', micState: 'off' });
+    setRecUpdate(
+      (u) =>
+        u ?? {
+          elapsedMs: 0,
+          frameCount: 0,
+          segmentCount: 0,
+          interim: '',
+          micState: 'off',
+          sysAudio: r.sysState,
+        },
+    );
     setPicking(null);
     await refresh();
   };
@@ -1081,6 +1095,23 @@ export function App() {
               {recUpdate.interim || (recUpdate.micState === 'listening' ? 'listening…' : '')}
             </div>
           )}
+          {/* Chrome's "share audio" box is easy to miss and its absence is silent —
+              the take records fine, just without the app's sound. Say so now,
+              while stopping and re-picking still costs seconds. 'silent' is the
+              nastier cousin: the box WAS ticked but the loopback carries nothing,
+              which on Windows means the sound is playing on a device Chrome
+              isn't capturing. Five seconds of grace before accusing anyone. */}
+          {recUpdate.sysAudio === 'none' && (
+            <div className="note">
+              no app audio — to capture it, stop and re-share with “share tab audio” ticked
+            </div>
+          )}
+          {recUpdate.sysAudio === 'silent' && recUpdate.elapsedMs > 5000 && (
+            <div className="note">
+              app audio is shared but silent so far — if sound is playing, it isn’t reaching
+              Chrome (check Windows’ default output device)
+            </div>
+          )}
           {pageDock && <div className="note">draw and stop from the little bar on the page</div>}
           <button className="stop-big" onClick={() => void stopRecording()} disabled={stopping}>
             {stopping ? 'saving…' : 'stop recording'}
@@ -1303,10 +1334,60 @@ function MicGate({ onOpenTab, onSkip }: { onOpenTab: () => void; onSkip: () => v
 }
 
 /**
+ * A portrait of Chrome's share dialog, drawn small: the panel can't reach into
+ * the real one, but it can point at the part that matters. The audio switch is
+ * ringed in cobalt because it is the whole reason this picture exists — Chrome
+ * leaves it wherever it was last time, a window surface doesn't offer it at
+ * all, and a take recorded with it off is a silent app and no error anywhere.
+ */
+function ShareDialogMock() {
+  return (
+    <div className="sharemock" aria-hidden="true">
+      <div className="sm-title">Choose what to share</div>
+      <div className="sm-tabs">
+        <span className="on">Chrome Tab</span>
+        <span>Window</span>
+        <span>Entire Screen</span>
+      </div>
+      <div className="sm-rows">
+        <div className="sm-row">
+          <i />
+          <b style={{ flex: 0.9 }} />
+        </div>
+        <div className="sm-row">
+          <i />
+          <b style={{ flex: 0.6 }} />
+        </div>
+        <div className="sm-row">
+          <i />
+          <b style={{ flex: 0.75 }} />
+        </div>
+      </div>
+      <div className="sm-audio">
+        <svg viewBox="0 0 16 16" width="13" height="13">
+          <path d="M2.5 6v4h2.6L9 13V3L5.1 6H2.5z" fill="currentColor" />
+          <path
+            d="M11 5.5a3.4 3.4 0 0 1 0 5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.4"
+            strokeLinecap="round"
+          />
+        </svg>
+        <span className="sm-label">Also share tab audio</span>
+        <span className="sm-toggle">
+          <i />
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/**
  * Chrome's screen-share dialog is a separate OS surface the panel can't reach into,
- * so instead of sitting blank behind it the panel says what it's waiting on:
- * 'choosing' while the dialog is up, 'refused' when it closed with nothing chosen —
- * the one moment there's actually a button to offer.
+ * so instead of sitting blank behind it the panel walks the choice: which surface,
+ * and above all the audio switch — 'choosing' while the dialog is up, 'refused'
+ * when it closed with nothing chosen, the one moment there's a button to offer.
  */
 function PickGate({
   mode,
@@ -1323,8 +1404,18 @@ function PickGate({
         <span className="gate-dot pulse" />
         <h2 className="gate-title">Pick what to record</h2>
         <p className="gate-lead">
-          Chrome just opened its share dialog. Choose a screen, window, or tab and hit{' '}
+          Chrome just opened its share dialog. Choose the tab you’re walking through and hit{' '}
           <b>Share</b> — recording starts the moment you do.
+        </p>
+        <ShareDialogMock />
+        <p className="gate-lead">
+          <b>Turn on “Also share tab audio.”</b> That switch is how the sound your app makes —
+          everything you’re hearing in your headphones — gets into the take. Chrome leaves it
+          wherever it was last time, and with it off the app records silent.
+        </p>
+        <p className="gate-lead">
+          A <b>window</b> can’t share audio at all — pick the tab, or the entire screen if you
+          need more than one.
         </p>
       </section>
     );

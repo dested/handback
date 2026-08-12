@@ -2,6 +2,23 @@
 
 > ADR-lite: what was decided, why, what was rejected. Append-only.
 
+## 2026-08-12 — Takes record app audio + raw mic, mixed; transcription hears a mic-only shadow
+**Why:** a walkthrough's evidence is often *sound* — the app's own audio (what's in the narrator's
+headphones), the narrator, and the room/second voice. Chrome's default mic pipeline (echo
+cancellation, noise suppression, auto gain) exists to isolate one call voice and deliberately
+shreds everything else, and `getDisplayMedia({audio:false})` threw the app audio away entirely. So:
+display capture now requests audio (`systemAudio:'include'`, raw constraints), the mic runs raw
+(AEC/NS/AGC off), and a Web Audio graph mixes them into the single track MediaRecorder can record.
+Because Whisper must hear narration and not the mix (song lyrics/app speech would land in the
+transcript, the report, and the agent brief), a take with system audio also runs a mic-only shadow
+MediaRecorder — persisted crash-safe exactly like the video chunks (`micchunk:*`, reassembled on
+recover) — and transcription prefers `<id>:mic` over the webm. Headphones are the assumed setup;
+on speakers the app audio leaks into the mic slightly phased, which is livable.
+**Rejected:** transcribing the mixed track (transcript pollution); keeping AEC on (kills the room —
+the very thing asked for); uploading the mic-only webm as a walkthrough file (internal artifact,
+storage cost, nothing consumes it); handing MediaRecorder two audio tracks without a mixer (it
+silently records only the first).
+
 ## 2026-08-07 — The Web Store build has its OWN id; /recorder pings both ids (supersedes the ID claim in 2026-07-30)
 **Why:** the 2026-07-30 handshake decision assumed the extension's `key`-pinned id
 (`gmggnebbenlmpakojgocnjfcnpmifdci`) would carry into the Web Store "on first upload". That was

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Handback Recorder",
-  "version": "1.6.4",
+  "version": "1.7.2",
   "description": "Narrate what's broken. Recording, transcript, and console errors land in your Handback inbox for an agent to fix — you sign off.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA06835Jlmsy4GMib+uHYJBhkvoQm163u8UvFbf/2WcmUyHijPTyrrIOu4dic0lpb8D8SIYar5yeSRBAO4Ovi6tt5otKOHHvKQqGWxN2dDcMWBKhu7K99keFaFn8QrU+hjHS1XsIMwUl5nnQ4CBAg3jKSvo8fQjaHSGYrGpVNK2wUDFFPgz/xYeuF48V+T1pBxoJWQJTuMzftQj3IBF+hZzhaz+LmMPbD0teGcaYEhLMHJx3QInAqtKzhEGnBudvQBeF2sqdgdN/tILlROa8ryeIuoPmxLzJUCymj9ZdGG+h42+4CQBoPUAD5phh68Nj+WzQbSvD2k82qZQff4uwShgQIDAQAB",
   "minimum_chrome_version": "116",

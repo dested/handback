@@ -70,6 +70,25 @@ export function frameBudget(durationMs: number): number {
 }
 
 const MIME_TYPES = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
+const AUDIO_MIME_TYPES = ['audio/webm;codecs=opus', 'audio/webm'];
+
+/**
+ * Raw capture on purpose, for both the mic and the shared audio: Chrome's echo
+ * cancellation / noise suppression / auto gain exist to isolate one voice on a
+ * call, and they do it by shredding everything else — the app's sound, the
+ * second voice across the desk, the room. A walkthrough wants all of that.
+ * The trade: on speakers the app audio leaks into the mic slightly phased
+ * (headphones keep the two clean), which is livable; narration vanishing under
+ * noise suppression is not.
+ */
+const RAW_AUDIO = {
+  echoCancellation: false,
+  noiseSuppression: false,
+  autoGainControl: false,
+} as const;
+
+/** Chrome's picker offers "share audio" on tab and screen surfaces; ask it to. */
+type DisplayOptions = DisplayMediaStreamOptions & { systemAudio?: 'include' | 'exclude' };
 
 /** MicState moved to lib/types — the content script speaks it too. */
 export type { MicState };
@@ -80,6 +99,14 @@ export interface RecorderUpdate {
   segmentCount: number;
   interim: string;
   micState: MicState;
+  /**
+   * App/system audio: 'none' = the share came without a track (checkbox missed,
+   * or a window was picked), 'silent' = a track exists but nothing has been
+   * heard on it yet, 'live' = real signal has landed. 'silent' minutes into a
+   * take with sound playing means the loopback is dead — the sound is reaching
+   * the ears but not Chrome (wrong default output device, virtual audio driver).
+   */
+  sysAudio: 'none' | 'silent' | 'live';
 }
 
 export interface RecorderHandlers {
@@ -199,6 +226,28 @@ export class Recorder {
   private chunkSeq = 0;
   private lastProgress = 0;
 
+  /** Mixes shared audio + mic into the one track the webm records. */
+  private audioCtx: AudioContext | null = null;
+  /** Mixer source nodes held as fields on purpose: an unreferenced node is GC
+   *  bait, and a collected node drops out of the graph mid-take — silently. */
+  private mixSources: MediaStreamAudioSourceNode[] = [];
+  /** Level tap on the system source. 'silent' vs 'live' in the HUD is the only
+   *  tell for a granted-but-dead loopback (sound reaching the ears through a
+   *  device Chrome isn't capturing). */
+  private sysTap: { analyser: AnalyserNode; buf: Float32Array<ArrayBuffer> } | null = null;
+  private sysHeard = false;
+  /**
+   * The mic-only shadow recorder, running only when the take ALSO has system
+   * audio: the webm's mixed track is what a human plays back, but Whisper must
+   * hear narration alone or the transcript fills with the app's own sound.
+   * Without system audio the video's track already is the mic, and this stays null.
+   */
+  private micRecorder: MediaRecorder | null = null;
+  private micMime = 'audio/webm';
+  private micChunks: Blob[] = [];
+  private micChunkCount = 0;
+  private micChunkSeq = 0;
+
   private dictation: Ticker | null = null;
   private micState: MicState = 'off';
   private interim = '';
@@ -242,10 +291,16 @@ export class Recorder {
   // ── lifecycle ───────────────────────────────────────────────────────────
 
   async start() {
-    const stream = await navigator.mediaDevices.getDisplayMedia({
+    // Audio too: the sound the app makes (what's in the narrator's headphones)
+    // belongs in the take. Chrome only grants it when the picker's "share audio"
+    // box is ticked on a tab or full-screen surface — a window share has no box —
+    // so its absence is a normal outcome, surfaced in the HUD, never an error.
+    const displayOptions: DisplayOptions = {
       video: { frameRate: { ideal: 10 } },
-      audio: false,
-    });
+      audio: { ...RAW_AUDIO },
+      systemAudio: 'include',
+    };
+    const stream = await navigator.mediaDevices.getDisplayMedia(displayOptions);
     this.stream = stream;
     this.startedAt = Date.now();
     // Hold the first push off by one throttle window: the panel only sends
@@ -272,18 +327,17 @@ export class Recorder {
     // The mic is grabbed for real, not as a throwaway probe: its track is mixed
     // into the webm so the raw video carries the narration, and acquiring it
     // here is also the only chance SpeechRecognition gets at a permission
-    // prompt from an extension page.
+    // prompt from an extension page. Raw constraints — see RAW_AUDIO — so the
+    // room survives: the second voice, the notification chime, the thing the
+    // narrator is reacting to.
     try {
-      this.micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      this.micStream = await navigator.mediaDevices.getUserMedia({ audio: { ...RAW_AUDIO } });
     } catch {
       this.micState = 'denied';
     }
 
     this.mime = MIME_TYPES.find((type) => MediaRecorder.isTypeSupported(type)) ?? 'video/webm';
-    const recorded = new MediaStream([
-      ...stream.getVideoTracks(),
-      ...(this.micStream?.getAudioTracks() ?? []),
-    ]);
+    const recorded = new MediaStream([...stream.getVideoTracks(), ...this.mixAudio()]);
     const recorder = new MediaRecorder(recorded, { mimeType: this.mime });
     recorder.ondataavailable = (e) => {
       if (!e.data.size) return;
@@ -300,6 +354,7 @@ export class Recorder {
     };
     recorder.start(1000);
     this.recorder = recorder;
+    this.startMicShadow();
 
     stream.getVideoTracks()[0]?.addEventListener('ended', () => this.handlers.onEnd());
     if (this.micState !== 'denied' && this.ticker) {
@@ -333,6 +388,7 @@ export class Recorder {
       if (!this.sampling) this.pending = this.sample();
     }, SAMPLE_MS);
     this.tickTimer = window.setInterval(() => {
+      this.pollAudio();
       this.emit();
       this.saveProgress();
     }, 1000);
@@ -342,6 +398,97 @@ export class Recorder {
   stop(): Promise<RecordingMeta> {
     if (!this.stopped) this.stopped = this.finish();
     return this.stopped;
+  }
+
+  /** Whether the share came with an audio track — decided at start, never changes. */
+  get hasSystemAudio(): boolean {
+    return (this.stream?.getAudioTracks().length ?? 0) > 0;
+  }
+
+  /** What the HUD shows for app audio — see RecorderUpdate.sysAudio. */
+  get sysState(): 'none' | 'silent' | 'live' {
+    if (!this.hasSystemAudio) return 'none';
+    return this.sysHeard ? 'live' : 'silent';
+  }
+
+  /**
+   * One audio track for the webm, whatever arrived: every source mixed through
+   * Web Audio (MediaRecorder records ONE audio track; handing it two silently
+   * drops the second), each tapped by an analyser so silence is a fact the HUD
+   * can state instead of a surprise at playback. A mixer failure falls back to
+   * the raw mic — narration over silence beats app sound over a missing voice.
+   */
+  private mixAudio(): MediaStreamTrack[] {
+    const sys = this.stream?.getAudioTracks() ?? [];
+    const mic = this.micStream?.getAudioTracks() ?? [];
+    if (!sys.length && !mic.length) return [];
+    try {
+      const ctx = new AudioContext();
+      this.audioCtx = ctx;
+      const dest = ctx.createMediaStreamDestination();
+      for (const track of [...sys, ...mic]) {
+        const source = ctx.createMediaStreamSource(new MediaStream([track]));
+        source.connect(dest);
+        this.mixSources.push(source);
+        if (track === sys[0]) {
+          const analyser = ctx.createAnalyser();
+          analyser.fftSize = 2048;
+          source.connect(analyser);
+          this.sysTap = { analyser, buf: new Float32Array(analyser.fftSize) };
+        }
+      }
+      // Extension pages are exempt from the autoplay policy, but a suspended
+      // graph records silence — resume just in case.
+      if (ctx.state === 'suspended') void ctx.resume().catch(() => {});
+      return dest.stream.getAudioTracks();
+    } catch {
+      this.mixSources = [];
+      this.sysTap = null;
+      return mic;
+    }
+  }
+
+  /** Latches sysHeard the first time the loopback carries real signal. */
+  private pollAudio() {
+    const tap = this.sysTap;
+    if (!tap || this.sysHeard) return;
+    tap.analyser.getFloatTimeDomainData(tap.buf);
+    for (let i = 0; i < tap.buf.length; i++) {
+      if (Math.abs(tap.buf[i]) > 0.001) {
+        this.sysHeard = true;
+        return;
+      }
+    }
+  }
+
+  /** The mic-only shadow, persisted exactly the way the video's chunks are. */
+  private startMicShadow() {
+    const mic = this.micStream;
+    if (!mic || !this.hasSystemAudio || !mic.getAudioTracks().length) return;
+    this.micMime =
+      AUDIO_MIME_TYPES.find((type) => MediaRecorder.isTypeSupported(type)) ?? 'audio/webm';
+    try {
+      const shadow = new MediaRecorder(new MediaStream(mic.getAudioTracks()), {
+        mimeType: this.micMime,
+      });
+      shadow.ondataavailable = (e) => {
+        if (!e.data.size) return;
+        this.micChunks.push(e.data);
+        const n = ++this.micChunkSeq;
+        void blobs
+          .set(`${this.id}:micchunk:${n}`, e.data)
+          .then(() => {
+            if (n > this.micChunkCount) this.micChunkCount = n;
+          })
+          .catch(() => {});
+      };
+      shadow.start(1000);
+      this.micRecorder = shadow;
+    } catch {
+      // No shadow: transcription decodes the mixed webm instead. Words over app
+      // sound is a degraded transcript, not a lost take.
+      this.micRecorder = null;
+    }
   }
 
   addEvent(event: PageEvent, origin?: string) {
@@ -495,6 +642,8 @@ export class Recorder {
       meta: this.snapshot(),
       mime: this.mime,
       chunks: this.chunkCount,
+      micChunks: this.micChunkCount,
+      micMime: this.micMime,
     }).catch(() => {});
   }
 
@@ -513,7 +662,10 @@ export class Recorder {
     const chunks = Array.from({ length: this.chunkSeq }, (_, i) =>
       blobs.delete(`${this.id}:chunk:${i + 1}`),
     );
-    await Promise.all([...frames, ...chunks]).catch(() => {});
+    const micChunks = Array.from({ length: this.micChunkSeq }, (_, i) =>
+      blobs.delete(`${this.id}:micchunk:${i + 1}`),
+    );
+    await Promise.all([...frames, ...chunks, ...micChunks]).catch(() => {});
   }
 
   /** Timers, dictation, streams, the offscreen video element. Safe to call twice. */
@@ -526,8 +678,14 @@ export class Recorder {
     this.dictation = null;
     if (this.recorder && this.recorder.state !== 'inactive') this.recorder.stop();
     this.recorder = null;
+    if (this.micRecorder && this.micRecorder.state !== 'inactive') this.micRecorder.stop();
+    this.micRecorder = null;
     this.stream?.getTracks().forEach((track) => track.stop());
     this.micStream?.getTracks().forEach((track) => track.stop());
+    void this.audioCtx?.close().catch(() => {});
+    this.audioCtx = null;
+    this.mixSources = [];
+    this.sysTap = null;
     this.video?.remove();
     this.stream = null;
     this.micStream = null;
@@ -579,13 +737,29 @@ export class Recorder {
       });
     }
     this.recorder = null;
+    const micRecorder = this.micRecorder;
+    if (micRecorder && micRecorder.state !== 'inactive') {
+      await new Promise<void>((resolve) => {
+        micRecorder.onstop = () => resolve();
+        micRecorder.stop();
+      });
+    }
+    this.micRecorder = null;
     await blobs.set(`${this.id}:video`, new Blob(this.chunks, { type: this.mime }));
+    if (this.micChunks.length) {
+      await blobs.set(`${this.id}:mic`, new Blob(this.micChunks, { type: this.micMime }));
+    }
     // The whole video is on disk now, so the pieces it was insurance against go.
     // Only after the write — a crash between the two must still be recoverable.
     for (let n = 1; n <= this.chunkSeq; n++) await blobs.delete(`${this.id}:chunk:${n}`);
+    for (let n = 1; n <= this.micChunkSeq; n++) await blobs.delete(`${this.id}:micchunk:${n}`);
 
     this.stream?.getTracks().forEach((track) => track.stop());
     this.micStream?.getTracks().forEach((track) => track.stop());
+    void this.audioCtx?.close().catch(() => {});
+    this.audioCtx = null;
+    this.mixSources = [];
+    this.sysTap = null;
     this.video?.remove();
     this.stream = null;
     this.micStream = null;
@@ -607,6 +781,7 @@ export class Recorder {
       segmentCount: this.segments.length,
       interim: this.interim,
       micState: this.micState,
+      sysAudio: this.sysState,
     });
   }
 }

@@ -2,6 +2,27 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-08-12 — silent-loopback detection + PickGate share-dialog portrait (extension 1.7.2)
+Asked (after testing 1.7.0): system audio still missing → diagnosed as Windows loopback routing,
+not code; then "remove the diag stuff, make the picking screen better". Kept as product: a level
+tap on the system source drives a 3-state HUD line (`none`/`silent`/`live` — "app audio is shared
+but silent" catches a granted-but-dead loopback); mixer source nodes held as fields (GC hazard).
+Removed: console.info track/graph logs. PickGate 'choosing' redesigned: a dark ShareDialogMock
+portrait of Chrome's dialog with the "Also share tab audio" row cobalt-ringed + copy about
+headphones/tab-vs-window. Both typechecks + build green.
+Touched: extension/src/sidepanel/{recorder.ts,App.tsx,panel.css}, extension/{package,public/manifest}.json
+
+## 2026-08-12 — recorder captures app audio + raw mic (extension 1.7.0)
+Asked: takes must carry the headphone/app audio AND the narrator's voice AND the room — was
+`getDisplayMedia({audio:false})` + processed mic. Now: display audio requested (raw constraints,
+`systemAudio:'include'`), mic raw (AEC/NS/AGC off so the room survives), both mixed via Web Audio
+into the webm's one track; a mic-only shadow recording (`<id>:micchunk:*` → `<id>:mic`, crash-safe
+like the video chunks) is what Whisper transcribes so app sound never pollutes the transcript. HUD
+warns when "share audio" wasn't ticked. Both typechecks + build green. NOT yet published to
+releases/ or the Web Store. See decisions.md 2026-08-12.
+Touched: extension/src/sidepanel/{recorder.ts,App.tsx,transcribe.ts}, extension/src/lib/{types.ts,
+messages.ts,db.ts}, extension/src/background/index.ts, extension/{package,public/manifest}.json
+
 ## 2026-08-07 — Web Store live: dual extension-id handshake + set STORE_URL; inbox inline rename
 Asked: extension is deployed to the Chrome Web Store — update the website; make it easy to
 name/rename handbacks. Found the published store id is `bdhajcll…`, NOT the `key`-pinned
