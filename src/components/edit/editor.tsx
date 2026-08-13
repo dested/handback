@@ -16,6 +16,7 @@
 // `sourceToOutput` are the only bridges. Nothing else may invent a third.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Redo2, Undo2 } from 'lucide-react'
 import { SectionHead } from '~/components/viewer/section-head'
 import {
   Timeline,
@@ -25,6 +26,7 @@ import {
   type TimelineVoiceBar,
 } from '~/components/viewer/timeline'
 import { useSegmentPlayer } from '~/components/viewer/use-segment-player'
+import { VideoStage } from '~/components/viewer/video-stage'
 import { mmss } from '~/lib/capture/format'
 import type { LiveTake } from '~/lib/capture/live-store'
 import {
@@ -44,6 +46,11 @@ export interface EditorProps {
   onChange(next: EditState): void
   /** Re-run the silence pass at a new threshold (parent owns the envelopes). */
   onThreshold(thresholdMs: number): void
+  /** Step back/forward through the edit history; the parent owns the stacks. */
+  onUndo(): void
+  onRedo(): void
+  canUndo: boolean
+  canRedo: boolean
   /** Seekable object URL per take id. */
   videoUrls: Map<string, string>
   /** Loudness per take, when the caller decoded one; missing/null takes fall back to transcript density. */
@@ -56,7 +63,18 @@ const VOICE_STEP_MS = 500
 /** A line missing its duration still covers a window; assume a nominal one. */
 const NOMINAL_LINE_MS = 1500
 
-export function Editor({ takes, state, onChange, onThreshold, videoUrls, envelopes }: EditorProps) {
+export function Editor({
+  takes,
+  state,
+  onChange,
+  onThreshold,
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo,
+  videoUrls,
+  envelopes,
+}: EditorProps) {
   const byId = useMemo(() => new Map(takes.map((t) => [t.id, t])), [takes])
   const durations = useMemo(() => new Map(takes.map((t) => [t.id, t.meta.durationMs])), [takes])
   const segments = useMemo(() => editSegments(state, durations), [state, durations])
@@ -219,6 +237,18 @@ export function Editor({ takes, state, onChange, onThreshold, videoUrls, envelop
     [state.cuts]
   )
 
+  /**
+   * Whether the render would DROP a line — its start lands in a removed span, so
+   * its words won't be in the video. The exact rule `editedTranscriptLines` uses,
+   * so the rail can't disagree with the transcript.json it ships. Covers cuts of
+   * every source: a hand-drawn Remove strikes the words it swallowed, not just a
+   * line the person struck by name.
+   */
+  const isRemovedLine = useCallback(
+    (takeId: string, tMs: number) => sourceToOutputMs(segments, takeId, tMs) === null,
+    [segments]
+  )
+
   /** Delete/restore one transcript line as a cut spanning its window. */
   const toggleLine = useCallback(
     (takeId: string, tMs: number, endMs: number) => {
@@ -298,11 +328,26 @@ export function Editor({ takes, state, onChange, onThreshold, videoUrls, envelop
 
   const playheadSourceMs = outputToSource(player.outputMs)
 
-  /** The in-point of a hand cut, source-global; null when none is marked. */
-  const [inPointMs, setInPointMs] = useState<number | null>(null)
-
-  // A reorder moves the source axis under the mark, so the mark can't survive it.
-  useEffect(() => setInPointMs(null), [state.takeOrder])
+  // Undo/redo from the keyboard, the way every editor has it — but never while a
+  // text field owns the caret.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey)) return
+      const tag = (event.target as HTMLElement).tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      const key = event.key.toLowerCase()
+      if (key === 'z') {
+        event.preventDefault()
+        if (event.shiftKey) onRedo()
+        else onUndo()
+      } else if (key === 'y') {
+        event.preventDefault()
+        onRedo()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onUndo, onRedo])
 
   return (
     <div className="space-y-6">
@@ -317,36 +362,25 @@ export function Editor({ takes, state, onChange, onThreshold, videoUrls, envelop
             · {activeCuts} {activeCuts === 1 ? 'cut' : 'cuts'}
           </span>
         </p>
-        <div className="flex items-center gap-2 font-mono text-xs">
-          {inPointMs === null ? (
-            <button
-              type="button"
-              onClick={() => setInPointMs(playheadSourceMs)}
-              className="text-muted-foreground hover:text-foreground underline underline-offset-4">
-              cut from here
-            </button>
-          ) : (
-            <>
-              <span className="text-muted-foreground">cutting from {mmss(inPointMs)}</span>
-              <button
-                type="button"
-                onClick={() => {
-                  const a = Math.min(inPointMs, playheadSourceMs)
-                  const b = Math.max(inPointMs, playheadSourceMs)
-                  if (b - a >= 250) addManualCut(a, b)
-                  setInPointMs(null)
-                }}
-                className="text-cobalt underline underline-offset-4">
-                to here
-              </button>
-              <button
-                type="button"
-                onClick={() => setInPointMs(null)}
-                className="text-muted-foreground hover:text-foreground">
-                cancel
-              </button>
-            </>
-          )}
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={onUndo}
+            disabled={!canUndo}
+            title="Undo (⌘Z)"
+            aria-label="Undo"
+            className="text-muted-foreground hover:text-foreground hover:bg-accent/50 grid size-8 place-items-center rounded-md transition-colors disabled:opacity-30 disabled:hover:bg-transparent">
+            <Undo2 className="size-4" />
+          </button>
+          <button
+            type="button"
+            onClick={onRedo}
+            disabled={!canRedo}
+            title="Redo (⇧⌘Z)"
+            aria-label="Redo"
+            className="text-muted-foreground hover:text-foreground hover:bg-accent/50 grid size-8 place-items-center rounded-md transition-colors disabled:opacity-30 disabled:hover:bg-transparent">
+            <Redo2 className="size-4" />
+          </button>
         </div>
         <label className="flex items-center gap-3 font-mono text-xs">
           <span className="text-muted-foreground">tighten</span>
@@ -369,17 +403,7 @@ export function Editor({ takes, state, onChange, onThreshold, videoUrls, envelop
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-2 lg:col-span-2">
           {player.currentSrc ? (
-            <video
-              ref={player.videoRef}
-              controls
-              preload="metadata"
-              src={player.currentSrc}
-              onTimeUpdate={player.onTimeUpdate}
-              onEnded={player.onEnded}
-              onPlay={player.onPlay}
-              onPause={player.onPause}
-              className="max-h-[420px] w-full rounded-md border bg-black/95"
-            />
+            <VideoStage player={player} maxHeightClass="max-h-[420px]" />
           ) : (
             <div className="border-border text-muted-foreground flex h-40 items-center justify-center rounded-md border border-dashed font-mono text-xs">
               the edit removed everything — restore a cut to preview
@@ -403,6 +427,7 @@ export function Editor({ takes, state, onChange, onThreshold, videoUrls, envelop
                   take={take}
                   position={orderIndex + 1}
                   struck={struckLines}
+                  removedAt={(tMs) => isRemovedLine(takeId, tMs)}
                   onToggleLine={toggleLine}
                   onSeekLine={(tMs) => {
                     const out = sourceToOutputMs(segments, takeId, tMs)
@@ -422,9 +447,8 @@ export function Editor({ takes, state, onChange, onThreshold, videoUrls, envelop
         voice={voice}
         cuts={timelineCuts}
         playheadMs={playheadSourceMs}
-        markMs={inPointMs}
         onScrub={(ms) => player.seekOutput(sourceToOutput(ms))}
-        onCarve={addManualCut}
+        onRemoveRange={addManualCut}
         onToggleCut={toggleCut}
         onMoveTake={(id, dir) => onChange(moveTake(state, id, dir))}
       />
@@ -505,6 +529,7 @@ function TakeFlow({
   take,
   position,
   struck,
+  removedAt,
   onToggleLine,
   onSeekLine,
 }: {
@@ -512,6 +537,8 @@ function TakeFlow({
   position: number
   /** Ids of every enabled line cut in the edit; ids carry their take. */
   struck: Set<string>
+  /** True when a region cut (drag-Remove, silence) already drops this line's start. */
+  removedAt(tMs: number): boolean
   onToggleLine(takeId: string, tMs: number, endMs: number): void
   onSeekLine(tMs: number): void
 }) {
@@ -531,15 +558,21 @@ function TakeFlow({
         <p className="text-muted-foreground text-sm">no words in this take.</p>
       ) : (
         <p className="text-[15px] leading-8">
-          {lines.map((line, i) => (
-            <LineSpan
-              key={`line-${line.tMs}-${i}`}
-              item={line}
-              struck={struck.has(`line:${take.id}:${Math.round(line.tMs)}`)}
-              onToggle={() => onToggleLine(take.id, line.tMs, line.endMs)}
-              onSeek={() => onSeekLine(line.tMs)}
-            />
-          ))}
+          {lines.map((line, i) => {
+            const struckByLine = struck.has(`line:${take.id}:${Math.round(line.tMs)}`)
+            return (
+              <LineSpan
+                key={`line-${line.tMs}-${i}`}
+                item={line}
+                struck={struckByLine}
+                // A span cut owns these words; only flag it when the line wasn't
+                // struck by name, or the two states would fight over one line.
+                removed={!struckByLine && removedAt(line.tMs)}
+                onToggle={() => onToggleLine(take.id, line.tMs, line.endMs)}
+                onSeek={() => onSeekLine(line.tMs)}
+              />
+            )
+          })}
         </p>
       )}
     </section>
@@ -548,16 +581,20 @@ function TakeFlow({
 
 /**
  * One spoken window. Click seeks the preview; the × on hover strikes the line
- * (and its seconds) from the edit; clicking a struck line restores it.
+ * (and its seconds) from the edit; clicking a struck line restores it. A line a
+ * region cut swallowed reads struck-and-dimmed but is inert — the span that
+ * removed it, not the word, is what a click on the timeline brings back.
  */
 function LineSpan({
   item,
   struck,
+  removed,
   onToggle,
   onSeek,
 }: {
   item: Line
   struck: boolean
+  removed: boolean
   onToggle(): void
   onSeek(): void
 }) {
@@ -570,6 +607,15 @@ function LineSpan({
         className="text-muted-foreground/60 mr-1.5 text-left line-through decoration-1 hover:no-underline">
         {item.text}
       </button>
+    )
+  }
+  if (removed) {
+    return (
+      <span
+        title="removed by a cut — clear the cut on the timeline to bring it back"
+        className="text-muted-foreground/40 mr-1.5 line-through decoration-1">
+        {item.text}
+      </span>
     )
   }
   return (

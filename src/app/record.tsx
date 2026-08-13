@@ -65,6 +65,7 @@ import {
   withSilenceCuts,
   type EditState,
 } from '~/lib/edit/edl'
+import { useEditHistory } from '~/lib/edit/history'
 import { renderEdit } from '~/lib/edit/render'
 import { seekableBlob } from '~/lib/edit/remux'
 import { computeEnvelope, silenceCuts, type Envelope } from '~/lib/edit/silence'
@@ -122,7 +123,7 @@ export function RecordPage() {
   // The human-handback edit. Envelopes and raw blobs live in refs (decoded
   // once, never rendered); the object URLs feed the preview and are revoked
   // when the edit ends.
-  const [editState, setEditState] = useState<EditState | null>(null)
+  const { state: editState, commit, setBase, undo, redo, canUndo, canRedo } = useEditHistory()
   const [editPrep, setEditPrep] = useState<EditPrep>({ status: 'loading', detail: '' })
   const [videoUrls, setVideoUrls] = useState<Map<string, string>>(new Map())
   const [humanProgress, setHumanProgress] = useState<{
@@ -327,10 +328,10 @@ export function RecordPage() {
     })
     envelopes.current = new Map()
     takeBlobs.current = new Map()
-    setEditState(null)
+    setBase(null)
     setFinalBlob(null)
     setHumanProgress(null)
-  }, [])
+  }, [setBase])
 
   const discard = useCallback(async () => {
     await clearAll().catch(() => {})
@@ -428,10 +429,11 @@ export function RecordPage() {
     return withSilenceCuts({ ...state, tighten }, cuts)
   }, [])
 
-  const changeEdit = useCallback((next: EditState) => {
-    setEditState(next)
-    void saveEditState(next).catch(() => {})
-  }, [])
+  // Every edit — a cut, a threshold nudge, an undo, a redo — persists so a
+  // reload drops back into exactly this cut.
+  useEffect(() => {
+    if (editState) void saveEditState(editState).catch(() => {})
+  }, [editState])
 
   /**
    * Into the editor: per take, make the preview seekable (remux), get the
@@ -479,7 +481,7 @@ export function RecordPage() {
       // A fresh edit opens already tightened — "give me the tightest edit" is
       // the default, and every proposed cut is a chip that can be vetoed.
       const state = saved ?? retighten(initialEditState(ids), 800, ordered)
-      setEditState(state)
+      setBase(state)
       void saveEditState(state).catch(() => {})
       setEditPrep({ status: 'ready' })
     } catch (error) {
@@ -488,7 +490,7 @@ export function RecordPage() {
         detail: error instanceof Error ? error.message : "couldn't prepare the edit",
       })
     }
-  }, [videoUrls, withToken, retighten])
+  }, [videoUrls, withToken, retighten, setBase])
 
   /** Render the EDL to final.mp4 in the tab, then the two-phase upload. */
   const renderAndSend = useCallback(async () => {
@@ -892,8 +894,12 @@ export function RecordPage() {
               <Editor
                 takes={orderedTakes}
                 state={editState}
-                onChange={changeEdit}
-                onThreshold={(ms) => changeEdit(retighten(editState, ms, orderedTakes))}
+                onChange={commit}
+                onThreshold={(ms) => commit(retighten(editState, ms, orderedTakes), 'threshold')}
+                onUndo={undo}
+                onRedo={redo}
+                canUndo={canUndo}
+                canRedo={canRedo}
                 videoUrls={videoUrls}
                 envelopes={envelopes.current}
               />

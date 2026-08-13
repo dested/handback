@@ -3,11 +3,12 @@
 // ignored cross-origin). Shared by the signed-in viewer and the public /w page
 // so the two can't drift.
 
-import { useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { SectionHead } from './section-head'
 import { TranscriptPanel } from './transcript-panel'
 import type { TranscriptLine } from './types'
+import { useSingleVideoPlayer } from './use-segment-player'
+import { VideoStage } from './video-stage'
 
 export function FinalCut({
   videoUrl,
@@ -18,21 +19,13 @@ export function FinalCut({
   transcriptUrl: string | undefined
   downloadUrl: string | null
 }) {
-  const videoRef = useRef<HTMLVideoElement | null>(null)
-  const [nowMs, setNowMs] = useState(0)
+  const player = useSingleVideoPlayer(videoUrl)
   const transcript = useTranscriptFile(transcriptUrl)
 
   return (
     <div className="grid gap-6 lg:grid-cols-3">
       <div className="space-y-3 lg:col-span-2">
-        <video
-          ref={videoRef}
-          controls
-          preload="metadata"
-          src={videoUrl}
-          onTimeUpdate={(event) => setNowMs(event.currentTarget.currentTime * 1000)}
-          className="max-h-[560px] w-full rounded-md border bg-black/95"
-        />
+        <VideoStage player={player} maxHeightClass="max-h-[560px]" />
         {downloadUrl && (
           <div className="flex flex-wrap items-center gap-5">
             <a
@@ -48,11 +41,8 @@ export function FinalCut({
         {transcript && transcript.length > 0 ? (
           <TranscriptPanel
             lines={transcript}
-            activeMs={nowMs}
-            onSeek={(tMs) => {
-              const video = videoRef.current
-              if (video) video.currentTime = tMs / 1000
-            }}
+            activeMs={player.outputMs}
+            onSeek={(tMs) => player.seekOutput(tMs)}
           />
         ) : (
           <p className="text-muted-foreground text-sm">No transcript came with this cut.</p>

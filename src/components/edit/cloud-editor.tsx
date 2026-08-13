@@ -27,6 +27,7 @@ import {
   withSilenceCuts,
   type EditState,
 } from '~/lib/edit/edl'
+import { useEditHistory } from '~/lib/edit/history'
 import { renderEdit } from '~/lib/edit/render'
 import { seekableBlob } from '~/lib/edit/remux'
 import { computeEnvelope, silenceCuts, type Envelope } from '~/lib/edit/silence'
@@ -109,7 +110,7 @@ export function CloudEditor({
 
   const [prep, setPrep] = useState<Prep>({ status: 'loading', detail: '', pct: null })
   const [liveTakes, setLiveTakes] = useState<LiveTake[]>([])
-  const [editState, setEditState] = useState<EditState | null>(null)
+  const { state: editState, commit, setBase, undo, redo, canUndo, canRedo } = useEditHistory()
   const [videoUrls, setVideoUrls] = useState<Map<string, string>>(new Map())
   const [attach, setAttach] = useState<Attach | null>(null)
   const [failure, setFailure] = useState<string | null>(null)
@@ -261,7 +262,7 @@ export function CloudEditor({
         setLiveTakes(built)
         setVideoUrls(new Map(urls))
         handedOff = true
-        setEditState(saved ?? retighten(initialEditState(ids), AUTO_TIGHTEN_MS, built))
+        setBase(saved ?? retighten(initialEditState(ids), AUTO_TIGHTEN_MS, built))
         setPrep({ status: 'ready' })
       } catch (error) {
         if (!live) return
@@ -277,7 +278,7 @@ export function CloudEditor({
       // A run torn down before it handed over owns URLs nobody will ever see.
       if (!handedOff) urls.forEach((url) => URL.revokeObjectURL(url))
     }
-  }, [attempt, walkthroughId, retighten])
+  }, [attempt, walkthroughId, retighten, setBase])
 
   // The preview URLs and the raw webms are the biggest things this page holds;
   // leaving the editor must not leave them behind.
@@ -402,7 +403,6 @@ export function CloudEditor({
     onClose,
   ])
 
-  const changeEdit = useCallback((next: EditState) => setEditState(next), [])
   const working = attach !== null
   const totalMs = orderedTakes.reduce((sum, t) => sum + t.meta.durationMs, 0)
 
@@ -458,8 +458,12 @@ export function CloudEditor({
           <Editor
             takes={orderedTakes}
             state={editState}
-            onChange={changeEdit}
-            onThreshold={(ms) => changeEdit(retighten(editState, ms, orderedTakes))}
+            onChange={commit}
+            onThreshold={(ms) => commit(retighten(editState, ms, orderedTakes), 'threshold')}
+            onUndo={undo}
+            onRedo={redo}
+            canUndo={canUndo}
+            canRedo={canRedo}
             videoUrls={videoUrls}
             envelopes={envelopes.current}
           />

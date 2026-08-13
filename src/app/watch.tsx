@@ -4,7 +4,7 @@
 // centered with the transcript under it — a screening, not the signed-in
 // two-column viewer; anything else falls back to take-by-take video + narration.
 
-import { useMemo, useRef, useState } from 'react'
+import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
 import { useTranscriptFile } from '~/components/viewer/final-cut'
@@ -12,6 +12,8 @@ import { dateTime, mmss } from '~/components/viewer/format'
 import { SectionHead } from '~/components/viewer/section-head'
 import { TranscriptPanel } from '~/components/viewer/transcript-panel'
 import type { TakeRecording } from '~/components/viewer/types'
+import { useSingleVideoPlayer } from '~/components/viewer/use-segment-player'
+import { VideoStage } from '~/components/viewer/video-stage'
 import { useTRPC } from '~/lib/trpc'
 
 // Presigns inside the payload live 1h; refetch comfortably before they lapse so
@@ -34,8 +36,7 @@ export function WatchPage() {
     () => new Map((walkthrough?.files ?? []).map((file) => [file.path, file.url])),
     [walkthrough]
   )
-  const videoRef = useRef<HTMLVideoElement | null>(null)
-  const [nowMs, setNowMs] = useState(0)
+  const player = useSingleVideoPlayer(urlByPath.get('final.mp4'))
   const transcript = useTranscriptFile(urlByPath.get('transcript.json'))
 
   if (shareToken && shared.isPending) {
@@ -76,14 +77,7 @@ export function WatchPage() {
 
       {finalUrl ? (
         <>
-          <video
-            ref={videoRef}
-            controls
-            preload="metadata"
-            src={finalUrl}
-            onTimeUpdate={(event) => setNowMs(event.currentTarget.currentTime * 1000)}
-            className="max-h-[620px] w-full rounded-md border bg-black/95"
-          />
+          <VideoStage player={player} maxHeightClass="max-h-[620px]" />
           {walkthrough.downloadUrl && (
             <p className="text-center">
               <a
@@ -98,11 +92,8 @@ export function WatchPage() {
               <SectionHead>transcript</SectionHead>
               <TranscriptPanel
                 lines={transcript}
-                activeMs={nowMs}
-                onSeek={(tMs) => {
-                  const video = videoRef.current
-                  if (video) video.currentTime = tMs / 1000
-                }}
+                activeMs={player.outputMs}
+                onSeek={(tMs) => player.seekOutput(tMs)}
               />
             </div>
           )}
@@ -135,8 +126,8 @@ type SharedTakeRow = {
 
 /** One raw take — the fallback when a walkthrough has no edited render. */
 function SharedTake({ take, urlByPath }: { take: SharedTakeRow; urlByPath: Map<string, string> }) {
-  const videoRef = useRef<HTMLVideoElement | null>(null)
   const videoUrl = urlByPath.get(take.videoPath ?? `${take.dir}/walkthrough.webm`)
+  const player = useSingleVideoPlayer(videoUrl)
   const recordingUrl = urlByPath.get(`${take.dir}/recording.json`)
 
   const recording = useQuery({
@@ -160,13 +151,7 @@ function SharedTake({ take, urlByPath }: { take: SharedTakeRow; urlByPath: Map<s
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2">
           {videoUrl ? (
-            <video
-              ref={videoRef}
-              controls
-              preload="metadata"
-              src={videoUrl}
-              className="max-h-[480px] w-full rounded-md border bg-black/95"
-            />
+            <VideoStage player={player} />
           ) : (
             <div className="border-border text-muted-foreground flex h-48 items-center justify-center rounded-md border border-dashed text-sm">
               No video for this take.
@@ -177,10 +162,8 @@ function SharedTake({ take, urlByPath }: { take: SharedTakeRow; urlByPath: Map<s
           {lines.length > 0 && (
             <TranscriptPanel
               lines={lines}
-              onSeek={(tMs) => {
-                const video = videoRef.current
-                if (video) video.currentTime = tMs / 1000
-              }}
+              activeMs={player.outputMs}
+              onSeek={(tMs) => player.seekOutput(tMs)}
             />
           )}
         </div>

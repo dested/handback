@@ -2,6 +2,26 @@
 
 > ADR-lite: what was decided, why, what was rejected. Append-only.
 
+## 2026-08-13 — The editor timeline DOES have a selection now (reverses 2026-08-01 / 08-12)
+**Why:** owner verdict, verbatim: "the scrobbler fucking sucks. no one is going to know to hold
+shit. just make drag select and then remove, give it undo redo." The ⇧-drag carve + "cut from
+here / to here" in-point (decided 2026-08-12) were undiscoverable — nobody guesses a modifier — so
+they are **removed**. The editor's Timeline now: a plain **drag paints a persistent selection**, a
+**click moves the playhead**, and the selection is Removed by a floating **Remove Ns** button (or
+**Delete**; **Esc** clears). This is exactly the marquee/selection model the 2026-08-01 and
+2026-08-12 entries called dead — it is **no longer dead**; those verdicts are reversed for the web
+editor. Scrubbing the editor timeline by dragging is gone (click-seek + the player's own seek bar
+cover it). The viewer's Timeline (no `onRemoveRange`) is **unchanged** — still a pure scrubber,
+drag still scrubs. Selection state lives inside `Timeline`; removal reuses `addManualCut` via the
+renamed `onRemoveRange` prop (was `onCarve`).
+**Undo/redo:** new `useEditHistory` (src/lib/edit/history.ts) — past/future snapshot stacks shared
+by /record and the cloud editor. `commit(next, tag?)` is one step; consecutive same-`tag` commits
+coalesce (so a Tighten-slider drag is ONE undo, not twenty). ⌘/Ctrl+Z / ⇧+Z / Ctrl+Y, plus buttons.
+**Player:** the editor's preview is the new `VideoStage` (see 2026-08-13 viewer-player entry / ui.md),
+not a native `<video controls>` — no capture-tells there (it's a human handback, not agent frames).
+**Rejected:** keeping the modifier-carve as a power-user path (owner wants ONE obvious gesture);
+draggable selection edge-handles (drag a fresh selection instead — simpler, ships now).
+
 ## 2026-08-12 — Free tier is enforced server-side: verified email + monthly budgets + first-walkthrough magic
 **Why:** cost control has to hold against 10k throwaway accounts, so the enforcement is entirely
 server-side where the recorders can't route around it: `emailVerified` gates uploads, token minting

@@ -174,6 +174,20 @@ properties in `extension/src/sidepanel/styles.css` (no Tailwind there).
 - **Section heads** are `SectionHead` (small-caps mono) — transcript, console,
   frames, report, for a person. Sections divide with `.rule` hairlines, never
   boxes.
+- **The player** (`video-stage.tsx`, `VideoStage`): every viewer surface (agent
+  view, final cut, `/w`) plays through ONE custom-chrome player — **never native
+  `<video controls>`**. A dark video well over a paper transport bar: play/pause,
+  a seek bar (subtle buffered gutter, cobalt played fill, a grip that swells on
+  hover, a mono time bubble that tracks the cursor), volume (hover-reveal slider),
+  a mono speed menu, fullscreen. The seek bar reads the player's OUTPUT clock
+  (every take as one continuous recording) so it never jumps back to zero at a
+  take seam the way native controls do. Keyboard: space/k, ←→ (±5s), j/l (±10s),
+  ↑↓ volume, m mute, f fullscreen, 0-9 seek, Home/End. **Capture tells** (agent
+  kind, Camera toggle in the bar, default on): each keyframe is a hairline tick on
+  the seek bar, and as playback crosses one the well gives a brief white shutter
+  flash and holds a small corner thumbnail of that keyframe — the exact still the
+  agent reads, grabbed right here. Keep the well dark (video needs it); everything
+  else stays light paper + cobalt.
 - **One player, one Timeline** (`timeline.tsx`): the takes play back to back
   through `useSegmentPlayer`; beneath, the scrubber — mono ruler, filmstrip
   lane, take lane (labels `take N · m:ss`, ↑/↓ reorder in the editor), voice
@@ -188,17 +202,28 @@ properties in `extension/src/sidepanel/styles.css` (no Tailwind there).
   pending in-point a dashed cobalt line. A manual cut's tag deletes it outright
   (silence cuts stay vetoed, line cuts belong to the transcript). Empty
   timeline collapses to one muted mono line.
-- **Frames** are a numbered contact sheet (`frames-grid.tsx`): mono `N m:ss`
-  caption over each keyframe, the current one cobalt-ringed, click seeks.
+- **Frames** are a numbered contact sheet (`frames-grid.tsx`): legible 2/3/4-col
+  tiles, mono `N m:ss` caption over each keyframe, the current one cobalt-ringed.
+  Clicking a tile opens a **lightbox** (full-size still, ←→/Esc, `frame N / total`)
+  with a cobalt **Play from here** that force-plays the player and scroll-reveals
+  it — a 64px thumbnail was never viewable, and seeking a player scrolled off the
+  top did nothing you could watch.
 - **Transcript** (`transcript-panel.tsx`) is a borderless list: cobalt mono
   times, the playing line cobalt-washed, click seeks. **Console**
   (`events-panel.tsx`): mono lines with a 2px left tick — red error, violet
   warn, never amber.
-- **Editor** (`components/edit/editor.tsx`): readout `orig → tight · N cuts` +
-  tighten slider, player + transcript rail (strike a line to cut its seconds),
-  the Timeline with cuts, footer `Render & share` + quiet `discard edit`.
-  Voice bars come from the real RMS envelope there; the agent viewer fakes
-  them from transcript density (no decoded audio — deliberate).
+- **Editor** (`components/edit/editor.tsx`): readout `orig → tight · N cuts`,
+  **Undo/Redo** buttons, and the tighten slider on the top row; `VideoStage`
+  player + transcript rail (strike a line to cut its seconds); the Timeline with
+  cuts; footer `Render & share` + quiet `discard edit`. Voice bars come from the
+  real RMS envelope there; the agent viewer fakes them from transcript density
+  (no decoded audio — deliberate). **The editor Timeline has a selection now**
+  (reverses the old no-selection rule — owner directive 2026-08-13, decisions.md):
+  a **drag paints a persistent cobalt selection**, a **click moves the playhead**,
+  and a floating **Remove Ns** button (or **Delete**; **Esc** clears) cuts it. No
+  modifier keys, no in-point dance. Undo/redo is ⌘/Ctrl+Z · ⇧+Z (a Tighten-slider
+  drag is one undo step). The **viewer** Timeline stays a pure scrubber — drag
+  still scrubs there.
 - **Watch page** (`/w`): centered column — title, mono date · duration, player,
   centered Download link, transcript, and the one-line sign-off
   "Recorded with Handback → handback.dev". No controls, no metadata soup.

@@ -3,14 +3,15 @@
 // rather than compressing it: the frames either side of a cut never move when
 // you toggle it, which is the only way the toggle reads as reversible.
 //
-// Bare drag scrubs — pointer-down anywhere on the lanes scrubs and dragging
-// keeps scrubbing. Where carving is enabled, ⇧-drag instead sweeps a span and
-// commits it as a cut the moment you let go. There is still NO selection of any
-// kind (owner verdict, decisions.md 2026-08-01): a carve commits instantly on
-// release and nothing persists selected. The cut tags above remain the only
-// control that toggles an existing cut.
+// Two interaction modes, decided by whether the caller can remove ranges:
+//  · Viewer (no onRemoveRange): the whole thing is a scrubber — pointer-down
+//    anywhere scrubs and dragging keeps scrubbing.
+//  · Editor (onRemoveRange present): a CLICK moves the playhead, a DRAG paints a
+//    persistent selection you then Remove (button, or Delete). This reverses the
+//    old no-selection rule — owner directive 2026-08-13, decisions.md.
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { Scissors, X } from 'lucide-react'
 import { cn } from '~/lib/utils'
 import { mmss } from './format'
 
@@ -53,8 +54,11 @@ const CUT_FILL =
 
 const CUT_GHOST = 'pointer-events-none absolute inset-y-0 border border-dashed border-border/80'
 
-/** Anything shorter is a ⇧-click, and a ⇧-click is nothing. */
-const MIN_CARVE_MS = 250
+/** Past this many pixels a press is a drag (a selection), under it a click (a seek). */
+const DRAG_THRESHOLD_PX = 4
+
+/** A selection shorter than this is nothing worth removing. */
+const MIN_SELECT_MS = 200
 
 function clamp(v: number, lo: number, hi: number): number {
   return v < lo ? lo : v > hi ? hi : v
@@ -77,8 +81,7 @@ export function Timeline({
   onScrub,
   onToggleCut,
   onMoveTake,
-  onCarve,
-  markMs,
+  onRemoveRange,
   busy,
 }: {
   totalMs: number
@@ -90,15 +93,39 @@ export function Timeline({
   onScrub(sourceMs: number): void
   onToggleCut?(id: string): void
   onMoveTake?(id: string, dir: -1 | 1): void
-  /** When present, ⇧-drag sweeps a span and calls this on release (source-global ms, start < end). */
-  onCarve?(startMs: number, endMs: number): void
-  /** A pending in-point (the editor's "cut from here"), drawn as a dashed cobalt line. */
-  markMs?: number | null
+  /** When present, drag paints a selection and this removes it (source-global ms, start < end). */
+  onRemoveRange?(startMs: number, endMs: number): void
   busy?: boolean
 }): React.ReactElement {
   // The fork is decided once, at pointerdown, and held for the whole gesture.
-  const gesture = useRef<'scrub' | 'carve' | null>(null)
-  const [carve, setCarve] = useState<{ a: number; b: number } | null>(null)
+  const gesture = useRef<'scrub' | 'select' | 'pending' | null>(null)
+  const anchorMs = useRef(0)
+  const anchorX = useRef(0)
+  /** The span being painted right now (null between drags). */
+  const [drag, setDrag] = useState<{ a: number; b: number } | null>(null)
+  /** The committed, persistent selection waiting to be Removed. */
+  const [selection, setSelection] = useState<{ a: number; b: number } | null>(null)
+
+  const selectable = Boolean(onRemoveRange) && !busy
+
+  // Delete removes the selection, Escape clears it — only while one exists, so a
+  // viewer timeline (which never has a selection) never touches the keyboard.
+  useEffect(() => {
+    if (!selection) return
+    const onKey = (event: KeyboardEvent) => {
+      const tag = (event.target as HTMLElement).tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      if (event.key === 'Delete' || event.key === 'Backspace') {
+        event.preventDefault()
+        onRemoveRange?.(selection.a, selection.b)
+        setSelection(null)
+      } else if (event.key === 'Escape') {
+        setSelection(null)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [selection, onRemoveRange])
 
   // A walkthrough seconds old is one quiet line, not a stack of empty scaffolding.
   if (totalMs <= 0 || takes.length === 0) {
@@ -120,9 +147,11 @@ export function Timeline({
   function onPointerDown(event: React.PointerEvent<HTMLDivElement>) {
     event.currentTarget.setPointerCapture(event.pointerId)
     const at = msAt(event)
-    if (event.shiftKey && onCarve && !busy) {
-      gesture.current = 'carve'
-      setCarve({ a: at, b: at })
+    anchorMs.current = at
+    anchorX.current = event.clientX
+    if (selectable) {
+      // Wait to see if this becomes a drag (select) or stays a click (seek).
+      gesture.current = 'pending'
       return
     }
     gesture.current = 'scrub'
@@ -132,34 +161,52 @@ export function Timeline({
   function onPointerMove(event: React.PointerEvent<HTMLDivElement>) {
     if (gesture.current === null) return
     const at = msAt(event)
-    if (gesture.current === 'carve') {
-      setCarve((span) => (span === null ? span : { a: span.a, b: at }))
+    if (gesture.current === 'scrub') {
+      onScrub(at)
       return
     }
-    onScrub(at)
+    if (gesture.current === 'pending') {
+      if (Math.abs(event.clientX - anchorX.current) < DRAG_THRESHOLD_PX) return
+      gesture.current = 'select'
+      setSelection(null) // a new drag supersedes whatever was selected
+    }
+    if (gesture.current === 'select') {
+      setDrag({ a: anchorMs.current, b: at })
+    }
   }
 
-  function endGesture(event: React.PointerEvent<HTMLDivElement>): 'scrub' | 'carve' | null {
+  function onPointerRelease(event: React.PointerEvent<HTMLDivElement>) {
     const mode = gesture.current
     gesture.current = null
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId)
     }
-    return mode
-  }
-
-  function onPointerRelease(event: React.PointerEvent<HTMLDivElement>) {
-    const mode = endGesture(event)
-    if (mode !== 'carve') return
-    setCarve(null)
-    if (carve === null || Math.abs(carve.b - carve.a) < MIN_CARVE_MS) return
-    onCarve?.(Math.min(carve.a, carve.b), Math.max(carve.a, carve.b))
+    if (mode === 'select' && drag) {
+      const a = Math.min(drag.a, drag.b)
+      const b = Math.max(drag.a, drag.b)
+      setDrag(null)
+      setSelection(b - a >= MIN_SELECT_MS ? { a, b } : null)
+      return
+    }
+    setDrag(null)
+    if (mode === 'pending') {
+      // Never crossed the threshold: it was a click — seek and drop any selection.
+      onScrub(anchorMs.current)
+      setSelection(null)
+    }
   }
 
   function onPointerAbort(event: React.PointerEvent<HTMLDivElement>) {
-    endGesture(event)
-    setCarve(null)
+    gesture.current = null
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    setDrag(null)
   }
+
+  const selCenterPct = selection
+    ? clamp(((selection.a + selection.b) / 2 / totalMs) * 100, 7, 93)
+    : 0
 
   return (
     <div className="select-none">
@@ -193,11 +240,43 @@ export function Timeline({
       )}
 
       <div
-        className="relative cursor-ew-resize"
+        className={cn('relative', selectable ? 'cursor-text' : 'cursor-ew-resize')}
         onPointerDown={busy ? undefined : onPointerDown}
         onPointerMove={busy ? undefined : onPointerMove}
         onPointerUp={busy ? undefined : onPointerRelease}
         onPointerCancel={busy ? undefined : onPointerAbort}>
+        {/* the Remove bar, floating over the committed selection */}
+        {selection && (
+          <div
+            className="absolute -top-9 z-30 -translate-x-1/2"
+            style={{ left: `${selCenterPct}%` }}
+            onPointerDown={(event) => event.stopPropagation()}>
+            <div className="border-border bg-card flex items-center gap-1 rounded-md border p-1 shadow-md">
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onRemoveRange?.(selection.a, selection.b)
+                  setSelection(null)
+                }}
+                className="bg-cobalt hover:bg-cobalt/90 inline-flex items-center gap-1.5 rounded px-2 py-1 font-mono text-[11px] font-medium text-white transition-colors">
+                <Scissors className="size-3" />
+                Remove {((selection.b - selection.a) / 1000).toFixed(1)}s
+              </button>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  setSelection(null)
+                }}
+                aria-label="Clear selection"
+                className="text-muted-foreground hover:text-foreground hover:bg-accent/50 grid size-6 place-items-center rounded transition-colors">
+                <X className="size-3.5" />
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* ruler */}
         <div className="border-border relative h-5 border-b">
           {ticks.map((at) => {
@@ -322,33 +401,36 @@ export function Timeline({
           <CutOverlays cuts={cuts} pct={pct} />
         </div>
 
-        {/* the pen mid-stroke — tinted cobalt, deliberately not the committed hatch */}
-        {carve !== null && (
+        {/* the selection: the live drag, tinted lighter; the committed one, bordered */}
+        {drag && (
           <span
-            className="border-cobalt/50 bg-cobalt-wash/60 pointer-events-none absolute inset-y-0 z-10 border-x"
+            className="border-cobalt/50 bg-cobalt-wash/50 pointer-events-none absolute inset-y-0 z-10 border-x"
+            style={{ left: pct(Math.min(drag.a, drag.b)), width: pct(Math.abs(drag.b - drag.a)) }}
+          />
+        )}
+        {selection && (
+          <span
+            className="border-cobalt bg-cobalt-wash/60 pointer-events-none absolute inset-y-0 z-10 border-x-2"
             style={{
-              left: pct(Math.min(carve.a, carve.b)),
-              width: pct(Math.abs(carve.b - carve.a)),
+              left: pct(selection.a),
+              width: pct(selection.b - selection.a),
             }}
           />
         )}
 
-        {typeof markMs === 'number' && (
-          <div
-            className="border-cobalt/70 pointer-events-none absolute inset-y-0 z-10 w-0 border-l border-dashed"
-            style={{ left: pct(markMs) }}
-          />
-        )}
-
         <div
-          className="bg-cobalt pointer-events-none absolute inset-y-0 w-px"
+          className="bg-cobalt pointer-events-none absolute inset-y-0 z-20 w-px"
           style={{ left: pct(playheadMs), transform: 'translateX(-50%)' }}>
           <span className="bg-cobalt absolute top-0 left-0 size-[7px] -translate-x-1/2 rounded-full" />
         </div>
       </div>
 
-      {onCarve && (
-        <p className="text-muted-foreground pt-1 font-mono text-[10px]">⇧ drag to cut a section</p>
+      {selectable && (
+        <p className="text-muted-foreground pt-1.5 font-mono text-[10px]">
+          {selection
+            ? 'Delete removes it · Esc clears · click to move the playhead'
+            : 'Drag across the timeline to select a section, then Remove it · click to move the playhead'}
+        </p>
       )}
     </div>
   )

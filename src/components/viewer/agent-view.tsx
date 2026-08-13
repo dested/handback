@@ -3,8 +3,9 @@
 // every keyframe in one numbered contact sheet below, then the report the agent
 // will actually read.
 
-import { useMemo } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { useQueries } from '@tanstack/react-query'
+import { Button } from '~/components/ui/button'
 import type { EditSegment } from '~/lib/edit/edl'
 import { EventsPanel } from './events-panel'
 import { mmss } from './format'
@@ -15,6 +16,7 @@ import { Timeline, type TimelineTake, type TimelineVoiceBar } from './timeline'
 import { TranscriptPanel } from './transcript-panel'
 import type { TakeEvent, TakeRecording, Walkthrough } from './types'
 import { useSegmentPlayer } from './use-segment-player'
+import { VideoStage } from './video-stage'
 
 type Line = { tMs: number; endMs: number; text: string }
 
@@ -88,6 +90,21 @@ export function AgentView({
 
   const player = useSegmentPlayer(segments, videoUrls)
 
+  // Seeks fired from far down the page (a keyframe near the bottom) are useless
+  // if the player is scrolled off the top — so bring it back into view.
+  const playerRef = useRef<HTMLDivElement>(null)
+  const seekAndReveal = useCallback(
+    (ms: number) => {
+      // "Play from here" means play — force it even if the player was paused —
+      // and bring the player back up so you can actually watch it.
+      player.seekOutput(ms, true)
+      playerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    },
+    [player]
+  )
+
+  const [showReport, setShowReport] = useState(false)
+
   // useQueries hands back a fresh array every render and the playhead re-renders
   // ~30×/s; the strips only change when a recording actually lands.
   const landed = recordings.map((query) => (query.data ? '1' : '0')).join('')
@@ -140,9 +157,33 @@ export function AgentView({
     [takes, offsets]
   )
 
+  // The report is the agent's brief, not the reviewer's — kept folded away behind
+  // a button so the page reads as a video first, a document only on request.
   const report = walkthrough.kind === 'agent' && (
     <section className="rule pt-8">
-      <ReportPanel walkthroughId={walkthrough.id} url={urlByPath.get('report.md')} />
+      {showReport ? (
+        <div className="space-y-3">
+          <ReportPanel walkthroughId={walkthrough.id} url={urlByPath.get('report.md')} />
+          <button
+            type="button"
+            onClick={() => setShowReport(false)}
+            className="text-muted-foreground hover:text-foreground text-sm underline underline-offset-4">
+            Hide report
+          </button>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="space-y-1">
+            <SectionHead>report</SectionHead>
+            <p className="text-muted-foreground text-sm">
+              The brief your agent reads — hidden by default.
+            </p>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => setShowReport(true)}>
+            Show report
+          </Button>
+        </div>
+      )}
     </section>
   )
 
@@ -166,24 +207,8 @@ export function AgentView({
   return (
     <div className="space-y-8">
       <div className="grid gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          {player.currentSrc ? (
-            <video
-              ref={player.videoRef}
-              controls
-              preload="metadata"
-              src={player.currentSrc}
-              onTimeUpdate={player.onTimeUpdate}
-              onEnded={player.onEnded}
-              onPlay={player.onPlay}
-              onPause={player.onPause}
-              className="max-h-[480px] w-full rounded-md border bg-black/95"
-            />
-          ) : (
-            <div className="border-border text-muted-foreground flex h-64 items-center justify-center rounded-md border border-dashed text-sm">
-              No video was uploaded.
-            </div>
-          )}
+        <div ref={playerRef} className="scroll-mt-4 lg:col-span-2">
+          <VideoStage player={player} frames={frames} />
         </div>
 
         <div className="space-y-5 lg:col-span-1">
@@ -235,11 +260,7 @@ export function AgentView({
 
       <section className="rule space-y-3 pt-8">
         <SectionHead>frames</SectionHead>
-        <FramesGrid
-          frames={frames}
-          activeMs={player.outputMs}
-          onSeek={(ms) => player.seekOutput(ms)}
-        />
+        <FramesGrid frames={frames} activeMs={player.outputMs} onSeek={seekAndReveal} />
       </section>
 
       {report}

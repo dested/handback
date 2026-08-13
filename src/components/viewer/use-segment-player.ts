@@ -17,7 +17,10 @@ export interface SegmentPlayer {
   outputMs: number
   /** Sum of segment lengths. */
   durationMs: number
-  seekOutput(outMs: number): void
+  /** Seek on the output clock. Pass forcePlay to start playing regardless of the paused state. */
+  seekOutput(outMs: number, forcePlay?: boolean): void
+  /** Toggle play/pause; restarts from 0 when parked at the end. */
+  togglePlay(): void
   onTimeUpdate(): void
   onEnded(): void
   onPlay(): void
@@ -122,16 +125,17 @@ export function useSegmentPlayer(
   }, [segments, videoUrls])
 
   const seekOutput = useCallback(
-    (outMs: number) => {
+    (outMs: number, forcePlay?: boolean) => {
       const target = clamp(outMs, 0, durationMs)
       setOutputMs(target)
+      const wantPlay = forcePlay ?? !videoRef.current?.paused
       let acc = 0
       for (let i = 0; i < segments.length; i++) {
         const seg = segments[i]
         if (!seg) continue
         const len = seg.srcEndMs - seg.srcStartMs
         if (target < acc + len) {
-          enter(i, target - acc, !videoRef.current?.paused)
+          enter(i, target - acc, wantPlay)
           return
         }
         acc += len
@@ -139,6 +143,22 @@ export function useSegmentPlayer(
     },
     [segments, enter, durationMs]
   )
+
+  const togglePlay = useCallback(() => {
+    const video = videoRef.current
+    if (!video) return
+    if (!video.paused) {
+      video.pause()
+      return
+    }
+    // Parked at the end: a play press restarts from the top rather than
+    // firing `ended` on the spot.
+    if (durationMs > 0 && outputMs >= durationMs - 60) {
+      seekOutput(0, true)
+      return
+    }
+    void video.play().catch(() => {})
+  }, [durationMs, outputMs, seekOutput])
 
   const onTimeUpdate = useCallback(() => {
     const video = videoRef.current
@@ -200,6 +220,97 @@ export function useSegmentPlayer(
     outputMs,
     durationMs,
     seekOutput,
+    togglePlay,
+    onTimeUpdate,
+    onEnded,
+    onPlay,
+    onPause,
+  }
+}
+
+// A single, already-muxed source (final.mp4) has a real duration and needs no
+// segment bookkeeping — but it drives the same custom chrome as the multi-take
+// player, so it wears the SegmentPlayer shape too. The output clock is just the
+// element's own currentTime.
+export function useSingleVideoPlayer(src: string | undefined): SegmentPlayer {
+  const videoRef = useRef<HTMLVideoElement | null>(null)
+  const [playing, setPlaying] = useState(false)
+  const [outputMs, setOutputMs] = useState(0)
+  const [durationMs, setDurationMs] = useState(0)
+
+  const seekOutput = useCallback(
+    (outMs: number, forcePlay?: boolean) => {
+      const video = videoRef.current
+      if (!video) return
+      const ceiling = durationMs > 0 ? durationMs : outMs
+      const target = clamp(outMs, 0, ceiling)
+      video.currentTime = target / 1000
+      setOutputMs(target)
+      if (forcePlay) void video.play().catch(() => {})
+    },
+    [durationMs]
+  )
+
+  const togglePlay = useCallback(() => {
+    const video = videoRef.current
+    if (!video) return
+    if (!video.paused) {
+      video.pause()
+      return
+    }
+    if (durationMs > 0 && outputMs >= durationMs - 60) video.currentTime = 0
+    void video.play().catch(() => {})
+  }, [durationMs, outputMs])
+
+  const onTimeUpdate = useCallback(() => {
+    const video = videoRef.current
+    if (video) setOutputMs(video.currentTime * 1000)
+  }, [])
+  const onEnded = useCallback(() => setPlaying(false), [])
+  const onPlay = useCallback(() => setPlaying(true), [])
+  const onPause = useCallback(() => setPlaying(false), [])
+
+  // Duration lands with metadata; MediaRecorder webm can report Infinity, so a
+  // final.mp4 (finite by construction) is the only thing this hook ever plays.
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+    const read = () => {
+      if (Number.isFinite(video.duration)) setDurationMs(video.duration * 1000)
+    }
+    video.addEventListener('loadedmetadata', read)
+    video.addEventListener('durationchange', read)
+    read()
+    return () => {
+      video.removeEventListener('loadedmetadata', read)
+      video.removeEventListener('durationchange', read)
+    }
+  }, [src])
+
+  // `timeupdate` alone is too coarse for a playhead — poll while playing.
+  useEffect(() => {
+    if (!playing) return
+    let frame = 0
+    let last = 0
+    const tick = (now: number) => {
+      frame = requestAnimationFrame(tick)
+      if (now - last < TICK_MS) return
+      last = now
+      const video = videoRef.current
+      if (video) setOutputMs(video.currentTime * 1000)
+    }
+    frame = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(frame)
+  }, [playing])
+
+  return {
+    videoRef,
+    currentSrc: src,
+    playing,
+    outputMs,
+    durationMs,
+    seekOutput,
+    togglePlay,
     onTimeUpdate,
     onEnded,
     onPlay,
