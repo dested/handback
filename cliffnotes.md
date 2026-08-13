@@ -375,9 +375,22 @@ semantics ← Take (rec-NN) + WalkthroughFile (path unique per walkthrough; S3 k
 frozen) · ApiToken (**user-scoped**, no team column; sha256 hash only; `hb_` prefix; lastUsedAt
 stamped on ingest auth).
 
-## Storage (S3)
+## Storage (Cloudflare R2 since 2026-08-13; S3 before that)
 
-Bucket **handback-files** — **live** (us-west-2, account 114394156384, profile `dested`), created
+**LIVE: Cloudflare R2** bucket **handback-files** (account `0a38b0…f0f`, endpoint
+`https://<account>.r2.cloudflarestorage.com`, region `auto`) — cut over 2026-08-13: all 4,602
+objects copied from S3 and byte-verified, SSM flipped (`S3_ENDPOINT` + R2 keypair +
+`AWS_REGION=auto`), CORS mirrored from the S3 bucket (same 5 origins). Egress is $0 — the reason
+for the move. **The R2 S3 keypair is derived from a Cloudflare API token — deleting that token in
+the dashboard kills the server's storage access.** Steady-state cleanup (pending): mint an
+Object-R&W-only token, swap its keypair into SSM, then delete the admin token used for the
+migration (it's over-privileged and was pasted in chat).
+**The old AWS S3 bucket still holds a full copy** as a cold fallback — nothing deletes it; retire
+it deliberately once R2 has been quiet for a while (it bills ~$0.10/mo while it sits).
+
+The paragraph below describes that S3 bucket (historical + fallback):
+
+Bucket **handback-files** — (us-west-2, account 114394156384, profile `dested`), created
 by hand 2026-07-30 night, not by Drydock: public access fully blocked, CORS allowing
 handback.dev / www / `http://localhost:3995` / `http://localhost:3210` / `chrome-extension://*`.
 Its writer is IAM user **`handback-app`** with one inline policy `handback-files-rw` scoped to

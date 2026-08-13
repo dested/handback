@@ -2,6 +2,47 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-08-13 — Viewer player rebuilt: custom chrome, capture tells, frames lightbox
+Asked: the walkthrough player "sucks / amateur hour," progress bar jumps around; frames grid is
+illegible + clicking seeks a player scrolled off-screen; hide the report behind a button; make the
+page cohesive. Also: surface when a keyframe (the still the agent reads) is captured.
+Done: new `viewer/video-stage.tsx` — a custom `VideoStage` replacing every native `<video controls>`
+in the chassis (agent view, final cut, /w). Its seek bar reads the SegmentPlayer OUTPUT clock (sum
+of take durations, stable) so it no longer jumps at take boundaries or on MediaRecorder's unknowable
+webm duration. Full transport: play/pause, buffered+played+grip seek with a mono time bubble, volume
+(hover slider), speed menu (usePopover), fullscreen, keyboard (space/k, ←→/jl, ↑↓ vol, m, f, 0-9,
+Home/End), buffering spinner, center play. **Capture tells:** keyframe ticks on the seek bar, a
+shutter flash + a corner thumbnail of the current keyframe as playback crosses each one (Camera
+toggle, default on) — literally showing "the frame the agent kept, grabbed here." `use-segment-player`
+gained `togglePlay`, `seekOutput(forcePlay)` and a sibling `useSingleVideoPlayer` (single mp4, same
+shape). `frames-grid.tsx`: legible 2/3/4-col tiles + a lightbox (full-size, ←→/Esc, "Play from here"
+that force-plays and scroll-reveals the player). Report folded behind a "Show report" button.
+Touched: viewer/{video-stage(new),use-segment-player,frames-grid,agent-view,final-cut}.tsx, app/watch.tsx.
+Typecheck green. ui.md viewer section updated.
+
+## 2026-08-13 — Editor ("tighten up") rebuilt: drag-select + Remove, undo/redo, new player
+Asked: the tighten screen "sucks / written by a piss poor llm" — give it the new video player, and
+the scrubber's ⇧-drag carve is undiscoverable ("no one is going to know to hold shit") — make it
+drag-select-then-Remove with undo/redo. Reverses the no-selection rule (owner directive; decisions.md).
+Done: editor preview is now `VideoStage`. Timeline gained a selection model gated on `onRemoveRange`
+(was `onCarve`): drag paints a persistent cobalt selection, click moves the playhead, a floating
+**Remove Ns** button / **Delete** cuts it (Esc clears) — reuses `addManualCut`. Removed the ⇧-carve
+and the "cut from here/to here" in-point. New `lib/edit/history.ts` `useEditHistory` — past/future
+snapshot stacks with tag-coalescing (Tighten-slider drag = one undo), shared by /record + cloud
+editor; ⌘/Ctrl+Z · ⇧+Z · Ctrl+Y + toolbar buttons. Viewer Timeline unchanged (still pure scrubber).
+Touched: viewer/timeline.tsx, edit/{editor,cloud-editor}.tsx, lib/edit/history.ts(new), app/record.tsx.
+Typecheck green. decisions.md + ui.md updated.
+
+## 2026-08-13 — R2 cutover DONE (live), estimator defaults to R2
+Asked: "do the cutover but make sure you don't lose anything" + estimator R2 update.
+Created R2 bucket handback-files (CORS mirrored), copied all 4,602 objects (3.8 GB) with a
+concurrent verifier (two silent process deaths + one socket wedge en route — fixed with
+timeouts; final pass: 0 missing, byte-verified), flipped SSM via portal (S3_ENDPOINT + R2 keys +
+region auto) + Apply, verified prod presigns → R2 host with real content. S3 bucket kept as cold
+fallback. /admin/costs defaults to R2 prices (S3 preset kept). ⚠️ Alpha users hit free-tier 429s
+(polish/transcribe) — pro grants pending; R2 admin token needs steady-state downgrade.
+Touched: src/app/admin/costs.tsx, cliffnotes.md (Storage), scratchpad r2-copy.ts (ops otherwise)
+
 ## 2026-08-13 — Go-wide cutover (R2 still pending)
 Asked: "I'm ready to cut it over" — deploy + backfill + Resend + extension.
 Shipped all three waves (0fc7675 + manifest fix f3cd020); prod verified serving headers/HSTS.
