@@ -193,15 +193,27 @@ src/
                         final-cta · demo-shot.tsx (a keyframe as SVG) + demo-data.ts (the one
                         demo walkthrough) + mock.tsx (Pane/ContactSheet/Filmstrip/PlayerStrip/
                         RecorderPanelMock — the hero's extension panel)
-    viewer/             take-section, filmstrip, transcript-panel, events-panel, report-panel,
-                        walkthrough-header, walkthrough-controls, status-control, types, format,
-                        use-copy · final-cut.tsx (the human handback's player: final.mp4 +
-                        transcript.json, shared by viewer and /w) · share-control.tsx (mint/copy/
-                        revoke the /w link)
-    edit/               editor.tsx — THE transcript-first editor for human handbacks: delete a
-                        line to cut its seconds, silence gap chips (veto-able), Tighten slider,
-                        EDL preview player (skips cuts live), take ↑/↓ reorder. No timeline
-                        selection — that stays dead (decisions.md 2026-08-01 + 2026-08-12) ·
+    viewer/             THE 2026-08-12 chassis (mocks: plans/2026-08-12-viewer-redesign.md):
+                        walkthrough-header (masthead — status segments, project popover, one
+                        kind-appropriate primary action, ⋯ overflow) · overflow-menu (usePopover +
+                        kind/move/share/delete, inline arming, no window.confirm) · agent-view
+                        (one player + transcript/console rail + timeline + frames + report) ·
+                        timeline (THE scrubber: source-global axis, cut tags are the only cut
+                        toggle, one-gesture drag, empty→one muted line) · use-segment-player
+                        (multi-take playback, rAF playhead) · frames-grid (numbered contact
+                        sheet) · transcript-panel (borderless, live active line) · events-panel
+                        (mono, red/violet ticks) · section-head · report-panel · status-control ·
+                        share-control (url·copy·revoke pill) · final-cut · skeleton · types ·
+                        format · use-copy. take-section/filmstrip/walkthrough-controls DELETED
+    edit/               editor.tsx — THE scrubber-first editor for human handbacks: the viewer's
+                        Timeline over a source-global axis (takes at FULL length) with every cut
+                        as a toggleable tag, client-extracted thumbs (lib/edit/thumbs.ts) and
+                        envelope-driven voice bars, useSegmentPlayer beside a transcript rail
+                        (strike a line to cut its seconds), Tighten slider, take reorder in the
+                        timeline's take lane. Two clocks: the player's output clock (cuts removed)
+                        and the timeline's source-global one — `outputToSource`/`sourceToOutput`
+                        are the only bridges. No timeline selection — that stays dead
+                        (decisions.md 2026-08-01 + 2026-08-12) ·
                         cloud-editor.tsx — the same editor over an UPLOADED walkthrough
                         (extension human handbacks): downloads raws via presigned GETs, takes
                         keyed by `take.dir`, renders + attaches via presignEdit/finalizeEdit;
@@ -857,6 +869,14 @@ reaches the container on a plain push.
   mediabunny MP4 render + upload (`final.mp4`/`transcript.json`/`edit.json`), share-on-success.
   Typecheck + build green; **no live browser run** (the `.env`-points-at-prod hazard again) —
   the whole record→edit→render→share loop wants a human at a keyboard.
+- **Done (2026-08-12, later that night)** — **the viewer/editor/watch redesign**
+  (`plans/2026-08-12-viewer-redesign.md`, mock-first: 3 directions → owner merged all three →
+  anchored suite → approved; built fable-opus, 5 Opus agents + gate): the masthead header
+  (controls absorbed, ⋯ overflow, inline arming — walkthrough-controls.tsx deleted), the shared
+  `Timeline` scrubber + `useSegmentPlayer` chassis, agent view rebuilt as one player + rail +
+  timeline + numbered frames grid (take-section/filmstrip deleted), the human editor rebuilt
+  scrubber-first (thumbs.ts, envelope voice bars; supersedes transcript-first — decisions.md),
+  /w restyled as a centered screening page. Typecheck + build green; no live browser run yet.
 - **Done (2026-08-12, night)** — **extension human handback**
   (`plans/2026-08-12-extension-human-handback.md`, built by an Opus subagent, reviewed): panel
   "for a person" picker + pristine capture (extension 1.8.0 — REMEMBER: needs

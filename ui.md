@@ -1,7 +1,7 @@
 # Handback — UI
 
 > Visual-language source of truth. Follow exactly; deviations are bugs.
-> Last updated: 2026-08-01.
+> Last updated: 2026-08-12.
 
 ## The one law
 
@@ -155,6 +155,53 @@ properties in `extension/src/sidepanel/styles.css` (no Tailwind there).
   acceptance seed is `mode=long` (10:18, two takes, 150 frames). `mode=fresh` is
   the other one that has to hold: a walkthrough seconds old must be one quiet
   line, not a stack of empty scaffolding.
+
+## Viewer & editor (web) — the walkthrough chassis (2026-08-12 redesign)
+
+`/walkthroughs/:id`, the cloud editor, and `/w` share one chassis
+(`src/components/viewer/*`, mocks: `plans/2026-08-12-viewer-redesign.md`):
+
+- **Masthead header** (`walkthrough-header.tsx`): crumb, Fraunces title with quiet
+  Rename, then on the same row right-aligned: segmented **StatusControl**, the
+  **project picker as quiet text** (name + chevron opening a popover — never a
+  native `<select>`), ONE kind-appropriate primary action (agent → cobalt "Copy
+  agent brief"; human → the ShareControl pill `url · copy · revoke`), and the
+  `⋯` **OverflowMenu**. Everything rare or irreversible lives in the overflow
+  (kind switch, share for agent-kind, move, delete) and **arms into one inline
+  `question? yes / keep` row** — no `window.confirm`, no growing rows. One mono
+  meta line under the title says everything (slug · origin · date · duration ·
+  takes · frames · errors · size · uploader); frames/errors only for agent kind.
+- **Section heads** are `SectionHead` (small-caps mono) — transcript, console,
+  frames, report, for a person. Sections divide with `.rule` hairlines, never
+  boxes.
+- **One player, one Timeline** (`timeline.tsx`): the takes play back to back
+  through `useSegmentPlayer`; beneath, the scrubber — mono ruler, filmstrip
+  lane, take lane (labels `take N · m:ss`, ↑/↓ reorder in the editor), voice
+  lane (ink-grey bars, SVG), cobalt playhead. The axis is **SOURCE-GLOBAL**:
+  cuts render ON it as hatched spans with mono `−N.Ns` tags above — enabled =
+  cobalt-wash tag + hatch, vetoed = hollow struck tag. **Tags are the only
+  toggle for an existing cut; bare drag only scrubs.** Where carving is enabled
+  (the editor), **⇧-drag sweeps a cobalt-tinted span that commits as a manual
+  cut on release** — nothing ever persists selected, so the 2026-08-01
+  no-selection rule stands — and a hint line under the lanes says so; the
+  readout row's "cut from here / to here" pair is the modifier-free path, its
+  pending in-point a dashed cobalt line. A manual cut's tag deletes it outright
+  (silence cuts stay vetoed, line cuts belong to the transcript). Empty
+  timeline collapses to one muted mono line.
+- **Frames** are a numbered contact sheet (`frames-grid.tsx`): mono `N m:ss`
+  caption over each keyframe, the current one cobalt-ringed, click seeks.
+- **Transcript** (`transcript-panel.tsx`) is a borderless list: cobalt mono
+  times, the playing line cobalt-washed, click seeks. **Console**
+  (`events-panel.tsx`): mono lines with a 2px left tick — red error, violet
+  warn, never amber.
+- **Editor** (`components/edit/editor.tsx`): readout `orig → tight · N cuts` +
+  tighten slider, player + transcript rail (strike a line to cut its seconds),
+  the Timeline with cuts, footer `Render & share` + quiet `discard edit`.
+  Voice bars come from the real RMS envelope there; the agent viewer fakes
+  them from transcript density (no decoded audio — deliberate).
+- **Watch page** (`/w`): centered column — title, mono date · duration, player,
+  centered Download link, transcript, and the one-line sign-off
+  "Recorded with Handback → handback.dev". No controls, no metadata soup.
 
 ## Don'ts
 

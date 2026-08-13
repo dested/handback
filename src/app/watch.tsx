@@ -1,14 +1,15 @@
 // /w/:shareToken — the public watch page behind a share link. No session, no
 // app chrome: the token in the URL is the whole credential (walkthroughs.shared
 // resolves it or 404s). A human handback plays its edited render (final.mp4)
-// with the transcript beside it; anything else falls back to take-by-take video
-// + narration, the same reading the signed-in viewer does.
+// centered with the transcript under it — a screening, not the signed-in
+// two-column viewer; anything else falls back to take-by-take video + narration.
 
-import { useMemo, useRef } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
-import { FinalCut } from '~/components/viewer/final-cut'
-import { dateTime, mmss, numeral } from '~/components/viewer/format'
+import { useTranscriptFile } from '~/components/viewer/final-cut'
+import { dateTime, mmss } from '~/components/viewer/format'
+import { SectionHead } from '~/components/viewer/section-head'
 import { TranscriptPanel } from '~/components/viewer/transcript-panel'
 import type { TakeRecording } from '~/components/viewer/types'
 import { useTRPC } from '~/lib/trpc'
@@ -33,6 +34,9 @@ export function WatchPage() {
     () => new Map((walkthrough?.files ?? []).map((file) => [file.path, file.url])),
     [walkthrough]
   )
+  const videoRef = useRef<HTMLVideoElement | null>(null)
+  const [nowMs, setNowMs] = useState(0)
+  const transcript = useTranscriptFile(urlByPath.get('transcript.json'))
 
   if (shareToken && shared.isPending) {
     return (
@@ -62,20 +66,47 @@ export function WatchPage() {
   const finalUrl = urlByPath.get('final.mp4')
 
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-8 px-6 py-10">
-      <div className="space-y-2">
+    <div className="mx-auto w-full max-w-4xl space-y-8 px-6 py-10">
+      <div className="space-y-2 text-center">
         <h1 className="font-display text-3xl font-semibold">{walkthrough.title}</h1>
-        <p className="text-muted-foreground text-sm">
+        <p className="text-muted-foreground font-mono text-sm">
           {dateTime(walkthrough.recordedAt)} · {mmss(walkthrough.durationMs)}
         </p>
       </div>
 
       {finalUrl ? (
-        <FinalCut
-          videoUrl={finalUrl}
-          transcriptUrl={urlByPath.get('transcript.json')}
-          downloadUrl={walkthrough.downloadUrl}
-        />
+        <>
+          <video
+            ref={videoRef}
+            controls
+            preload="metadata"
+            src={finalUrl}
+            onTimeUpdate={(event) => setNowMs(event.currentTarget.currentTime * 1000)}
+            className="max-h-[620px] w-full rounded-md border bg-black/95"
+          />
+          {walkthrough.downloadUrl && (
+            <p className="text-center">
+              <a
+                href={walkthrough.downloadUrl}
+                className="text-cobalt font-mono text-sm underline underline-offset-4">
+                Download the video
+              </a>
+            </p>
+          )}
+          {transcript && transcript.length > 0 && (
+            <div className="mx-auto max-w-2xl space-y-2 text-left">
+              <SectionHead>transcript</SectionHead>
+              <TranscriptPanel
+                lines={transcript}
+                activeMs={nowMs}
+                onSeek={(tMs) => {
+                  const video = videoRef.current
+                  if (video) video.currentTime = tMs / 1000
+                }}
+              />
+            </div>
+          )}
+        </>
       ) : (
         walkthrough.takes.map((take) => (
           <div key={take.id} className="rule pt-8">
@@ -83,6 +114,13 @@ export function WatchPage() {
           </div>
         ))
       )}
+
+      <p className="rule text-muted-foreground pt-6 text-center text-sm">
+        Recorded with Handback →{' '}
+        <Link to="/" className="text-cobalt hover:underline">
+          handback.dev
+        </Link>
+      </p>
     </div>
   )
 }
@@ -98,7 +136,7 @@ type SharedTakeRow = {
 /** One raw take — the fallback when a walkthrough has no edited render. */
 function SharedTake({ take, urlByPath }: { take: SharedTakeRow; urlByPath: Map<string, string> }) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
-  const videoUrl = take.videoPath ? urlByPath.get(take.videoPath) : undefined
+  const videoUrl = urlByPath.get(take.videoPath ?? `${take.dir}/walkthrough.webm`)
   const recordingUrl = urlByPath.get(`${take.dir}/recording.json`)
 
   const recording = useQuery({
@@ -116,11 +154,9 @@ function SharedTake({ take, urlByPath }: { take: SharedTakeRow; urlByPath: Map<s
 
   return (
     <section className="space-y-4">
-      <div className="flex flex-wrap items-baseline gap-3">
-        <span className="text-cobalt font-mono text-sm">{numeral(take.index)}</span>
-        <h2 className="text-base font-semibold">Take {take.index}</h2>
-        <span className="text-muted-foreground font-mono text-sm">{mmss(take.durationMs)}</span>
-      </div>
+      <p className="text-muted-foreground font-mono text-xs tracking-widest uppercase">
+        take {take.index} · {mmss(take.durationMs)}
+      </p>
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2">
           {videoUrl ? (

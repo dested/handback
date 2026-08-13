@@ -1,7 +1,7 @@
 // Share link controls for a walkthrough the viewer is a member of. Off: one
-// quiet button that mints the token. On: the /w URL reads in mono with Copy
-// beside it, `turn off` kills the link, and minting again rotates it (which is
-// also how a leaked link dies without going dark first).
+// quiet button that mints the token. On: one pill — the /w URL in mono, then
+// `copy`, then `revoke`, which kills the link; minting again rotates it (which
+// is also how a leaked link dies without going dark first).
 
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -60,19 +60,22 @@ export function ShareControl({ walkthrough }: { walkthrough: Walkthrough }) {
   const url = `${window.location.origin}/w/${token}`
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <span className="border-border bg-muted/30 text-muted-foreground max-w-64 truncate rounded-md border px-2 py-1.5 font-mono text-xs">
+    <div className="flex items-center gap-0">
+      <span className="border-input bg-card text-muted-foreground max-w-56 truncate rounded-l-md border border-r-0 px-2.5 py-1.5 font-mono text-xs">
         {url}
       </span>
-      <Button variant="outline" onClick={() => copy(url)}>
-        {copied ? 'Copied' : 'Copy link'}
-      </Button>
       <button
         type="button"
-        className="text-muted-foreground hover:text-destructive text-sm"
+        className="border-input text-cobalt hover:bg-cobalt-wash border px-2.5 py-1.5 font-mono text-xs"
+        onClick={() => copy(url)}>
+        {copied ? 'copied' : 'copy'}
+      </button>
+      <button
+        type="button"
+        className="border-input text-muted-foreground hover:text-destructive rounded-r-md border border-l-0 px-2.5 py-1.5 font-mono text-xs"
         disabled={busy}
         onClick={() => unshare.mutate({ walkthroughId: walkthrough.id })}>
-        {unshare.isPending ? 'turning off…' : 'turn off'}
+        {unshare.isPending ? 'revoking…' : 'revoke'}
       </button>
     </div>
   )

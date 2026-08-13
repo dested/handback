@@ -16,6 +16,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Editor } from '~/components/edit/editor'
 import { Button } from '~/components/ui/button'
+import { SectionHead } from '~/components/viewer/section-head'
 import { mmss } from '~/lib/capture/format'
 import type { LiveTake } from '~/lib/capture/live-store'
 import type { TranscriptSegment } from '~/lib/capture/types'
@@ -407,19 +408,7 @@ export function CloudEditor({
 
   return (
     <section className="space-y-6">
-      <div className="flex items-baseline justify-between gap-3">
-        <p className="text-muted-foreground font-mono text-xs tracking-widest uppercase">
-          The tight edit
-        </p>
-        {!working && (
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-muted-foreground text-sm underline underline-offset-4">
-            ← back to the takes
-          </button>
-        )}
-      </div>
+      <SectionHead>The tight edit</SectionHead>
 
       {prep.status === 'loading' && (
         <div className="space-y-2">
@@ -442,12 +431,21 @@ export function CloudEditor({
       {prep.status === 'failed' && (
         <div className="border-border border-l-destructive bg-card space-y-3 rounded-md border border-l-2 p-5">
           <p className="text-sm leading-relaxed">{prep.detail}</p>
-          <button
-            type="button"
-            onClick={() => setAttempt((n) => n + 1)}
-            className="text-primary text-sm underline underline-offset-4">
-            try again
-          </button>
+          <div className="flex flex-wrap items-center gap-4">
+            <button
+              type="button"
+              onClick={() => setAttempt((n) => n + 1)}
+              className="text-primary text-sm underline underline-offset-4">
+              try again
+            </button>
+            {/* The failed state renders no Editor footer, so it needs its own exit. */}
+            <button
+              type="button"
+              onClick={onClose}
+              className="text-muted-foreground hover:text-foreground text-sm underline underline-offset-4">
+              back to the takes
+            </button>
+          </div>
         </div>
       )}
 
@@ -463,11 +461,20 @@ export function CloudEditor({
             onChange={changeEdit}
             onThreshold={(ms) => changeEdit(retighten(editState, ms, orderedTakes))}
             videoUrls={videoUrls}
+            envelopes={envelopes.current}
           />
           {failure && <p className="text-destructive text-sm">{failure}</p>}
-          <Button type="button" className="h-[46px] w-full" onClick={() => void renderAndAttach()}>
-            Render &amp; attach
-          </Button>
+          <div className="flex flex-wrap items-center gap-4">
+            <Button type="button" onClick={() => void renderAndAttach()}>
+              Render &amp; share
+            </Button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="text-muted-foreground hover:text-foreground text-sm underline underline-offset-4">
+              discard edit
+            </button>
+          </div>
           <p className="text-muted-foreground font-mono text-xs">
             renders the tight cut as an MP4 in this tab, then attaches it to this walkthrough — the
             raw takes stay where they are, so you can re-cut it later

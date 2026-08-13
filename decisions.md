@@ -2,6 +2,46 @@
 
 > ADR-lite: what was decided, why, what was rejected. Append-only.
 
+## 2026-08-12 — Arbitrary section cuts (⇧-drag carve + in/out), and the editor serves every kind
+**Why:** owner: "I should be able to just cut out a big section — person mode or not." Two ways
+to carve, both committing instantly (the no-selection rule survives because nothing ever *stays*
+selected): **⇧-drag** on the editor's timeline sweeps a cobalt-tinted span and commits it as a
+`source: 'manual'` cut on release (bare drag still scrubs; the fork is decided once at
+pointerdown; <250 ms is dropped as a shift-click); and **"cut from here / to here"** on the
+readout row for trackpads/touch, with the pending in-point drawn as a dashed cobalt line
+(`Timeline.markMs`). A carve may cross take seams — `addManualCut` splits it into per-take cuts.
+**A manual cut's tag DELETES it** (silence cuts linger vetoed so re-tighten remembers; line cuts
+belong to the transcript; a vetoed manual cut would be an immortal ghost with no other owner).
+**Editing is kind-agnostic**: `walkthroughs.presignEdit`/`finalizeEdit` never checked kind, so
+an agent walkthrough gets a quiet "cut this video down" entry under the viewer timeline into the
+SAME cloud editor; its render sits ABOVE the review surface as "the tight cut" (the raw takes,
+frames and report stay — they're what the agent reads), while a human walkthrough's render still
+replaces the take view. `/w` already served final.mp4 kind-blind. Known wrinkle, accepted:
+`finalizeEdit` sets `Walkthrough.durationMs` to the render's length for agent kind too — the
+deliverable's duration wins the meta line.
+**Rejected:** a marquee/action-bar selection model (still dead), a second inline editor on the
+review page (one editor to maintain), kind-gating the server procedures (no security value — the
+caller already holds the space).
+
+## 2026-08-12 — The viewer and editor share one scrubber chassis; the editor is scrubber-first (supersedes "transcript-first" below)
+**Why:** owner verdict on the shipped viewer ("the whole UI is terrible… the human part is
+supposed to be like a video scrubber, not a word thing — redesign from scratch"), settled
+through a mock-first pass (plans/2026-08-12-viewer-redesign.md, merged direction). One chassis
+now serves /walkthroughs/:id, the cloud editor, and /w: a masthead header that absorbs every
+control (segmented status, quiet project popover, ONE kind-appropriate primary action, `⋯`
+overflow with inline arming — no native selects, no window.confirm), one continuous player
+(`useSegmentPlayer`, the editor's old preview hook generalized), and one `Timeline` scrubber on
+a SOURCE-GLOBAL axis (takes end to end at full length; cuts drawn ON the axis as hatched spans
+with −N.Ns tags — the tags are the only cut toggle; toggling never moves the material around a
+cut). The editor keeps the same transcript strike/restore but the timeline is now the primary
+surface, with client-extracted thumbnails (`src/lib/edit/thumbs.ts`) and envelope-driven voice
+bars; the agent viewer's voice lane is a deterministic pseudo-waveform from transcript density
+(no decoded audio on that path, on purpose). **The 2026-08-01 no-selection rule still stands**:
+scrubbing is one gesture, and nothing on the track drag-selects.
+**Rejected:** keeping transcript-first as the editor's primary surface (the words remain as the
+rail, demoted), per-take stacked players (the old viewer's shape — the thing being redesigned),
+decoding audio in the agent viewer just to draw a real waveform (cost without judgment value).
+
 ## 2026-08-12 — Extension human handback rides the cloud; the web is the editor
 **Why:** owner's directive ("record in extension and resolve on web — make it"). A page can
 never read the extension's IndexedDB (chrome-extension:// origin) and external messaging

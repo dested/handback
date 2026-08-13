@@ -889,6 +889,7 @@ export function RecordPage() {
                 onChange={changeEdit}
                 onThreshold={(ms) => changeEdit(retighten(editState, ms, orderedTakes))}
                 videoUrls={videoUrls}
+                envelopes={envelopes.current}
               />
               <Button
                 type="button"

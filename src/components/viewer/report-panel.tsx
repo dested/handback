@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { Button } from '~/components/ui/button'
+import { SectionHead } from './section-head'
 import { useCopy } from './use-copy'
 
 /**
@@ -32,8 +33,8 @@ export function ReportPanel({
   return (
     <section className="space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h3 className="text-lg font-semibold">report.md</h3>
+        <div className="space-y-1">
+          <SectionHead>report</SectionHead>
           <p className="text-muted-foreground text-sm">
             Authored for the agent, not for you — this is exactly what your agent reads.
           </p>

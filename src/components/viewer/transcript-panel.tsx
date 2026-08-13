@@ -1,35 +1,43 @@
+import { cn } from '~/lib/utils'
 import { mmss } from './format'
-import type { TranscriptLine } from './types'
 
-/** The narration, one clickable line per spoken window. */
+/**
+ * The narration, one clickable line per spoken window. Structurally typed on
+ * purpose: the viewer hands it lines on the whole-walkthrough clock, the final
+ * cut hands it `TranscriptLine`s off transcript.json.
+ */
 export function TranscriptPanel({
   lines,
   onSeek,
+  activeMs,
 }: {
-  lines: TranscriptLine[]
+  lines: { tMs: number; endMs: number; text: string }[]
   onSeek: (tMs: number) => void
+  activeMs?: number
 }) {
   if (lines.length === 0) {
-    return <p className="text-muted-foreground text-sm">No speech in this take.</p>
+    return <p className="text-muted-foreground text-sm">No narration in this recording.</p>
   }
 
   return (
-    <div className="border-border max-h-[480px] overflow-y-auto rounded-md border">
-      <ul className="divide-border divide-y">
-        {lines.map((line, i) => (
+    <ul className="max-h-[420px] space-y-1 overflow-y-auto">
+      {lines.map((line, i) => {
+        const active = activeMs !== undefined && activeMs >= line.tMs && activeMs < line.endMs
+        return (
           <li key={`${line.tMs}-${i}`}>
             <button
               type="button"
               onClick={() => onSeek(line.tMs)}
-              className="hover:bg-accent/40 flex w-full gap-3 px-3 py-2 text-left transition-colors">
-              <span className="text-cobalt shrink-0 pt-px font-mono text-xs">
-                [{mmss(line.tMs)}]
-              </span>
-              <span className="text-sm">{line.text}</span>
+              className={cn(
+                'hover:bg-accent/40 flex w-full gap-3 rounded-sm px-1.5 py-1 text-left transition-colors',
+                active && 'bg-cobalt-wash'
+              )}>
+              <span className="text-cobalt shrink-0 pt-px font-mono text-xs">{mmss(line.tMs)}</span>
+              <span className="text-sm leading-relaxed">{line.text}</span>
             </button>
           </li>
-        ))}
-      </ul>
-    </div>
+        )
+      })}
+    </ul>
   )
 }

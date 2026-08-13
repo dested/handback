@@ -2,6 +2,23 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-08-12 — Arbitrary section cuts; editor opened to agent-kind walkthroughs
+Asked: "I should be able to just cut out a big section — person mode or not."
+⇧-drag carve + "cut from here / to here" in-point pair (both commit instantly, no selection
+model), manual cuts split across take seams, manual tag-toggle deletes, agent viewer gains
+"cut this video down" into the same editor, agent renders show as "the tight cut" above the
+review surface. See decisions.md 2026-08-12 (arbitrary cuts). tsc + build green.
+Touched: src/components/viewer/{timeline,agent-view}.tsx, src/components/edit/editor.tsx, src/app/walkthrough.tsx, ui.md
+
+## 2026-08-12 — Viewer/editor/watch redesigned from scratch (scrubber chassis)
+Asked: "the walkthrough UI is terrible — redesign from scratch; the human part should be a video
+scrubber." Mock-first (3 layout directions, owner merged all three), then built per
+plans/2026-08-12-viewer-redesign.md: masthead header with ⋯ overflow + inline arming (no native
+selects, no window.confirm), shared Timeline scrubber + useSegmentPlayer, agent view = one player
++ rail + timeline + numbered frames, editor scrubber-first (client thumbs, envelope voice bars),
+/w centered screening page. Supersedes transcript-first (decisions.md 2026-08-12). tsc + build green.
+Touched: src/components/viewer/* (3 deleted, 7 new), src/components/edit/*, src/app/{walkthrough,watch,record}.tsx, ui.md
+
 ## 2026-08-12 — Extension human handback: record in the panel, resolve on the web
 Asked: the extension needs "for a person" too — record in the extension, edit on the web. Built per
 plans/2026-08-12-extension-human-handback.md. **Extension 1.8.0**: `Session.kind` (optional on disk,

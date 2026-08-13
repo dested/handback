@@ -1,18 +1,18 @@
 // /walkthroughs/:walkthroughId — the review surface. Everything a human needs to judge a
-// recorded walkthrough before an agent touches it: the takes as video + keyframes +
-// narration, and the report.md the agent will actually read.
+// recorded walkthrough before an agent touches it: the takes played as one continuous
+// recording with its narration, keyframes and console, and the report.md the agent will
+// actually read.
 
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
 import { CloudEditor } from '~/components/edit/cloud-editor'
 import { Button } from '~/components/ui/button'
+import { AgentView } from '~/components/viewer/agent-view'
 import { FinalCut } from '~/components/viewer/final-cut'
-import { WalkthroughControls } from '~/components/viewer/walkthrough-controls'
+import { SectionHead } from '~/components/viewer/section-head'
 import { WalkthroughHeader } from '~/components/viewer/walkthrough-header'
-import { ReportPanel } from '~/components/viewer/report-panel'
 import { ViewerSkeleton } from '~/components/viewer/skeleton'
-import { TakeSection } from '~/components/viewer/take-section'
 import { useTRPC } from '~/lib/trpc'
 
 export function WalkthroughPage() {
@@ -48,17 +48,19 @@ export function WalkthroughPage() {
     )
   }
 
-  // A human handback's artifact is its edited render — one player, the
-  // narration beside it, no filmstrip/report scaffolding (there is no distill
-  // to show). Falls through to the take view if the render never uploaded.
+  // A render is kind-agnostic now, but what it displaces is not: a human
+  // handback's artifact IS the tight cut, so it replaces the take view (one
+  // player, the narration beside it, no filmstrip/report scaffolding — there is
+  // no distill to show). An agent walkthrough's tight cut sits ABOVE the take
+  // view, because the raw material is still what the agent reads. Either kind
+  // falls through to the take view if the render never uploaded.
   const human = walkthrough.kind === 'human'
-  const finalUrl = human ? urlByPath.get('final.mp4') : undefined
+  const finalUrl = urlByPath.get('final.mp4')
   // An extension human handback arrives as raw takes and gets tightened here;
   // /record's arrives already rendered and has none. Whether the raws are
   // present is therefore the whole question — it decides both whether there is
   // an edit to make and whether the render can be re-cut.
   const hasRawTakes =
-    human &&
     walkthrough.takes.length > 0 &&
     walkthrough.takes.every((take) =>
       urlByPath.has(take.videoPath ?? `${take.dir}/walkthrough.webm`)
@@ -88,16 +90,13 @@ export function WalkthroughPage() {
     <div className="space-y-8">
       <div className="space-y-5">
         <WalkthroughHeader walkthrough={walkthrough} />
-        <WalkthroughControls walkthrough={walkthrough} />
       </div>
 
       {/* Recorded for a person, uploaded raw, never tightened: the edit is the
           only thing anyone wants from this page, so it is the page. */}
-      {canEdit && !finalUrl && (
+      {human && canEdit && !finalUrl && (
         <div className="border-border bg-muted/20 space-y-3 rounded-md border p-5">
-          <p className="text-muted-foreground font-mono text-xs tracking-widest uppercase">
-            For a person
-          </p>
+          <SectionHead>for a person</SectionHead>
           <p className="text-sm leading-relaxed">
             This was recorded as a video to hand to someone. Cut the dead air out of it here and it
             becomes one MP4 with a share link — the raw takes stay put, so you can re-cut it any
@@ -109,7 +108,26 @@ export function WalkthroughPage() {
         </div>
       )}
 
-      {finalUrl ? (
+      {finalUrl && !human && (
+        <div className="rule space-y-3 pt-8">
+          <SectionHead>the tight cut</SectionHead>
+          <FinalCut
+            videoUrl={finalUrl}
+            transcriptUrl={urlByPath.get('transcript.json')}
+            downloadUrl={walkthrough.downloadUrl}
+          />
+          {canEdit && (
+            <button
+              type="button"
+              onClick={() => setEditing(true)}
+              className="text-muted-foreground hover:text-foreground text-sm underline underline-offset-4">
+              re-edit this cut
+            </button>
+          )}
+        </div>
+      )}
+
+      {finalUrl && human ? (
         <div className="rule space-y-4 pt-8">
           <FinalCut
             videoUrl={finalUrl}
@@ -127,21 +145,11 @@ export function WalkthroughPage() {
           )}
         </div>
       ) : (
-        <>
-          {walkthrough.takes.map((take) => (
-            <div key={take.id} className="rule pt-8">
-              <TakeSection take={take} urlByPath={urlByPath} />
-            </div>
-          ))}
-
-          {walkthrough.takes.length === 0 && (
-            <p className="rule text-muted-foreground pt-8 text-sm">No takes were uploaded.</p>
-          )}
-
-          <div className="rule pt-8">
-            <ReportPanel walkthroughId={walkthrough.id} url={urlByPath.get('report.md')} />
-          </div>
-        </>
+        <AgentView
+          walkthrough={walkthrough}
+          urlByPath={urlByPath}
+          onEdit={canEdit && !human ? () => setEditing(true) : undefined}
+        />
       )}
     </div>
   )
