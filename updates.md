@@ -2,6 +2,15 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-08-13 — Go-wide cutover (R2 still pending)
+Asked: "I'm ready to cut it over" — deploy + backfill + Resend + extension.
+Shipped all three waves (0fc7675 + manifest fix f3cd020); prod verified serving headers/HSTS.
+Ran cli/backfill-expiry.ts on prod: 3 resolved walkthroughs expire 2026-09-12. All 4 unverified
+alpha accounts flipped verified (owner ran the update). RESEND_API_KEY updated in SSM (rotate —
+pasted in chat). Extension 1.8.1 published self-hosted; store zip rebuilt (owner uploads).
+First sweep pass verified harmless (0 abandoned uploads). R2 waits on owner's Cloudflare setup.
+Touched: extension/public/manifest.json (ops otherwise — prod SSM, prod DB backfill)
+
 ## 2026-08-12 — /app reframed: "Walkthroughs" card grid, no more inbox
 Asked: stop making /app an inbox — it's the walkthroughs available to you; cards not a list, "be
 cool, be nicer".
