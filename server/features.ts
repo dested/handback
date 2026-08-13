@@ -11,7 +11,7 @@ const bootstrapAdmins = new Set(
     .filter((e) => e !== '')
 )
 
-export type Feature = 'team'
+export type Feature = 'team' | 'pro'
 
 export function isPlatformAdmin(user: { email: string; isAdmin: boolean }): boolean {
   return user.isAdmin || bootstrapAdmins.has(user.email.toLowerCase())
@@ -22,6 +22,20 @@ export function userHasFeature(
   feature: Feature
 ): boolean {
   return isPlatformAdmin(user) || user.features.includes(feature)
+}
+
+/**
+ * Is this account on the Pro tier? True for a platform admin (implicitly holds
+ * everything) or anyone granted the `pro` feature by hand from /admin — the same
+ * per-user feature mechanism `team` rides on, no new table. Metering in
+ * server/usage.ts reads this to pick the free vs. Pro ceiling.
+ */
+export async function userIsPro(userId: string): Promise<boolean> {
+  const u = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { email: true, isAdmin: true, features: true },
+  })
+  return u !== null && userHasFeature(u, 'pro')
 }
 
 /** A team has a feature when its owner does. */

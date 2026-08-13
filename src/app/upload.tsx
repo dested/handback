@@ -270,6 +270,12 @@ export function UploadPage() {
           Already have the clip? Drop it here and this page distils it into the same walkthrough the
           recorder produces — keyframes, transcript, report — without leaving the browser.
         </p>
+        <p className="text-muted-foreground text-xs">
+          Where your recording goes →{' '}
+          <Link to="/privacy#processors" className="text-cobalt hover:underline">
+            /privacy#processors
+          </Link>
+        </p>
       </header>
 
       {phase === 'intake' && (

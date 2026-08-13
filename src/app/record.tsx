@@ -647,6 +647,12 @@ export function RecordPage() {
           you click. This page can't reach inside the page it's recording — everything else is the
           same.
         </p>
+        <p className="text-muted-foreground text-xs">
+          Where your recording goes →{' '}
+          <Link to="/privacy#processors" className="text-cobalt hover:underline">
+            /privacy#processors
+          </Link>
+        </p>
       </header>
 
       {capable === false && (

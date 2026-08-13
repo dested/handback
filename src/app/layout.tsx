@@ -65,7 +65,7 @@ function MarketingHeader({ signedIn }: { signedIn: boolean }) {
             <Link
               to="/app"
               className="bg-primary text-primary-foreground rounded-md px-4 py-2 font-medium hover:opacity-90">
-              Open the inbox
+              Open Handback
             </Link>
           ) : (
             <>
@@ -114,12 +114,12 @@ function AppHeader({ email }: { email: string }) {
           hidden duplicate would double every nav locator (e2e finds "Team"
           twice) and ship two DOMs to keep in sync. */}
       <nav className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 sm:px-6">
-        <Link to="/app" aria-label="Handback inbox" className="shrink-0">
+        <Link to="/app" aria-label="Handback walkthroughs" className="shrink-0">
           <Wordmark />
         </Link>
         <div className="order-last flex w-full items-center gap-1 overflow-x-auto [scrollbar-width:none] md:order-none md:ml-2 md:w-auto md:overflow-visible [&::-webkit-scrollbar]:hidden">
           <NavLink to="/app" className={tab} end>
-            Inbox
+            Walkthroughs
           </NavLink>
           <NavLink to="/projects" className={tab}>
             Projects

@@ -240,15 +240,17 @@ export class LiveRecorder {
 
     this.mime = MIME_TYPES.find((type) => MediaRecorder.isTypeSupported(type)) ?? 'video/webm'
     const recorded = new MediaStream([...stream.getVideoTracks(), ...this.mixAudio()])
-    // ~4 bits per pixel per second of captured area: 1080p ≈ 8 Mbps, 1440p ≈
-    // 15 Mbps, clamped so a 4K share doesn't fill the disk. Only in pristine
-    // mode — distill sources are read once for keyframes and never watched.
+    // Pristine: ~2 bits per pixel per second of captured area — 1080p ≈ 4 Mbps,
+    // 1440p ≈ 7 Mbps — clamped [3,8] Mbps so a 4K share doesn't fill the disk.
+    // Non-pristine (a distill source, read once for keyframes and never watched)
+    // is capped at 1 Mbps instead of Chrome's default. Throttled 2026-08-12 to
+    // cut storage + egress; mirror any change in extension/src/sidepanel/recorder.ts.
     const bitrate = this.pristine
-      ? Math.round(Math.min(16e6, Math.max(6e6, video.videoWidth * video.videoHeight * 4)))
-      : undefined
+      ? Math.round(Math.min(8e6, Math.max(3e6, video.videoWidth * video.videoHeight * 2)))
+      : 1_000_000
     const recorder = new MediaRecorder(recorded, {
       mimeType: this.mime,
-      ...(bitrate ? { videoBitsPerSecond: bitrate } : {}),
+      videoBitsPerSecond: bitrate,
     })
     recorder.ondataavailable = (e) => {
       if (!e.data.size) return

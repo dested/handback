@@ -1,7 +1,7 @@
 # Handback — CliffNotes
 
 > Living map of the project. Read this before any coding session.
-> Last updated: 2026-08-06. Visual language → `ui.md` · why → `decisions.md` ·
+> Last updated: 2026-08-12. Visual language → `ui.md` · why → `decisions.md` ·
 > log → `updates.md`.
 >
 > **Naming:** the product noun is **walkthrough** (renamed from "gripe" 2026-08-01, owner's
@@ -90,6 +90,7 @@ AWS S3 (`@aws-sdk/client-s3`, presigned URLs) · `@modelcontextprotocol/sdk` (st
 server.ts               Express entry: /healthz, auth, ingest, tRPC, vite/SSR, 404s
 server/
   env.ts                zod env: DATABASE_URL, BETTER_AUTH_*, AWS_REGION, S3_BUCKET, AWS keys,
+                        optional S3_ENDPOINT (point at R2 without code changes),
                         GROQ_API_KEY / ANTHROPIC_API_KEY / RESEND_API_KEY + EMAIL_FROM (all
                         optional — each unset one disables its feature, nothing crashes),
                         ADMIN_EMAILS (comma-separated bootstrap platform admins)
@@ -100,7 +101,13 @@ server/
                         requireViewAccess (read-only platform-admin bypass) / memberTeamIds /
                         spaceId (teamId ?? userId — the S3 path segment) / slugify
   features.ts           entitlements: isPlatformAdmin (User.isAdmin OR ADMIN_EMAILS env),
-                        teamHasFeature('team') checked at Team.owner, requireAdmin
+                        teamHasFeature('team') checked at Team.owner, userIsPro ('pro' feature or
+                        admin), requireAdmin
+  limits.ts             tier ceilings: free 900s/mo cloud transcribe, pro 72 000s + 1 000 polish
+                        (abuse ceilings, not product quotas), MAX_ACTIVE_TOKENS=10, monthKey()
+  usage.ts              MonthlyUsage metering: first-walkthrough magic (zero finalized uploads =
+                        unmetered), checkAndReserveTranscribe/Polish (atomic upsert+increment),
+                        cloudStatus for GET /context. Admins fully unmetered
   router.ts             THE tRPC API: teams (incl. get/transferOwnership), invites (seat-capped),
                         tokens (user-scoped, no team input), projects, walkthroughs — space inputs
                         are `teamId: string | null` (null = the caller's personal space)
@@ -113,7 +120,11 @@ server/
                         reaches everything. Items carry `space` (team name or "Personal")
   mcp.ts                Hosted MCP at /mcp — StreamableHTTP, stateless, hb_ bearer auth
   mcp-format.ts         Pure formatter for a walkthrough brief; shared with cli/mcp.ts
-  storage.ts            S3: presignPut/Get, getObjectText, deletePrefix, key layout, isSafePath
+  storage.ts            S3: presignPut/Get, getObjectText, deletePrefix, deleteKeys, key layout,
+                        isSafePath. Honors optional S3_ENDPOINT (R2/S3-compatible, forcePathStyle)
+  retention.ts          THE deletion clocks: RETENTION_DAYS=30 (resolved auto-expire via
+                        expiryFor), RAW_TTL_DAYS=14 (human raw takes post-render), 7d unfinalized
+                        reap; hourly S3-first sweep (startRetentionSweep in server.ts)
   transcribe.ts         speech-to-text via Groq whisper-large-v3-turbo; segments in ms
   polish.ts             transcript cleanup via claude-haiku-4-5 — text only, timings untouched
   email.ts              Resend sender + reset/verify/invite templates; never throws
@@ -126,6 +137,10 @@ cli/
   migrate-teams.ts      the one-shot workspace→teams data migration (raw SQL + S3 re-prefixing;
                         idempotent/resumable). ALREADY RUN on prod 2026-08-02 — keep for reference
   make-admin.ts         promote an account to platform admin by email (dev; prod uses ADMIN_EMAILS)
+  backfill-expiry.ts    ONE-SHOT: stamp expiresAt on already-resolved walkthroughs (never make it
+                        recurring — Keep clears expiresAt on purpose). NOT YET RUN on prod
+  migrate-storage.ts    S3→R2 copy CLI (SRC_*/DEST_* env, --dry-run, size-skip idempotent).
+                        OWNER-GATED — do not run until Sal says cutover day (decisions.md)
 prisma/schema.prisma    better-auth models + Team(ownerId, seatLimit)/Membership/Invite/Project/
                         Walkthrough/Take/WalkthroughFile/ApiToken — Project/Walkthrough carry the
                         ownership pair `teamId | userId` (exactly one set; null teamId = personal)
@@ -137,8 +152,11 @@ src/
                         Team nav renders only on a team space
     home.tsx            Landing page (assembles src/components/landing/*)
     sign-in/up.tsx      Auth cards (better-auth client flows)
-    app.tsx             InboxPage: filters + walkthrough list. No provisioning state — Personal
-                        always exists, the space is never null
+    app.tsx             InboxPage (route /app, header reads "Walkthroughs"): a card GRID of every
+                        walkthrough you can reach + a light filter toolbar (search · status
+                        segments with mono counts · Space/Project popover selects that only appear
+                        when you have >1 space / any projects). One `walkthroughs.inbox` query,
+                        client-side filtering. No provisioning state — Personal always exists
     walkthrough.tsx     WalkthroughPage: the viewer (assembles src/components/viewer/*)
     projects.tsx        Projects list + create (origin-hints field removed from the UI)
     team.tsx            Members / Invites for team spaces (seat line, owner-only role select +
@@ -174,7 +192,11 @@ src/
                         of one walkthrough: the EXACT MCP brief via getWalkthroughDetail+
                         formatWalkthrough, frame-cap math, takes, all files incl. pending,
                         report.md, move-to-any-space control), usage.tsx (per-space bytes/
-                        recordings vs quota), shared.tsx. user.tsx also carries delete account
+                        recordings vs quota), costs.tsx (THE cost estimator: measured GB/hr
+                        anchors via admin.costStats, editable unit prices, scenario sliders,
+                        retention as the storage lever, tier-margin table — pricing constants
+                        live at the top of the file), shared.tsx. user.tsx also carries
+                        delete account
     forgot-password.tsx /forgot-password — same answer whether or not the account exists
     reset-password.tsx  /reset-password?token=… — the link better-auth emails
     privacy.tsx         /privacy — what's collected, where it lives, subprocessors
@@ -185,6 +207,13 @@ src/
                         `autoTokenName(kind, ua, now)` — the name both pages mint under so
                         neither has to ask for one
     legal.tsx           LegalPage/Section/Terms/Notice — shared chrome for /privacy + /terms
+    inbox/              card.tsx — THE /app walkthrough card (WalkthroughCard + InboxCard type):
+                        keyframe thumbnail for agent-kind-with-frames, a paper title-card set in
+                        type (kind + big mono duration) otherwise; status chip, space·project,
+                        uploader·time, mono duration/errors/expiry, whole-card stretched Link, and
+                        a per-card ⋯ menu whose one job is Rename (arms the inline title editor,
+                        usePopover from viewer/overflow-menu). Filter state + toolbar live in
+                        app.tsx. (rail.tsx — the old filter rail — DELETED 2026-08-12)
     ui/                 button, card, input, label, sidebar (shadcn new-york style, no asChild;
                         sidebar is hand-rolled — no radix — collapse persisted, mobile overlay)
     phone/              guide, clip-list (+AddClips/voice note), destination (one grouped
@@ -291,7 +320,7 @@ extension/              Handback Recorder — the Chrome MV3 extension (own npm 
 | `/join/:inviteId` | Invite accept | `src/app/join.tsx` |
 | `/forgot-password` · `/reset-password` | Password recovery (better-auth emails the link) | `src/app/{forgot,reset}-password.tsx` |
 | `/privacy` · `/terms` | Legal pages (linked from the marketing footer) | `src/app/{privacy,terms}.tsx` |
-| `/app` | Inbox — ALL spaces, filter rail (status/space/project/search over one `walkthroughs.inbox` query); rows rename inline (hover-revealed "Rename", stretched-link overlay so the row still navigates) via `walkthroughs.rename` | `src/app/app.tsx` + `src/components/inbox/rail.tsx` |
+| `/app` | **Walkthroughs** — ALL spaces as a card GRID (not a list), light filter toolbar (search · status segments w/ mono counts · Space/Project popover selects, shown only when >1 space / any projects) over one `walkthroughs.inbox` query, client-side filtered. Cards carry a keyframe thumbnail (agent kind) or a paper title-card; rename lives in a per-card ⋯ menu via `walkthroughs.rename` | `src/app/app.tsx` + `src/components/inbox/card.tsx` |
 | `/upload` | Desktop intake: drop a clip → distill → upload (reuses capture lib + phone components) | `src/app/upload.tsx` |
 | `/walkthroughs/:walkthroughId` | The viewer (`/gripes/:id` 302s here) | `src/app/walkthrough.tsx` |
 | `/projects` · `/team` | Projects (ALL spaces, grouped; create w/ space select) · "Teams" — every team (roster/invites/seats per team, New team lives HERE) | `src/app/{projects,team}.tsx` |
@@ -301,7 +330,7 @@ extension/              Handback Recorder — the Chrome MV3 extension (own npm 
 | `/recorder` | Install + one-click-link the extension (detects install, mints token, handshake). Nav label is **"Extension"**; the nav's "Record" is `/record` | `src/app/recorder.tsx` |
 | `/phone` | Phone guide + share-target intake — OS-recorded clips distilled in-browser and uploaded | `src/app/phone.tsx` |
 | `POST /share-target` | PWA share sheet target — SW intercepts + stashes; Express fallback 303s to /phone | `public/sw.js` · `server.ts` |
-| `/admin` (+ `/users[/:id]`, `/teams[/:id]`, `/walkthroughs`, `/usage`) | Platform-admin console — sidebar shell, overview stats, users + drill-down, teams + seat editor, platform feed, per-space usage (admins only; nav link hidden otherwise) | `src/app/admin/*` |
+| `/admin` (+ `/users[/:id]`, `/teams[/:id]`, `/walkthroughs`, `/usage`, `/costs`) | Platform-admin console — sidebar shell, overview stats, users + drill-down, teams + seat editor, platform feed, per-space usage, cost estimator (live anchors from `admin.costStats` + client-side scenario sliders → per-user cost + tier margins) | `src/app/admin/*` |
 | `/dashboard` | redirect → /app (legacy) | `routes.tsx` |
 | `/healthz` | DB probe | `server.ts` |
 | `/api/auth/*` · `/api/trpc/*` | better-auth · tRPC | `server.ts` |
@@ -777,6 +806,37 @@ reaches the container on a plain push.
   couldn't hold a real 20-minute pristine webm).
 - **Prettier never touches markdown here** — `*.md` is in `.prettierignore` because it rewrote
   `*`-bearing inline code spans and emphasis across updates.md (recovered). Format code, not prose.
+- **Retention is stamped at status-write time, swept hourly** (2026-08-12): `expiryFor(status)`
+  (server/retention.ts) is called by BOTH status paths (tRPC `setStatus` and the shared
+  `setWalkthroughStatus`) — resolved stamps `expiresAt` now+30d, any other status CLEARS it, and
+  the viewer's Keep control (`walkthroughs.keep`) clears it too. The sweep is S3-first like every
+  delete here. A new status-write path that skips `expiryFor` silently makes walkthroughs
+  immortal; a recurring backfill silently makes Keep meaningless — `cli/backfill-expiry.ts` is
+  one-shot for exactly that reason. Human raws (`rec-*` files) purge 14d after `renderedAt`
+  (stamped in finalizeEdit); the shipped final.mp4 stays until the walkthrough expires.
+- **Bitrate is throttled, and it's mirrored.** Pristine = 2 bits/px clamped [3, 8] Mbps; agent/
+  non-pristine = explicit 1 Mbps `videoBitsPerSecond`. Lives in BOTH
+  `extension/src/sidepanel/recorder.ts` and `src/lib/capture/live.ts` (the mirror rule) —
+  extension 1.8.1 carries it and still needs `bun run publish:extension`. Measured effect:
+  ~1.0 → ~0.45 GB/recorded-hr agent-kind; the /admin/costs fallbacks assume the throttled rates.
+- **R2 cutover is owner-gated and code-inert.** `S3_ENDPOINT` unset = plain AWS S3, nothing
+  changed. The cutover (SSM env flip + CORS + `cli/migrate-storage.ts`) runs ONLY when Sal says
+  so — order and checklist in decisions.md 2026-08-12. Don't "helpfully" set S3_ENDPOINT.
+- **Uploads and AI passes require a verified email; budgets are per-USER per-month** (2026-08-12):
+  declare, `/transcribe`, `/polish` and `tokens.create` all 403 on `emailVerified: false` (admins
+  exempt; reads stay open so existing agents keep pulling their queue). Budgets ride
+  `monthly_usage` (user × 'YYYY-MM'): free = 900 cloud-transcribe seconds/mo + no polish; the
+  FIRST walkthrough is unmetered on purpose (magic — don't "fix" it). `GET /context` returns the
+  `cloud` block so recorders can self-configure. **Deploy ordering matters**: the `monthly_usage`
+  table must exist before this code serves (Drydock predeploy `db push` handles a normal push;
+  `handback_test` needs its own `DATABASE_URL=…/handback_test bunx prisma db push` like any
+  schema change). Existing unverified alpha accounts hit the upload gate — flip `email_verified`
+  or have them verify; check RESEND_API_KEY is set in prod first.
+- **Security headers live in server.ts** (one middleware): X-Frame-Options DENY, nosniff,
+  Referrer-Policy, Permissions-Policy (camera/geolocation denied — mic and display-capture
+  deliberately untouched, the recorder needs them), HSTS only when serving https. There is NO CSP
+  yet (inline Vite scripts) — adding one is its own task, don't bolt it onto this middleware
+  casually.
 - **final.mp4 downloads through a second presign.** `presignGet(key, { downloadAs })` signs a
   `ResponseContentDisposition` — the `download` attribute is ignored cross-origin, so the
   Download button needs the URL itself to say attachment. `get`/`shared` return it as
@@ -883,6 +943,19 @@ reaches the container on a plain push.
   `bun run publish:extension`, a push ships only the server), raw-take human uploads,
   `presignEdit`/`finalizeEdit`/`setKind`, the viewer's cloud editor with re-edit, kind switch
   select in the controls row. Typecheck/build/extension-build green; still no live run.
+- **Done (2026-08-12, go-wide prep wave 1)** — retention + cost levers + hardening surface
+  (`plans/2026-08-12-security-retention-audit.md`): `server/retention.ts` (30d resolved expiry,
+  14d raw purge, 7d unfinalized reap, hourly sweep) + Keep control + "expires in Nd" in
+  viewer/inbox, `cli/backfill-expiry.ts` (NOT yet run on prod), R2-ready storage
+  (`S3_ENDPOINT` + `cli/migrate-storage.ts`, cutover owner-gated), bitrate throttle mirrored
+  (extension 1.8.1 — publish pending), security headers, /privacy rewrite (#processors names
+  models), /admin/costs estimator. Typecheck + build green; local live run blocked on a
+  `db push --accept-data-loss` only Sal can run.
+- **Done (2026-08-12, go-wide prep wave 2)** — server-side free tier + auth hardening (audit
+  items 2/5/7/8): email-verification gates (uploads/AI/token-mint; reads open), `monthly_usage`
+  budgets + first-walkthrough magic + `pro` feature, 10-token cap, `cloud` block in /context,
+  share-token log redaction, trustedOrigins + cookie pinning. Live-verified locally (403 gate,
+  magic, 900s free block). Turnstile deferred (no keys).
 - **Next** — **deploy, then re-test the loop**: `/mcp` and `/connect` only exist locally until the
   next push to `main`, so the command `/connect` prints for handback.dev 404s until then. Sal's
   Drydock/DNS checklist in the rename plan (zone, project, S3 via

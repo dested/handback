@@ -67,8 +67,11 @@ console.log(`uploading ${(zipStat.size / 1048576).toFixed(1)} MB → ${key}`)
 // and a release zip is single-digit megabytes.
 const body = await readFile(zipPath)
 
+// Same endpoint handling as server/storage.ts so a post-R2-cutover release
+// upload lands in the same bucket the site serves from.
 const s3 = new S3Client({
-  region: env.AWS_REGION,
+  region: env.S3_ENDPOINT && !process.env.AWS_REGION ? 'auto' : env.AWS_REGION,
+  ...(env.S3_ENDPOINT ? { endpoint: env.S3_ENDPOINT, forcePathStyle: true } : {}),
   credentials: {
     accessKeyId: env.AWS_ACCESS_KEY_ID,
     secretAccessKey: env.AWS_SECRET_ACCESS_KEY,

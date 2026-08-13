@@ -19,11 +19,13 @@ import {
   SPACE_MAX_WALKTHROUGHS,
   SPACE_QUOTA_BYTES,
 } from './ingest'
+import { MAX_ACTIVE_TOKENS } from './limits'
 import { log } from './logger'
 import { briefFrameLimit, formatWalkthrough } from './mcp-format'
 import { prisma } from './prisma'
 import { checkLimit } from './ratelimit'
 import { latestRecorderRelease } from './releases'
+import { expiryFor } from './retention'
 import {
   copyObject,
   deletePrefix,
@@ -528,6 +530,30 @@ const tokensRouter = router({
   create: protectedProcedure
     .input(z.object({ name: z.string().trim().min(1).max(80) }))
     .mutation(async ({ ctx, input }) => {
+      const user = await prisma.user.findUnique({
+        where: { id: ctx.session.user.id },
+        select: { email: true, isAdmin: true, emailVerified: true },
+      })
+      if (!user) throw new TRPCError({ code: 'NOT_FOUND' })
+      // Verified email gates token minting — a working `hb_` token is the key to
+      // the paid cloud passes, so a throwaway account can't mint one. Platform
+      // admins are exempt.
+      if (!user.emailVerified && !isPlatformAdmin(user)) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Verify your email to create API tokens.',
+        })
+      }
+      // Then a per-account cap on live tokens (after the verification gate).
+      const active = await prisma.apiToken.count({
+        where: { userId: ctx.session.user.id, revokedAt: null },
+      })
+      if (active >= MAX_ACTIVE_TOKENS) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: 'Too many active tokens — revoke one first.',
+        })
+      }
       const raw = `hb_${randomBytes(24).toString('base64url')}`
       const created = await prisma.apiToken.create({
         data: {
@@ -696,6 +722,7 @@ const walkthroughListSelect = {
   kind: true,
   recordedAt: true,
   uploadedAt: true,
+  expiresAt: true,
   durationMs: true,
   frameCount: true,
   errorCount: true,
@@ -777,6 +804,7 @@ const walkthroughsRouter = router({
         kind: g.kind,
         recordedAt: g.recordedAt.toISOString(),
         uploadedAt: g.uploadedAt.toISOString(),
+        expiresAt: iso(g.expiresAt),
         durationMs: g.durationMs,
         frameCount: g.frameCount,
         errorCount: g.errorCount,
@@ -802,26 +830,58 @@ const walkthroughsRouter = router({
       where: { ...reachWhere(me, teamIds), finalizedAt: { not: null } },
       orderBy: { recordedAt: 'desc' },
       take: 200,
-      select: { ...walkthroughListSelect, teamId: true, team: { select: { name: true } } },
+      select: {
+        ...walkthroughListSelect,
+        teamId: true,
+        userId: true,
+        team: { select: { name: true } },
+      },
     })
-    return rows.map((g) => ({
-      id: g.id,
-      slug: g.slug,
-      title: g.title,
-      origin: g.origin,
-      status: asStatus(g.status),
-      kind: g.kind,
-      recordedAt: g.recordedAt.toISOString(),
-      durationMs: g.durationMs,
-      frameCount: g.frameCount,
-      errorCount: g.errorCount,
-      takeCount: g._count.takes,
-      projectId: g.projectId,
-      projectName: g.project?.name ?? null,
-      teamId: g.teamId,
-      spaceName: g.team?.name ?? 'Personal',
-      uploadedByName: g.uploadedBy?.name ?? null,
-    }))
+
+    // One representative keyframe per card, for the agent-kind walkthroughs that
+    // have frames. `distinct: ['walkthroughId']` over a path-ordered scan is a
+    // single DISTINCT ON — the first frame file (`rec-01/frames/00-…jpg` sorts
+    // first) of the first take per walkthrough, never every file of every one.
+    const framedIds = rows.filter((g) => g.kind !== 'human').map((g) => g.id)
+    const thumbFiles = framedIds.length
+      ? await prisma.walkthroughFile.findMany({
+          where: { walkthroughId: { in: framedIds }, status: 'uploaded', path: { contains: '/frames/' } },
+          orderBy: [{ walkthroughId: 'asc' }, { path: 'asc' }],
+          distinct: ['walkthroughId'],
+          select: { walkthroughId: true, path: true },
+        })
+      : []
+    const thumbPathById = new Map(thumbFiles.map((f) => [f.walkthroughId, f.path]))
+
+    return Promise.all(
+      rows.map(async (g) => {
+        const thumbPath = thumbPathById.get(g.id)
+        return {
+          id: g.id,
+          slug: g.slug,
+          title: g.title,
+          origin: g.origin,
+          status: asStatus(g.status),
+          kind: g.kind,
+          recordedAt: g.recordedAt.toISOString(),
+          expiresAt: iso(g.expiresAt),
+          durationMs: g.durationMs,
+          frameCount: g.frameCount,
+          errorCount: g.errorCount,
+          takeCount: g._count.takes,
+          projectId: g.projectId,
+          projectName: g.project?.name ?? null,
+          teamId: g.teamId,
+          spaceName: g.team?.name ?? 'Personal',
+          uploadedByName: g.uploadedBy?.name ?? null,
+          // Presigning is local HMAC signing — no S3 round trip — so one per
+          // card at ≤200 items is cheap. Human kind or no frames → null.
+          thumbUrl: thumbPath
+            ? await presignGet(walkthroughKey(spaceId({ teamId: g.teamId, userId: g.userId }), g.id, thumbPath))
+            : null,
+        }
+      })
+    )
   }),
 
   get: protectedProcedure
@@ -856,6 +916,9 @@ const walkthroughsRouter = router({
         shareToken: g.shareToken,
         recordedAt: g.recordedAt.toISOString(),
         uploadedAt: g.uploadedAt.toISOString(),
+        // When this walkthrough auto-deletes (resolved + a retention window);
+        // null = not scheduled. The viewer reads it to show "expires in Nd".
+        expiresAt: iso(g.expiresAt),
         durationMs: g.durationMs,
         frameCount: g.frameCount,
         errorCount: g.errorCount,
@@ -934,7 +997,31 @@ const walkthroughsRouter = router({
         data: {
           status: input.status,
           resolvedAt: input.status === 'resolved' ? new Date() : null,
+          // resolved schedules auto-deletion; flipping back off resolved clears
+          // it. Same call as the shared MCP path (setWalkthroughStatus).
+          expiresAt: expiryFor(input.status),
         },
+      })
+      return { ok: true }
+    }),
+
+  /**
+   * Cancel a scheduled auto-deletion — a resolved walkthrough someone wants to
+   * hold on to. Same access bar as setStatus; reopening it (setStatus off
+   * resolved) clears `expiresAt` too, this is the way to keep it *and* resolved.
+   */
+  keep: protectedProcedure
+    .input(z.object({ walkthroughId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const g = await prisma.walkthrough.findUnique({
+        where: { id: input.walkthroughId },
+        select: { teamId: true, userId: true },
+      })
+      if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
+      await requireSpaceAccess(ctx.session.user.id, g)
+      await prisma.walkthrough.update({
+        where: { id: input.walkthroughId },
+        data: { expiresAt: null },
       })
       return { ok: true }
     }),
@@ -1218,7 +1305,9 @@ const walkthroughsRouter = router({
       const bytes = BigInt(uploaded._sum.size ?? 0)
       await prisma.walkthrough.update({
         where: { id: g.id },
-        data: { durationMs: input.durationMs, bytes },
+        // `renderedAt` starts the raw-take retention clock (server/retention.ts):
+        // the raws survive this long for re-edits, then the sweep purges them.
+        data: { durationMs: input.durationMs, bytes, renderedAt: new Date() },
       })
       log.info(`[edit] attached render to walkthrough ${g.id} (${input.paths.join(', ')})`)
       // BigInt doesn't survive JSON; the viewer reads a Number like everywhere else.
@@ -1736,7 +1825,7 @@ const adminRouter = router({
       // The agent's view, through the agent's own pipeline — reportMd included,
       // so it can't be fetched a second, subtly different way.
       const detail = await getWalkthroughDetail(
-        { userId: ctx.session.user.id, tokenId: 'admin-ui', isAdmin: true },
+        { userId: ctx.session.user.id, tokenId: 'admin-ui', isAdmin: true, emailVerified: true },
         g.id
       )
       const brief = detail ? formatWalkthrough(detail) : null
@@ -1854,6 +1943,46 @@ const adminRouter = router({
     return {
       quota: { bytes: SPACE_QUOTA_BYTES, walkthroughs: SPACE_MAX_WALKTHROUGHS },
       spaces,
+    }
+  }),
+
+  /**
+   * Live anchors for /admin/costs: how much real recordings weigh (GB per
+   * recorded hour, by kind) and the last 30 days of intake, so the estimator
+   * extrapolates from measured usage instead of guesses.
+   */
+  costStats: protectedProcedure.query(async ({ ctx }) => {
+    await requireAdmin(ctx.session.user.id)
+    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+    const [total, byKind, recent, recentUploaders, fileCount] = await Promise.all([
+      prisma.walkthrough.aggregate({ _count: true, _sum: { bytes: true, durationMs: true } }),
+      prisma.walkthrough.groupBy({
+        by: ['kind'],
+        _count: true,
+        _sum: { bytes: true, durationMs: true },
+      }),
+      prisma.walkthrough.aggregate({
+        where: { uploadedAt: { gte: since } },
+        _count: true,
+        _sum: { bytes: true, durationMs: true },
+      }),
+      prisma.walkthrough.findMany({
+        where: { uploadedAt: { gte: since }, uploadedById: { not: null } },
+        select: { uploadedById: true },
+        distinct: ['uploadedById'],
+      }),
+      prisma.walkthroughFile.count(),
+    ])
+    const shape = (r: { _count: number; _sum: { bytes: bigint | null; durationMs: number | null } }) => ({
+      walkthroughs: r._count,
+      bytes: Number(r._sum.bytes ?? 0),
+      durationMs: r._sum.durationMs ?? 0,
+    })
+    return {
+      total: shape(total),
+      byKind: byKind.map((r) => ({ kind: r.kind, ...shape(r) })),
+      last30d: { ...shape(recent), uploaders: recentUploaders.length },
+      files: fileCount,
     }
   }),
 

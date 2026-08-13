@@ -50,9 +50,19 @@ export function LegalPage({
   )
 }
 
-export function Section({ heading, children }: { heading: string; children: ReactNode }) {
+export function Section({
+  heading,
+  id,
+  children,
+}: {
+  heading: string
+  /** Anchor target, e.g. `#processors` linked from the recorder pages. */
+  id?: string
+  children: ReactNode
+}) {
   return (
-    <section>
+    // scroll-mt so a deep-link doesn't tuck the heading under the viewport top.
+    <section id={id} className={id ? 'scroll-mt-24' : undefined}>
       <h2 className="font-display text-2xl font-semibold tracking-tight">{heading}</h2>
       <div className="mt-3 space-y-3 leading-relaxed [&_a]:font-medium [&_a]:text-cobalt hover:[&_a]:underline">
         {children}

@@ -4,14 +4,14 @@ export function PrivacyPage() {
   return (
     <LegalPage
       title="Privacy"
-      updated="July 30, 2026"
+      updated="August 12, 2026"
       summary="Handback stores recordings of your screen and your voice. This page says exactly what we keep, where it lives, who can reach it, and how to get rid of it.">
       <Section heading="Who this covers">
         <p>
           Handback is operated by Sal Aiello. This policy covers the Handback web app at
           handback.dev, the Handback Recorder Chrome extension, and the command-line and MCP tools
           that talk to the same API. In a Handback team, almost everything you put in is visible to
-          the other members, by design. Your personal space is visible only to you.
+          the other members of that team, by design. Your personal space is only you.
         </p>
       </Section>
 
@@ -24,9 +24,9 @@ export function PrivacyPage() {
                 'Your email address, your name if you give one, and a hash of your password — never the password itself. Sessions are cookies issued by our own server.',
             },
             {
-              term: 'Organization',
+              term: 'Teams',
               detail:
-                'The organizations you create or join, your role in each, and invitations you send or accept.',
+                'The teams you create or join, your role in each, and invitations you send or accept. Your personal space needs none of this — it is simply the content that is yours alone.',
             },
             {
               term: 'Walkthroughs',
@@ -68,22 +68,30 @@ export function PrivacyPage() {
           Files are stored in a private Amazon S3 bucket in the US West (Oregon) region. The bucket
           blocks all public access; nothing in it is reachable by URL. When you or an authorized
           agent needs a file, our server issues a presigned link that expires in an hour. Everything
-          else — accounts, organizations, walkthrough metadata — lives in a PostgreSQL database on
-          our own server in the same region. All traffic runs over HTTPS.
+          else — accounts, teams, walkthrough metadata — lives in a PostgreSQL database on our own
+          server in the same region. All traffic runs over HTTPS.
         </p>
       </Section>
 
       <Section heading="Who can see it">
         <p>
-          Members of the organization a walkthrough belongs to, and anyone holding a valid API token
-          issued by that organization. Nobody else — the tenant boundary is enforced on every
-          request, not just in the interface.
+          A walkthrough in a team is visible to that team's members; a walkthrough in your personal
+          space is visible only to you. On top of that, anyone holding a valid API token that
+          reaches the space can read it — that is how your coding agent pulls the queue. Nobody else:
+          the boundary is enforced on every request, not just in the interface.
         </p>
         <Notice>
-          Invitation links are the exception worth understanding: the link <em>is</em> the
-          credential. Anyone who has it can join your organization and read its walkthroughs until
-          it expires after seven days. Send them the way you would send a password.
+          Invitation links are the credential themselves: anyone who has one can join your team and
+          read its walkthroughs until it expires after seven days. Send them the way you would send a
+          password.
         </Notice>
+        <p>
+          <strong>Share links work the same way.</strong> When you share a walkthrough, we mint a
+          link that plays it with no sign-in required — the link <em>is</em> the credential, so
+          anyone you send it to (and anyone they forward it to) can watch it. Sharing again replaces
+          the old link, which is also how you kill one that leaked; un-sharing revokes access
+          immediately. A walkthrough is never shared unless you share it.
+        </p>
         <p>
           Sal Aiello, as the operator, can technically reach stored data in the course of running
           and debugging the service. It is not read routinely and it is never shared.
@@ -123,7 +131,7 @@ export function PrivacyPage() {
         </p>
       </Section>
 
-      <Section heading="Processors">
+      <Section heading="Processors" id="processors">
         <Terms
           items={[
             {
@@ -133,12 +141,12 @@ export function PrivacyPage() {
             {
               term: 'Groq',
               detail:
-                'Speech-to-text, only when server-side transcription is enabled. Receives the audio track; receives nothing else.',
+                'Speech-to-text with the whisper-large-v3-turbo model, only when server-side transcription is enabled. Receives the audio track; receives nothing else.',
             },
             {
               term: 'Anthropic',
               detail:
-                'Transcript cleanup. Receives the transcript text, the recorded page address, and its console errors. Never receives audio, video, or images.',
+                'Transcript cleanup with the claude-haiku-4-5 model. Receives the transcript text, the recorded page address, and its console errors. Never receives audio, video, or images.',
             },
             {
               term: 'Resend',
@@ -155,10 +163,32 @@ export function PrivacyPage() {
 
       <Section heading="How long we keep it">
         <p>
-          Walkthroughs are kept until someone deletes them. Deleting a walkthrough removes its
-          database records and its entire folder of files from S3. Re-recording under the same name
-          replaces the old walkthrough wholesale — the previous files are deleted, not versioned.
-          Account records persist until the account is deleted.
+          We keep recordings no longer than we need to. A few clocks run automatically:
+        </p>
+        <Terms
+          items={[
+            {
+              term: 'Resolved walkthroughs',
+              detail:
+                'Once a walkthrough is marked resolved, it auto-deletes 30 days later — records and files both. A Keep control on the walkthrough cancels that, and reopening it (moving it off resolved) cancels it too.',
+            },
+            {
+              term: 'Raw recordings of a shared cut',
+              detail:
+                'For a walkthrough recorded for a person, the raw source recordings are deleted 14 days after the final video is rendered. The finished video stays reachable until the walkthrough itself is gone.',
+            },
+            {
+              term: 'Unfinished uploads',
+              detail:
+                'An upload that never finished — interrupted, abandoned — is removed after 7 days.',
+            },
+          ]}
+        />
+        <p>
+          Deleting a walkthrough yourself is immediate and total: it removes the database records and
+          the entire folder of files from S3, right away. Re-recording under the same name replaces
+          the old walkthrough wholesale — the previous files are deleted, not versioned. Account
+          records persist until the account is deleted.
         </p>
         <Notice>
           Deleting your <em>account</em> is not yet a button in the product. Email{' '}

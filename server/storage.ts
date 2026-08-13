@@ -16,8 +16,15 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { env } from './env'
 
+// R2: set S3_ENDPOINT=https://<account>.r2.cloudflarestorage.com + R2 keypair in
+// the AWS_* vars. R2 speaks SigV4 and the S3 API, so presignPut/Get, copy and
+// delete work unchanged — it only needs path-style addressing and region `auto`.
+// AWS_REGION still drives real AWS; when S3_ENDPOINT is set we fall back to
+// `auto` unless the operator set AWS_REGION explicitly (it has a zod default, so
+// only process.env tells us whether it was actually provided).
 const s3 = new S3Client({
-  region: env.AWS_REGION,
+  region: env.S3_ENDPOINT && !process.env.AWS_REGION ? 'auto' : env.AWS_REGION,
+  ...(env.S3_ENDPOINT ? { endpoint: env.S3_ENDPOINT, forcePathStyle: true } : {}),
   credentials: {
     accessKeyId: env.AWS_ACCESS_KEY_ID,
     secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
@@ -132,6 +139,21 @@ export async function listPrefix(prefix: string): Promise<Array<{ key: string; s
     token = page.IsTruncated ? page.NextContinuationToken : undefined
   } while (token)
   return out
+}
+
+/**
+ * Delete a known set of objects by key — the retention sweep's raw-take purge,
+ * which keeps some files (final.mp4, transcript.json) and drops the rest, so it
+ * can't just wipe a prefix. Batched at S3's 1000-key ceiling; a no-op on empty.
+ */
+export async function deleteKeys(keys: string[]): Promise<void> {
+  for (let i = 0; i < keys.length; i += 1000) {
+    const batch = keys.slice(i, i + 1000).map((Key) => ({ Key }))
+    if (batch.length === 0) continue
+    await s3.send(
+      new DeleteObjectsCommand({ Bucket: env.S3_BUCKET, Delete: { Objects: batch, Quiet: true } })
+    )
+  }
 }
 
 /** Delete everything under a prefix (re-push of a walkthrough, walkthrough deletion). */

@@ -2,6 +2,63 @@
 
 > ADR-lite: what was decided, why, what was rejected. Append-only.
 
+## 2026-08-12 — Free tier is enforced server-side: verified email + monthly budgets + first-walkthrough magic
+**Why:** cost control has to hold against 10k throwaway accounts, so the enforcement is entirely
+server-side where the recorders can't route around it: `emailVerified` gates uploads, token minting
+and both AI passes (reads stay open — an agent keeps pulling its queue); `MonthlyUsage`
+(user × 'YYYY-MM') meters cloud transcribe seconds (free 900s/mo, pro 72 000s abuse ceiling) and
+polish calls (free none, pro 1 000/mo ceiling) via atomic reserve-then-call; max 10 active tokens.
+The first walkthrough is deliberately unmetered ("magic") — the first-run experience is the
+product. `pro` is a hand-granted `User.features` flag like `team`; platform admins are fully
+unmetered. Recorders degrade gracefully on the 403/429s they already handle (non-2xx transcribe →
+on-device, polish → raw transcript), and `GET /context` now tells future recorders their allowance
+(`cloud` block). No Turnstile yet (no keys), no disposable-email blocklist (deferred).
+**Rejected:** client-side enforcement (trivially bypassed), better-auth `requireEmailVerification`
+(blocks sign-in outright — alpha users with bounced mail would be locked out), a daily token
+(owner declined), metering by walltime instead of audio seconds (WAV byte length is exact enough).
+
+## 2026-08-12 — Cost levers: R2 for media, throttled capture bitrates, local-first free tier
+**Why:** egress + AI passes are ~90% of per-user cost (storage with 30d retention is cents —
+see /admin/costs). R2 = $0.015/GB-mo + zero egress, S3-compatible presigned URLs. Agent-kind
+capture drops to ~1 Mbps (the agent reads frames/transcript, not the video); pristine halves to
+~2 bits/px clamped 3–8 Mbps. Free tier: first walkthrough gets full cloud transcribe+polish,
+then on-device Whisper (extension) / 15 cloud-min/mo (web+phone); no polish on free. Maxed free
+user lands ≈ $0.02/mo.
+**⚠️ Cutover is owner-gated (2026-08-12: "don't migrate until I'm ready, people use this every
+day").** The code ships inert: prod stays on S3 until Sal sets S3_ENDPOINT + R2 keys in SSM and
+runs cli/migrate-storage.ts himself. Safe order when ready: run migration copy while live
+(idempotent) → re-run to catch stragglers → flip SSM + redeploy → one final re-run. Presigned
+GETs minted before the flip keep working for their 1h TTL against old S3.
+**Rejected:** Backblaze B2 (cheaper still, but R2's S3 compat + Turnstile/CDN adjacency wins),
+CloudFront in front of S3 (egress still billed), literal-zero free tier (gutting first-run magic
+to save pennies).
+
+## 2026-08-12 — Admin tokens stay platform-wide (no scoped tokens)
+**Why:** owner declined the mint-time scoping option outright ("don't do that token thing, it's
+fine") after the audit flagged the blast radius (a platform admin's `hb_` token reaches every
+space, `walkthroughs-api.ts` `isAdmin` drops the filter). Risk accepted; revocation is immediate
+and tokens are sha256-stored, which bounds the damage window.
+**Rejected:** per-token scope (personal / one team) with admin reach as opt-in.
+
+## 2026-08-12 — Pricing = seats + hour quotas + tiered retention windows
+**Why:** owner's call while preparing to go wide. Storage-forever plus egress is the entire cost
+story (~$0.33/recorded-hour at 30d retention; measured ~1.0 GB/hr agent-kind — see /admin/costs);
+retention windows bound cost per user, keep the bill predictable for buyers, and double as the
+liability lever ("get it out of my system as quickly as possible"). Ladder: Free 1h/mo · 30d,
+Pro $20 3h · 90d, Business $40 10h · 1y, Enterprise custom. Margins verified in /admin/costs.
+**Rejected:** usage-based overage (metering + Stripe complexity, unpredictable bills), flat seats
+with generous quotas (margin hostage to expiry defaults).
+
+## 2026-08-12 — Resolved walkthroughs auto-expire
+**Why:** owner: "once the thing is done there's probably no reason to keep them" + minimal-data
+liability posture. Resolve stamps `expiresAt = now + tier window`; flipping back to open, or an
+explicit Keep, clears it; hourly sweep deletes S3-first (design:
+plans/2026-08-12-security-retention-audit.md). Privacy page changes in the SAME release — it
+currently promises "kept until someone deletes them."
+**Rejected:** keep-forever with only the storage cap (COGS grow with every account forever),
+per-team-configurable windows (more surface than the alpha needs; the ladder can gain a knob
+later without a migration).
+
 ## 2026-08-12 — Arbitrary section cuts (⇧-drag carve + in/out), and the editor serves every kind
 **Why:** owner: "I should be able to just cut out a big section — person mode or not." Two ways
 to carve, both committing instantly (the no-selection rule survives because nothing ever *stays*

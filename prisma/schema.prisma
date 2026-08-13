@@ -39,11 +39,12 @@ model User {
   accounts     Account[]
   memberships  Membership[]
   apiTokens    ApiToken[]
-  uploads      Walkthrough[] @relation("uploader")
+  uploads      Walkthrough[]  @relation("uploader")
   // The personal space: rows owned by this account rather than a team.
-  walkthroughs Walkthrough[] @relation("personal")
-  projects     Project[]     @relation("personalProjects")
-  ownedTeams   Team[]        @relation("teamOwner")
+  walkthroughs Walkthrough[]  @relation("personal")
+  projects     Project[]      @relation("personalProjects")
+  ownedTeams   Team[]         @relation("teamOwner")
+  monthlyUsage MonthlyUsage[]
 
   @@map("user")
 }
@@ -207,6 +208,15 @@ model Walkthrough {
   // walkthrough list only shows finalized walkthroughs.
   finalizedAt  DateTime? @map("finalized_at")
   resolvedAt   DateTime? @map("resolved_at")
+  // Retention bookkeeping (server/retention.ts). `expiresAt` is when the whole
+  // walkthrough auto-deletes — stamped when it's marked resolved, cleared when
+  // it moves off resolved or someone hits Keep; null = no expiry scheduled.
+  // `renderedAt` is when a human handback's final.mp4 landed, the clock the raw
+  // takes expire off. `rawsPurgedAt` records that the raw-take purge already ran
+  // so the sweep does it once.
+  expiresAt    DateTime? @map("expires_at")
+  renderedAt   DateTime? @map("rendered_at")
+  rawsPurgedAt DateTime? @map("raws_purged_at")
 
   takes Take[]
   files WalkthroughFile[]
@@ -264,4 +274,21 @@ model ApiToken {
   revokedAt  DateTime? @map("revoked_at")
 
   @@map("api_token")
+}
+
+// Per-user, per-month meter for the metered cloud passes. Checked and
+// incremented by server/usage.ts before Groq/Anthropic are billed: the free tier
+// gets a small monthly transcription budget, Pro a high abuse ceiling, and a
+// user's first-ever walkthrough is unmetered magic (server/limits.ts holds the
+// numbers). One row per (user, month) — `month` is a 'YYYY-MM' UTC bucket.
+model MonthlyUsage {
+  id                String @id @default(uuid())
+  userId            String @map("user_id")
+  user              User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  month             String // 'YYYY-MM' UTC
+  transcribeSeconds Int    @default(0) @map("transcribe_seconds")
+  polishCalls       Int    @default(0) @map("polish_calls")
+
+  @@unique([userId, month])
+  @@map("monthly_usage")
 }

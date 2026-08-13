@@ -48,6 +48,7 @@ import {
   transcriptionConfigured,
 } from './transcribe'
 import { deletePrefix, walkthroughKey, walkthroughPrefix, isSafePath, presignPut } from './storage'
+import { checkAndReservePolish, checkAndReserveTranscribe, cloudStatus } from './usage'
 
 const MAX_FILES = 4000
 const GB = 1024 * 1024 * 1024
@@ -126,6 +127,15 @@ function fail(res: Response, status: number, error: string) {
   res.status(status).json({ error })
 }
 
+// Cloud writes (declare) and the paid AI passes (transcribe/polish) require a
+// verified email; a platform admin is exempt. Reads stay open — an unverified
+// agent can still see its queue. Returns false and sends the 403 when it blocks.
+function requireVerifiedEmail(auth: TokenAuth, res: Response): boolean {
+  if (auth.emailVerified || auth.isAdmin) return true
+  fail(res, 403, 'verify your email to upload')
+  return false
+}
+
 // The auth middleware stashes the token's identity on the request; express's
 // generics don't compose with route params, so retrieval goes through unknown.
 function getAuth(req: Request): TokenAuth {
@@ -195,7 +205,7 @@ ingestRouter.use(async (req, res, next) => {
 ingestRouter.get('/context', readLimit, async (req, res) => {
   const auth = getAuth(req)
   const projectSelect = { id: true, name: true, slug: true, originHints: true } as const
-  const [user, personalProjects, memberships] = await Promise.all([
+  const [user, personalProjects, memberships, cloud] = await Promise.all([
     prisma.user.findUnique({
       where: { id: auth.userId },
       select: { id: true, name: true, email: true },
@@ -219,6 +229,9 @@ ingestRouter.get('/context', readLimit, async (req, res) => {
         },
       },
     }),
+    // Future recorders read this to self-configure their cloud passes; today's
+    // ignore the field.
+    cloudStatus(auth.userId),
   ])
   if (!user) {
     fail(res, 404, 'Unknown user')
@@ -233,11 +246,13 @@ ingestRouter.get('/context', readLimit, async (req, res) => {
       slug: m.team.slug,
       projects: m.team.projects,
     })),
+    cloud,
   })
 })
 
 ingestRouter.post(DECLARE, declareLimit, async (req, res) => {
   const auth = getAuth(req)
+  if (!requireVerifiedEmail(auth, res)) return
   const parsed = declareSchema.safeParse(req.body)
   if (!parsed.success) {
     fail(res, 400, parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '))
@@ -491,13 +506,27 @@ ingestRouter.post(
   transcribeLimit,
   raw({ type: ['audio/wav', 'application/octet-stream'], limit: MAX_AUDIO_BYTES }),
   async (req, res) => {
+    const auth = getAuth(req)
     if (!transcriptionConfigured()) {
       fail(res, 503, 'Server-side transcription is not configured on this server')
       return
     }
+    if (!requireVerifiedEmail(auth, res)) return
     const audio = req.body
     if (!Buffer.isBuffer(audio) || audio.length === 0) {
       fail(res, 400, 'Expected a WAV body')
+      return
+    }
+    // Estimate the take's length from the WAV body BEFORE spending Groq: a
+    // 16 kHz mono 16-bit stream is 32000 bytes/sec, so seconds ≈ bytes / 32000.
+    // A budget-exhausted caller gets a 429 and never reaches the provider; the
+    // recorder degrades to on-device on any non-2xx.
+    const estSeconds = Math.max(1, Math.round(audio.length / 32000))
+    const budget = await checkAndReserveTranscribe(auth.userId, estSeconds)
+    if (!budget.allowed) {
+      res
+        .status(429)
+        .json({ error: 'cloud transcription budget exhausted', remainingSeconds: budget.remaining ?? 0 })
       return
     }
     // A two-letter hint helps Whisper; anything else is noise, so drop it.
@@ -540,13 +569,22 @@ const polishSchema = z.object({
 })
 
 ingestRouter.post('/polish', polishLimit, async (req, res) => {
+  const auth = getAuth(req)
   if (!polishConfigured()) {
     fail(res, 503, 'Transcript cleanup is not configured on this server')
     return
   }
+  if (!requireVerifiedEmail(auth, res)) return
   const parsed = polishSchema.safeParse(req.body)
   if (!parsed.success) {
     fail(res, 400, parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '))
+    return
+  }
+  // Polish is Pro-only past first-walkthrough magic; per-token rate limits above
+  // still apply on top of this per-user budget.
+  const budget = await checkAndReservePolish(auth.userId)
+  if (!budget.allowed) {
+    res.status(429).json({ error: 'polish unavailable on this plan' })
     return
   }
   const cleaned = await polishTranscript(parsed.data.lines, parsed.data.context).catch(

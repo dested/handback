@@ -1,113 +1,120 @@
-// The inbox — one list of every walkthrough this account can see, Personal and
-// every team at once. Space used to be a mode you switched at the top of the
-// page; it is an attribute now, and this is the page that decision was made
-// for. You filter, you don't context-switch.
+// Walkthroughs — the walkthroughs available to you, Personal and every team at
+// once, as a card grid. Not an inbox: there is no queue to clear, just the
+// collection you can reach. Space stopped being a mode you switch at the top
+// (2026-08-03); it's an attribute you filter by, and only when you have more
+// than one space to filter between.
 //
-// One query does the whole page. `walkthroughs.inbox` is capped small enough to
-// hold, so every filter and every count in the rail is computed here over that
-// one array — no refetch when you click a facet, and the counts can never
-// disagree with the rows they are counting.
+// One query does the whole page. `walkthroughs.inbox` (the wire name is frozen —
+// the API keeps it) is capped small enough to hold, so every filter and every
+// count in the toolbar is computed here over that one array — no refetch when
+// you click a facet, and the counts can never disagree with the cards they count.
 //
 // Status colors are fixed by ui.md: open = cobalt, in_review = violet,
 // resolved = green.
 
-import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { X } from 'lucide-react'
-import {
-  CLEARED_FILTERS,
-  DEFAULT_FILTERS,
-  FilterChips,
-  FilterRail,
-  STATUS_LABELS,
-  STATUS_ORDER,
-  loadFilters,
-  saveFilters,
-  type FacetOption,
-  type InboxFilters,
-  type StatusKey,
-} from '~/components/inbox/rail'
+import { useQuery } from '@tanstack/react-query'
+import { ChevronDown, X } from 'lucide-react'
+import { WalkthroughCard, type InboxCard } from '~/components/inbox/card'
+import { usePopover } from '~/components/viewer/overflow-menu'
 import { buttonVariants } from '~/components/ui/button'
-import { mmss } from '~/lib/capture/format'
+import { Input } from '~/components/ui/input'
 import { useTRPC } from '~/lib/trpc'
 import { cn } from '~/lib/utils'
 
 /** The personal space's key in every facet — teamId is null and null is not a Map key you can read back. */
 const PERSONAL = 'personal'
 
-/** The fields the filters actually read. Rows are structurally wider than this. */
-type Filterable = {
-  title: string
-  slug: string
-  origin: string | null
-  status: string
-  teamId: string | null
+type StatusKey = 'all' | 'open' | 'in_review' | 'resolved'
+
+const STATUS_LABELS: Record<StatusKey, string> = {
+  all: 'All',
+  open: 'Open',
+  in_review: 'In review',
+  resolved: 'Resolved',
+}
+const STATUS_ORDER: StatusKey[] = ['all', 'open', 'in_review', 'resolved']
+
+type Filters = {
+  status: StatusKey
+  /** null = every space. `'personal'` or a teamId otherwise. */
+  space: string | null
+  /** null = every project. `'general'` = the walkthroughs pinned to no project. */
   projectId: string | null
+  q: string
+}
+
+// A collection, not a queue: it opens on everything you can reach, not on
+// "what's still owed". The old inbox defaulted to Needs-attention for exactly
+// the queue framing the owner asked us to drop.
+const DEFAULT_FILTERS: Filters = { status: 'all', space: null, projectId: null, q: '' }
+
+/** One row of a facet group. `key` is the filter value; `'all'` is the reset. */
+type FacetOption = { key: string; label: string; count: number }
+
+const STORAGE_KEY = 'handback.inbox.filters'
+
+function isStatusKey(value: unknown): value is StatusKey {
+  return typeof value === 'string' && value in STATUS_LABELS
+}
+
+// The remembered half — status and space. A project or a search term is about
+// one sitting; the shape of the collection you work in is not. Read in a mount
+// effect: localStorage does not exist during SSR.
+function loadFilters(): Pick<Filters, 'status' | 'space'> | null {
+  let raw: string | null
+  try {
+    raw = localStorage.getItem(STORAGE_KEY)
+  } catch {
+    return null
+  }
+  if (!raw) return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  if (typeof parsed !== 'object' || parsed === null) return null
+  const { status, space } = parsed as { status?: unknown; space?: unknown }
+  return {
+    status: isStatusKey(status) ? status : DEFAULT_FILTERS.status,
+    space: typeof space === 'string' ? space : null,
+  }
+}
+
+function saveFilters(filters: Filters): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ status: filters.status, space: filters.space }))
+  } catch {
+    // Private mode, or a full quota. Losing the memory of a filter is not worth
+    // taking the page down for.
+  }
 }
 
 function matchesStatus(status: string, key: StatusKey): boolean {
-  if (key === 'all') return true
-  if (key === 'attention') return status === 'open' || status === 'in_review'
-  return status === key
+  return key === 'all' || status === key
 }
 
-function matchesSpace(row: Filterable, space: string | null): boolean {
-  return space === null || (row.teamId ?? PERSONAL) === space
+function matchesSpace(card: InboxCard, space: string | null): boolean {
+  return space === null || (card.teamId ?? PERSONAL) === space
 }
 
-function matchesProject(row: Filterable, projectId: string | null): boolean {
+function matchesProject(card: InboxCard, projectId: string | null): boolean {
   if (projectId === null) return true
-  if (projectId === 'general') return row.projectId === null
-  return row.projectId === projectId
+  if (projectId === 'general') return card.projectId === null
+  return card.projectId === projectId
 }
 
-function matchesQuery(row: Filterable, q: string): boolean {
+function matchesQuery(card: InboxCard, q: string): boolean {
   if (!q) return true
   const needle = q.toLowerCase()
   return (
-    row.title.toLowerCase().includes(needle) ||
-    row.slug.toLowerCase().includes(needle) ||
-    (row.origin !== null && row.origin.toLowerCase().includes(needle))
+    card.title.toLowerCase().includes(needle) ||
+    card.slug.toLowerCase().includes(needle) ||
+    (card.origin !== null && card.origin.toLowerCase().includes(needle))
   )
-}
-
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-
-// UTC parts, not toLocaleDateString: locale formatting differs between the SSR
-// runtime and the browser, which would break hydration.
-function shortDate(value: string): string {
-  const d = new Date(value)
-  return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}`
-}
-
-/**
- * "2h ago". Client-only by construction — it reads the wall clock, which the
- * server's clock is not, so the row renders the absolute date until hydration
- * has happened and only then softens to this.
- */
-function relativeTime(value: string, now: number): string {
-  const seconds = Math.round((now - new Date(value).getTime()) / 1000)
-  if (seconds < 45) return 'just now'
-  const minutes = Math.round(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.round(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.round(hours / 24)
-  if (days < 7) return `${days}d ago`
-  if (days < 30) return `${Math.round(days / 7)}w ago`
-  return shortDate(value)
-}
-
-function plural(n: number, word: string): string {
-  return `${n} ${word}${n === 1 ? '' : 's'}`
-}
-
-/** Word + dot ink for a status, narrowed from the free-form string on the wire. */
-function statusInk(status: string): { label: string; text: string; dot: string } {
-  if (status === 'resolved') return { label: 'resolved', text: 'text-approve', dot: 'bg-approve' }
-  if (status === 'in_review') return { label: 'in review', text: 'text-review', dot: 'bg-review' }
-  return { label: 'open', text: 'text-cobalt', dot: 'bg-cobalt' }
 }
 
 export function InboxPage() {
@@ -117,9 +124,9 @@ export function InboxPage() {
   const teamsQuery = useQuery(trpc.teams.mine.queryOptions())
   const connection = useQuery(trpc.tokens.connection.queryOptions())
 
-  const [filters, setFilters] = useState<InboxFilters>(DEFAULT_FILTERS)
-  // Both corrected on mount, so the server's markup and the first client paint
-  // agree: SSR knows neither the stored filters nor the clock.
+  const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS)
+  // Corrected on mount, so the server's markup and the first client paint agree:
+  // SSR knows neither the stored filters nor the clock.
   const [hydrated, setHydrated] = useState(false)
   useEffect(() => {
     const stored = loadFilters()
@@ -127,71 +134,69 @@ export function InboxPage() {
     setHydrated(true)
   }, [])
 
-  function update(patch: Partial<InboxFilters>) {
+  function update(patch: Partial<Filters>) {
     const next = { ...filters, ...patch }
     setFilters(next)
     saveFilters(next)
   }
 
-  const rows = useMemo(() => inbox.data ?? [], [inbox.data])
+  const cards = useMemo(() => inbox.data ?? [], [inbox.data])
   const projects = useMemo(() => projectsQuery.data ?? [], [projectsQuery.data])
+  const memberships = teamsQuery.data ?? []
 
-  // Four passes over one array. Each facet group counts the rows that would
-  // survive *every other* filter, which is what makes a count in the rail a
-  // promise about what clicking it shows.
-  const searched = useMemo(() => rows.filter((r) => matchesQuery(r, filters.q)), [rows, filters.q])
+  // Facet counts are computed the same honest way the rail did it: each group
+  // counts the cards that survive *every other* filter, so a count is a promise
+  // about what picking it shows.
+  const searched = useMemo(() => cards.filter((c) => matchesQuery(c, filters.q)), [cards, filters.q])
   const statusScope = useMemo(
     () =>
-      searched.filter(
-        (r) => matchesSpace(r, filters.space) && matchesProject(r, filters.projectId)
-      ),
+      searched.filter((c) => matchesSpace(c, filters.space) && matchesProject(c, filters.projectId)),
     [searched, filters.space, filters.projectId]
   )
   const spaceScope = useMemo(
-    () => searched.filter((r) => matchesStatus(r.status, filters.status)),
+    () => searched.filter((c) => matchesStatus(c.status, filters.status)),
     [searched, filters.status]
   )
   const projectScope = useMemo(
-    () => spaceScope.filter((r) => matchesSpace(r, filters.space)),
+    () => spaceScope.filter((c) => matchesSpace(c, filters.space)),
     [spaceScope, filters.space]
   )
   const visible = useMemo(
-    () => projectScope.filter((r) => matchesProject(r, filters.projectId)),
+    () => projectScope.filter((c) => matchesProject(c, filters.projectId)),
     [projectScope, filters.projectId]
   )
 
-  const statusFacets: FacetOption[] = STATUS_ORDER.map((key) => ({
-    key,
-    label: STATUS_LABELS[key],
-    count: statusScope.filter((r) => matchesStatus(r.status, key)).length,
-  }))
+  const statusCount = (key: StatusKey) =>
+    statusScope.filter((c) => matchesStatus(c.status, key)).length
 
   // The universe of spaces is the union of what has walkthroughs, what has
-  // projects, AND the membership list itself — a team you just joined has
-  // neither rows nor projects yet, and still belongs here.
-  const memberships = teamsQuery.data ?? []
+  // projects, AND the membership list — a team you just joined has neither cards
+  // nor projects yet and still belongs here.
   const spaceFacets: FacetOption[] = useMemo(() => {
     const names = new Map<string, string>([[PERSONAL, 'Personal']])
     for (const t of memberships) names.set(t.id, t.name)
-    for (const r of rows) names.set(r.teamId ?? PERSONAL, r.spaceName)
+    for (const c of cards) names.set(c.teamId ?? PERSONAL, c.spaceName)
     for (const p of projects) names.set(p.teamId ?? PERSONAL, p.spaceName)
     const teams = [...names.entries()]
       .filter(([key]) => key !== PERSONAL)
       .sort((a, b) => a[1].localeCompare(b[1]))
-    const count = (key: string) => spaceScope.filter((r) => (r.teamId ?? PERSONAL) === key).length
+    const count = (key: string) => spaceScope.filter((c) => (c.teamId ?? PERSONAL) === key).length
     return [
       { key: 'all', label: 'All spaces', count: spaceScope.length },
       { key: PERSONAL, label: names.get(PERSONAL) ?? 'Personal', count: count(PERSONAL) },
       ...teams.map(([key, label]) => ({ key, label, count: count(key) })),
     ]
-  }, [memberships, rows, projects, spaceScope])
+  }, [memberships, cards, projects, spaceScope])
 
-  // A persisted space filter can outlive the membership that made it valid —
-  // a left team's id would silently empty the inbox. Reset it once the
-  // membership list is in and disagrees.
+  // Space is worth surfacing only once there's more than one to choose between:
+  // a lone Personal space is not a filter, it's the whole universe.
+  const hasSpaces = spaceFacets.length > 2
+
+  // A persisted space filter can outlive the membership that made it valid — a
+  // left team's id would silently empty the grid. Reset it once the membership
+  // list is in and disagrees.
   useEffect(() => {
-    if (!hydrated || !teamsQuery.data || filters.space === null || filters.space === PERSONAL)
-      return
+    if (!hydrated || !teamsQuery.data || filters.space === null || filters.space === PERSONAL) return
     if (!teamsQuery.data.some((t) => t.id === filters.space)) {
       update({ space: null, projectId: null })
     }
@@ -201,31 +206,30 @@ export function InboxPage() {
     const inSpace = projects.filter(
       (p) => filters.space === null || (p.teamId ?? PERSONAL) === filters.space
     )
-    const general = projectScope.filter((r) => r.projectId === null).length
+    const general = projectScope.filter((c) => c.projectId === null).length
     const named = inSpace
       .map((p) => ({
         key: p.id,
         label: p.name,
-        count: projectScope.filter((r) => r.projectId === p.id).length,
+        count: projectScope.filter((c) => c.projectId === p.id).length,
       }))
-      // Busiest first: with the list capped, the eight worth showing are the
-      // eight with something in them.
       .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
     return [
       { key: 'all', label: 'All projects', count: projectScope.length },
-      // "General" is the project-less pile. It only earns a row when it has one.
       ...(general > 0 ? [{ key: 'general', label: 'General', count: general }] : []),
       ...named,
     ]
   }, [projects, projectScope, filters.space])
 
-  const openCount = rows.filter((r) => r.status === 'open').length
-  const reviewCount = rows.filter((r) => r.status === 'in_review').length
-  const spaceCount = new Set(rows.map((r) => r.spaceName)).size
+  const hasProjects = projects.length > 0
+
+  // One quiet meta line under the title — mono numbers, not a dashboard.
+  const openCount = cards.filter((c) => c.status === 'open').length
+  const reviewCount = cards.filter((c) => c.status === 'in_review').length
   const summary = [
+    cards.length > 0 ? `${cards.length} available` : null,
     openCount > 0 ? `${openCount} open` : null,
     reviewCount > 0 ? `${reviewCount} in review` : null,
-    spaceCount > 1 ? `across ${spaceCount} spaces` : null,
   ]
     .filter((part): part is string => part !== null)
     .join(' · ')
@@ -233,24 +237,11 @@ export function InboxPage() {
   // No token has ever been minted, so nothing on this account can record yet.
   const needsRecorder = connection.data?.tokenCount === 0
 
-  const railProps = {
-    status: statusFacets,
-    spaces: spaceFacets,
-    projects: projectFacets,
-    filters,
-    onStatus: (key: StatusKey) => update({ status: key }),
-    // A project belongs to exactly one space; carrying the old pick across
-    // would filter the new space down to nothing.
-    onSpace: (key: string) => update({ space: key === 'all' ? null : key, projectId: null }),
-    onProject: (key: string) => update({ projectId: key === 'all' ? null : key }),
-    onSearch: (value: string) => update({ q: value }),
-  }
-
   return (
     <div>
       <header className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4">
         <div>
-          <h1 className="font-display text-4xl font-semibold tracking-tight">Inbox</h1>
+          <h1 className="font-display text-4xl font-semibold tracking-tight">Walkthroughs</h1>
           {summary && <p className="text-muted-foreground mt-2 font-mono text-xs">{summary}</p>}
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -267,208 +258,193 @@ export function InboxPage() {
 
       <ConnectLine lastUsedAt={connection.data?.lastUsedAt ?? null} />
 
-      <div className="mt-8 lg:grid lg:grid-cols-[220px_1fr] lg:gap-10">
-        <aside className="hidden lg:sticky lg:top-8 lg:block lg:self-start">
-          <FilterRail {...railProps} />
-        </aside>
-        <div className="mb-6 lg:hidden">
-          <FilterChips {...railProps} />
+      <div className="border-border mt-8 flex flex-wrap items-center gap-x-4 gap-y-3 border-t pt-5">
+        <div className="w-full sm:w-56">
+          <Input
+            type="search"
+            value={filters.q}
+            onChange={(event) => update({ q: event.target.value })}
+            placeholder="Search"
+            aria-label="Search walkthroughs"
+            className="h-9"
+          />
         </div>
 
-        <div className="min-w-0">
-          {inbox.isPending ? (
-            <SkeletonRows />
-          ) : inbox.isError ? (
-            <p className="border-border border-t py-8 text-sm">
-              <span className="text-destructive">Could not load the inbox.</span>{' '}
-              <button
-                type="button"
-                onClick={() => void inbox.refetch()}
-                className="text-primary underline underline-offset-4">
-                try again
-              </button>
-            </p>
-          ) : rows.length === 0 ? (
-            <FirstWalkthroughGuide />
-          ) : visible.length === 0 ? (
-            <p className="text-muted-foreground border-border border-t py-10 text-sm">
-              nothing here under these filters ·{' '}
-              <button
-                type="button"
-                onClick={() => {
-                  setFilters(CLEARED_FILTERS)
-                  saveFilters(CLEARED_FILTERS)
-                }}
-                className="text-primary underline underline-offset-4">
-                clear filters
-              </button>
-            </p>
-          ) : (
-            <ul className="divide-border border-border divide-y border-t">
-              {visible.map((row) => (
-                <li key={row.id}>
-                  <Row row={row} hydrated={hydrated} showSpaceChip={filters.space === null} />
-                </li>
-              ))}
-            </ul>
+        <StatusSegments
+          value={filters.status}
+          count={statusCount}
+          onPick={(key) => update({ status: key })}
+        />
+
+        <div className="flex items-center gap-2 sm:ml-auto">
+          {hasSpaces && (
+            <FacetSelect
+              label="Space"
+              options={spaceFacets}
+              value={filters.space ?? 'all'}
+              onPick={(key) => update({ space: key === 'all' ? null : key, projectId: null })}
+            />
+          )}
+          {hasProjects && (
+            <FacetSelect
+              label="Project"
+              options={projectFacets}
+              value={filters.projectId ?? 'all'}
+              onPick={(key) => update({ projectId: key === 'all' ? null : key })}
+            />
           )}
         </div>
+      </div>
+
+      <div className="mt-6">
+        {inbox.isPending ? (
+          <SkeletonGrid />
+        ) : inbox.isError ? (
+          <p className="py-10 text-sm">
+            <span className="text-destructive">Could not load your walkthroughs.</span>{' '}
+            <button
+              type="button"
+              onClick={() => void inbox.refetch()}
+              className="text-primary underline underline-offset-4">
+              try again
+            </button>
+          </p>
+        ) : cards.length === 0 ? (
+          <FirstWalkthroughGuide />
+        ) : visible.length === 0 ? (
+          <p className="text-muted-foreground py-10 text-sm">
+            nothing here under these filters ·{' '}
+            <button
+              type="button"
+              onClick={() => update({ status: 'all', space: null, projectId: null, q: '' })}
+              className="text-primary underline underline-offset-4">
+              clear filters
+            </button>
+          </p>
+        ) : (
+          <ul className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            {visible.map((card) => (
+              <li key={card.id} className="min-w-0">
+                <WalkthroughCard card={card} hydrated={hydrated} showSpace={hasSpaces} />
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </div>
   )
 }
 
-/** What a row needs to draw itself — the inbox payload, structurally. */
-type InboxRow = Filterable & {
-  id: string
-  kind: string
-  recordedAt: string
-  durationMs: number
-  errorCount: number
-  takeCount: number
-  projectName: string | null
-  spaceName: string
-  uploadedByName: string | null
-}
-
-function Row({
-  row,
-  hydrated,
-  showSpaceChip,
+/** The status filter as a segmented control; each segment carries its mono count. */
+function StatusSegments({
+  value,
+  count,
+  onPick,
 }: {
-  row: InboxRow
-  hydrated: boolean
-  showSpaceChip: boolean
+  value: StatusKey
+  count: (key: StatusKey) => number
+  onPick: (key: StatusKey) => void
 }) {
-  const trpc = useTRPC()
-  const queryClient = useQueryClient()
-  const [editing, setEditing] = useState(false)
-
-  const rename = useMutation(
-    trpc.walkthroughs.rename.mutationOptions({
-      onSettled: () => {
-        // Every surface that lists titles — the inbox itself, the flat list, and
-        // the walkthrough it belongs to.
-        queryClient.invalidateQueries({ queryKey: trpc.walkthroughs.inbox.queryKey() })
-        queryClient.invalidateQueries({ queryKey: trpc.walkthroughs.list.queryKey() })
-        queryClient.invalidateQueries({
-          queryKey: trpc.walkthroughs.get.queryKey({ walkthroughId: row.id }),
-        })
-      },
-    })
-  )
-
-  // The in-flight title stands in until the refetch lands, so the row reads as
-  // renamed the instant it's submitted and snaps back on its own if it fails.
-  const title = rename.isPending ? (rename.variables?.title ?? row.title) : row.title
-
-  function commit(next: string) {
-    const trimmed = next.trim()
-    setEditing(false)
-    if (!trimmed || trimmed === row.title) return
-    rename.mutate({ walkthroughId: row.id, title: trimmed })
-  }
-
-  const ink = statusInk(row.status)
-  const when = hydrated ? relativeTime(row.recordedAt, Date.now()) : shortDate(row.recordedAt)
-
-  const meta: ReactNode[] = [
-    // A human handback is a video for a person, not agent work — say so where
-    // the row's other facts live, in the same quiet chip voice as the space.
-    ...(row.kind === 'human'
-      ? [<span className="ring-border rounded px-1.5 ring-1 ring-inset">video</span>]
-      : []),
-    showSpaceChip ? (
-      <span className="ring-border rounded px-1.5 ring-1 ring-inset">{row.spaceName}</span>
-    ) : (
-      row.spaceName
-    ),
-    row.projectName ?? 'General',
-    ...(row.origin ? [row.origin] : []),
-    plural(row.takeCount, 'take'),
-    mmss(row.durationMs),
-    ...(row.errorCount > 0 ? [plural(row.errorCount, 'error')] : []),
-    ...(row.uploadedByName ? [`by ${row.uploadedByName}`] : []),
-  ]
-
   return (
-    // A stretched Link covers the row for navigation (an <a> can't hold the
-    // rename button or the input), and the interactive controls sit above it
-    // with `relative z-10`. While editing the overlay is gone, so nothing here
-    // navigates by accident.
-    <div className="hover:bg-muted/40 group relative -mx-3 rounded-sm px-3 py-4 transition-colors">
-      {!editing && (
-        <Link to={`/walkthroughs/${row.id}`} aria-label={title} className="absolute inset-0" />
-      )}
-      <div className="flex items-baseline gap-3">
-        <span className="flex shrink-0 items-center gap-1.5">
-          <span className={cn('size-[7px] shrink-0 rounded-full', ink.dot)} />
-          <span className={cn('text-xs font-medium', ink.text)}>{ink.label}</span>
-        </span>
-        {editing ? (
-          <form
-            className="relative z-10 flex min-w-0 flex-1 items-center gap-2"
-            onSubmit={(e) => {
-              e.preventDefault()
-              const input = e.currentTarget.elements.namedItem('title')
-              commit(input instanceof HTMLInputElement ? input.value : '')
-            }}>
-            <input
-              name="title"
-              autoFocus
-              defaultValue={title}
-              aria-label="Title"
-              className="border-input bg-background focus-visible:border-ring min-w-0 flex-1 rounded-md border px-2 py-1 text-sm font-medium outline-none"
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') setEditing(false)
-              }}
-            />
-            <button
-              type="submit"
-              className="text-primary shrink-0 text-xs font-medium underline underline-offset-4">
-              Save
-            </button>
-            <button
-              type="button"
-              className="text-muted-foreground hover:text-foreground shrink-0 text-xs"
-              onClick={() => setEditing(false)}>
-              Cancel
-            </button>
-          </form>
-        ) : (
-          <>
-            <span className="min-w-0 flex-1 truncate font-medium">{title}</span>
-            <button
-              type="button"
-              // Hover-revealed on a fine pointer to keep rows quiet; always
-              // shown where there is no hover (touch), so it stays reachable.
-              className="text-muted-foreground hover:text-foreground relative z-10 shrink-0 text-xs opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 [@media(pointer:coarse)]:opacity-100"
-              onClick={() => setEditing(true)}>
-              Rename
-            </button>
-            <span className="text-muted-foreground shrink-0 font-mono text-xs">{when}</span>
-          </>
-        )}
-      </div>
-      <p className="text-muted-foreground mt-1.5 truncate font-mono text-xs">
-        {meta.map((part, i) => (
-          <Fragment key={i}>
-            {i > 0 && <span className="text-border"> · </span>}
-            {part}
-          </Fragment>
-        ))}
-      </p>
-      {rename.error && <p className="text-destructive mt-1 text-xs">{rename.error.message}</p>}
+    <div className="border-border inline-flex items-center rounded-md border p-0.5">
+      {STATUS_ORDER.map((key) => {
+        const active = value === key
+        return (
+          <button
+            key={key}
+            type="button"
+            onClick={() => onPick(key)}
+            className={cn(
+              'flex items-center gap-1.5 rounded-sm px-2.5 py-1 text-sm whitespace-nowrap transition-colors',
+              active
+                ? 'bg-cobalt-wash text-accent-foreground font-medium'
+                : 'text-muted-foreground hover:text-foreground'
+            )}>
+            {STATUS_LABELS[key]}
+            <span className="font-mono text-[11px] tabular-nums opacity-60">{count(key)}</span>
+          </button>
+        )
+      })}
     </div>
   )
 }
 
 /**
- * The one thing worth interrupting the inbox for: an inbox full of walkthroughs
- * is useless if the person who fixes them can't reach it. Shown until an agent
- * has actually called in (`lastUsedAt`), then gone for good — and dismissible in
- * the meantime, because a banner you can't close is a banner people learn to
- * hate. It is one line, not a box: the inbox below it is the page.
+ * A quiet text selector — label + current value + chevron, opening a popover of
+ * facet rows. Never a native `<select>` (ui.md; the viewer's project picker set
+ * the pattern).
+ */
+function FacetSelect({
+  label,
+  options,
+  value,
+  onPick,
+}: {
+  label: string
+  options: FacetOption[]
+  value: string
+  onPick: (key: string) => void
+}) {
+  const { open, setOpen, ref } = usePopover()
+  const current = options.find((o) => o.key === value) ?? options[0]
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        aria-label={`Filter by ${label.toLowerCase()}`}
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        className="border-border hover:bg-accent/50 flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-sm transition-colors">
+        <span className="text-muted-foreground font-mono text-[10px] tracking-widest uppercase">
+          {label}
+        </span>
+        <span className="max-w-[10rem] truncate">{current?.label}</span>
+        <ChevronDown className="text-muted-foreground size-3.5" />
+      </button>
+      {open && (
+        <div className="bg-card border-border absolute right-0 z-20 mt-1 max-h-80 w-56 overflow-y-auto rounded-md border p-1 shadow-sm">
+          {options.map((option) => {
+            const active = option.key === value
+            const empty = option.count === 0 && !active
+            return (
+              <button
+                key={option.key}
+                type="button"
+                onClick={() => {
+                  onPick(option.key)
+                  setOpen(false)
+                }}
+                className={cn(
+                  'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors',
+                  active
+                    ? 'bg-cobalt-wash text-accent-foreground font-medium'
+                    : empty
+                      ? 'text-muted-foreground/60 hover:bg-muted/60'
+                      : 'hover:bg-muted/60'
+                )}>
+                <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                <span
+                  className={cn(
+                    'shrink-0 font-mono text-xs tabular-nums',
+                    active ? 'text-accent-foreground' : 'text-muted-foreground'
+                  )}>
+                  {option.count}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * The one thing worth interrupting for: a wall of walkthroughs is useless if the
+ * person who fixes them can't reach it. Shown until an agent has actually called
+ * in (`lastUsedAt`), then gone for good — dismissible in the meantime. One line,
+ * not a box: the grid below it is the page.
  */
 const DISMISS_KEY = 'handback.connectBannerDismissed'
 
@@ -543,17 +519,17 @@ function FirstWalkthroughGuide() {
   )
 }
 
-function SkeletonRows() {
+function SkeletonGrid() {
   return (
-    <ul className="divide-border border-border divide-y border-t">
-      {[0, 1, 2].map((i) => (
-        <li key={i} className="space-y-2 py-4">
-          <div className="flex items-center gap-3">
+    <ul className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+      {[0, 1, 2, 3, 4, 5].map((i) => (
+        <li key={i} className="border-border bg-card overflow-hidden rounded-md border">
+          <div className="bg-muted aspect-video w-full animate-pulse" />
+          <div className="space-y-2 p-4">
             <div className="bg-muted h-3 w-14 animate-pulse rounded" />
-            <div className="bg-muted h-4 flex-1 animate-pulse rounded" />
-            <div className="bg-muted h-3 w-12 animate-pulse rounded" />
+            <div className="bg-muted h-4 w-4/5 animate-pulse rounded" />
+            <div className="bg-muted h-3 w-2/5 animate-pulse rounded" />
           </div>
-          <div className="bg-muted h-3 w-2/5 animate-pulse rounded" />
         </li>
       ))}
     </ul>

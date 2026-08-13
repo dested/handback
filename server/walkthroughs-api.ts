@@ -21,12 +21,19 @@ import { memberTeamIds, spaceId } from './access'
 import { isPlatformAdmin } from './features'
 import { log } from './logger'
 import { prisma } from './prisma'
+import { expiryFor } from './retention'
 import { getObjectText, walkthroughKey, presignGet } from './storage'
 
 export const WALKTHROUGH_STATUSES = ['open', 'in_review', 'resolved'] as const
 export type WalkthroughStatus = (typeof WALKTHROUGH_STATUSES)[number]
 
-export type TokenAuth = { userId: string; tokenId: string; isAdmin: boolean }
+export type TokenAuth = {
+  userId: string
+  tokenId: string
+  isAdmin: boolean
+  // Carried so ingest's write/cloud gates don't run an extra query per request.
+  emailVerified: boolean
+}
 
 /** The ownership pair every space-scoped row carries — exactly one side is set. */
 type SpaceRef = { teamId: string | null; userId: string | null }
@@ -62,7 +69,7 @@ export async function authenticateToken(header: string | undefined): Promise<Tok
   const tokenHash = createHash('sha256').update(raw).digest('hex')
   const token = await prisma.apiToken.findUnique({
     where: { tokenHash },
-    include: { user: { select: { email: true, isAdmin: true } } },
+    include: { user: { select: { email: true, isAdmin: true, emailVerified: true } } },
   })
   if (!token || token.revokedAt) return null
   prisma.apiToken
@@ -72,6 +79,7 @@ export async function authenticateToken(header: string | undefined): Promise<Tok
     userId: token.userId,
     tokenId: token.id,
     isAdmin: isPlatformAdmin(token.user),
+    emailVerified: token.user.emailVerified,
   }
 }
 
@@ -266,7 +274,14 @@ export async function setWalkthroughStatus(
   if (!walkthrough || !(await inScope(auth, walkthrough))) return null
   await prisma.walkthrough.update({
     where: { id: walkthrough.id },
-    data: { status, resolvedAt: status === 'resolved' ? new Date() : null },
+    // resolved schedules auto-deletion; flipping back off resolved clears it.
+    // Identical to the tRPC setStatus path so an MCP write and a UI write behave
+    // the same.
+    data: {
+      status,
+      resolvedAt: status === 'resolved' ? new Date() : null,
+      expiresAt: expiryFor(status),
+    },
   })
   log.info(`[walkthroughs] ${walkthrough.slug} (${walkthrough.id}) → ${status}`)
   return { slug: walkthrough.slug }

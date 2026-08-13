@@ -12,6 +12,7 @@ import { mcpRouter } from './server/mcp'
 import { prisma } from './server/prisma'
 import { latestRecorderRelease } from './server/releases'
 import { appRouter } from './server/router'
+import { startRetentionSweep } from './server/retention'
 import { presignGet } from './server/storage'
 import { createContext } from './server/trpc'
 
@@ -34,6 +35,23 @@ async function createServer() {
   // proxy's address for every request, which would collapse every caller into a
   // single rate-limit bucket.
   app.set('trust proxy', 1)
+
+  // Baseline security headers on every response. No CSP in this pass — the SSR
+  // inline state script needs a nonce before a policy can be strict, and that's
+  // out of scope here. Permissions-Policy deliberately leaves microphone and
+  // display-capture alone: the recorder pages are the whole product and need
+  // them. HSTS only goes out over HTTPS (Caddy terminates TLS; the container
+  // sees the forwarded proto), never on a plain-http dev request.
+  app.use((req, res, next) => {
+    res.setHeader('X-Frame-Options', 'DENY')
+    res.setHeader('X-Content-Type-Options', 'nosniff')
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
+    res.setHeader('Permissions-Policy', 'camera=(), geolocation=()')
+    if (req.secure || req.headers['x-forwarded-proto'] === 'https') {
+      res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
+    }
+    next()
+  })
 
   // One tidy log line per request (status + timing), asset noise filtered out.
   app.use(requestLogger(isProd))
@@ -99,8 +117,14 @@ async function createServer() {
       router: appRouter,
       createContext,
       onError({ error, type, path: trpcPath, input }) {
+        // Share tokens and file paths ride in these inputs; keep them out of the
+        // logs. Every other procedure's input still logs as-is for debugging.
+        const loggedInput =
+          trpcPath === 'walkthroughs.shared' || trpcPath === 'walkthroughs.fileUrl'
+            ? '[redacted]'
+            : input
         log.error(`[trpc] ${type} ${trpcPath ?? '<unknown>'} ${error.code} — ${error.message}`, {
-          input,
+          input: loggedInput,
         })
         if (error.code === 'INTERNAL_SERVER_ERROR' && error.stack) {
           console.error(error.stack)
@@ -202,6 +226,9 @@ async function createServer() {
       databaseUrl: env.DATABASE_URL,
       routes: ['/', '/sign-in', '/sign-up', '/connect', '/healthz', '/api/trpc', '/mcp'],
     })
+    // Hourly retention sweep (+ one run 30s after boot). One ECS task, same
+    // single-process assumption as the in-memory rate limiter.
+    startRetentionSweep()
   })
 }
 

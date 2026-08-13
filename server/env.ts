@@ -8,6 +8,10 @@ const schema = z.object({
   S3_BUCKET: z.string().min(1),
   AWS_ACCESS_KEY_ID: z.string().min(1),
   AWS_SECRET_ACCESS_KEY: z.string().min(1),
+  // Point the S3 client at a non-AWS S3-compatible endpoint. Unset = plain AWS
+  // S3 (the current behavior). R2: set S3_ENDPOINT=https://<account>.r2.cloudflarestorage.com
+  // and put the R2 keypair in AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY.
+  S3_ENDPOINT: z.string().url().optional(),
   // Optional on purpose: without it /api/ingest/transcribe answers 503 and the
   // recorder falls back to its on-device Whisper pass. A dev without a Groq key
   // gets the slow path, not a boot crash.

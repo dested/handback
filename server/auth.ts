@@ -4,9 +4,16 @@ import { prisma } from './prisma'
 import { env } from './env'
 import { resetPasswordEmail, sendEmail, verifyEmail } from './email'
 
+// Cookies go out Secure only when we're actually served over HTTPS — otherwise a
+// plain-http dev session can never set its cookie and sign-in silently fails.
+const secureCookies = env.BETTER_AUTH_URL.startsWith('https')
+
 export const auth = betterAuth({
   baseURL: env.BETTER_AUTH_URL,
   secret: env.BETTER_AUTH_SECRET,
+  // Pin the one origin we serve from, rather than trusting better-auth's inferred
+  // default — a request whose Origin isn't this is rejected before it touches auth.
+  trustedOrigins: [env.BETTER_AUTH_URL],
   database: prismaAdapter(prisma, {
     provider: 'postgresql',
   }),
@@ -48,6 +55,19 @@ export const auth = betterAuth({
       '/sign-up/email': { window: 60 * 60, max: 5 },
       '/forget-password': { window: 60 * 60, max: 5 },
       '/reset-password': { window: 60 * 60, max: 10 },
+    },
+  },
+  advanced: {
+    // Force Secure over HTTPS (better-auth only defaults it on in production).
+    useSecureCookies: secureCookies,
+    // Pin the session cookie's attributes rather than leaning on inferred
+    // defaults: Lax survives the top-level nav back from an email link while
+    // still blocking cross-site sends, Secure tracks the scheme, and HttpOnly
+    // keeps the cookie out of any script.
+    defaultCookieAttributes: {
+      sameSite: 'lax',
+      secure: secureCookies,
+      httpOnly: true,
     },
   },
 })

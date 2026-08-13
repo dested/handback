@@ -203,6 +203,36 @@ properties in `extension/src/sidepanel/styles.css` (no Tailwind there).
   centered Download link, transcript, and the one-line sign-off
   "Recorded with Handback → handback.dev". No controls, no metadata soup.
 
+## Walkthroughs grid (`/app`)
+
+`/app` is a **card grid**, not a list — "the walkthroughs available to you," never
+an inbox or a queue. Responsive CSS grid (1 col phone / 2 mid / 3 wide), every
+grid item `min-w-0` (the landing gotcha — mono lines never wrap). Card anatomy
+(`src/components/inbox/card.tsx`):
+
+- **Visual header** (aspect-video, hairline bottom rule). Agent-kind walkthroughs
+  with frames show a **real keyframe thumbnail** (`object-cover`) with a small
+  mono duration pill bottom-right (white/backdrop-blur, hairline). Human handbacks
+  and frameless walkthroughs get a **paper title-card**, never a grey box: paper
+  ground, a hairline inner frame, a mono small-caps kind label
+  (`For a person` / `Screen recording`) over the duration set large in Fraunces —
+  the duration is the hero so the placeholder reads as a designed cover.
+- **Body**: status chip (7px dot + word in the fixed ink) with the ⋯ menu on the
+  right; Fraunces title (2-line clamp); a mono `space · project` line; a mono
+  footer of `uploader · time` left and `duration · N err · Nd` (expiry) right.
+- The **whole card is a stretched `<Link>`**; the only thing above it is the ⋯
+  menu, whose single job is **Rename** — it arms the inline title editor in the
+  card body (usePopover from `viewer/overflow-menu`), no native select, no
+  `confirm()`.
+
+The **filter toolbar** is a light row over a hairline, not a rail: a search
+input, the status filter as a **segmented control** (each segment carries its
+mono count), and quiet **Space/Project popover selects** (label + value +
+chevron) that appear only when the account has more than one space / any
+projects. Summary counts are one quiet mono meta line under the "Walkthroughs"
+title (`N available · N open · N in review`), never a dashboard row. Thumbnails
+come from `walkthroughs.inbox`'s `thumbUrl` (one presigned keyframe per card).
+
 ## Don'ts
 
 - No dark mode, no `.dark`, no `color-scheme: dark`.

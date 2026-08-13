@@ -2,6 +2,66 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-08-12 — /app reframed: "Walkthroughs" card grid, no more inbox
+Asked: stop making /app an inbox — it's the walkthroughs available to you; cards not a list, "be
+cool, be nicer".
+Reframed /app from "Inbox" to **Walkthroughs** everywhere user-facing (header, nav label +
+wordmark aria + marketing "Open Handback" in layout.tsx, empty state kept warm). Rebuilt app.tsx
+as a responsive **card grid** (1/2/3 col, every item `min-w-0`) with a light filter toolbar:
+search + status **segmented control** w/ mono counts + Space/Project **popover selects** (usePopover,
+no native `<select>`) that appear only when >1 space / any projects. Same single `walkthroughs.inbox`
+query + client-side filtering; default status flipped `attention`→`all` (a collection, not a queue).
+New `src/components/inbox/card.tsx`: keyframe thumbnail for agent-kind-with-frames (mono duration
+pill) else a paper title-card (kind + big Fraunces duration); status chip, space·project, uploader·time,
+mono duration/errors/expiry; whole-card stretched Link; per-card ⋯ menu → inline Rename.
+Server: `walkthroughs.inbox` now returns `thumbUrl` per item — one presigned GET (local HMAC, no S3
+round trip) for the first frame file of the first take, selected via a single
+`walkthroughFile.findMany({ where: path contains '/frames/', distinct: ['walkthroughId'],
+orderBy: [walkthroughId, path] })` (DISTINCT ON — no N+1, no loading every file); human kind / no
+frames → null. Deleted `src/components/inbox/rail.tsx`.
+tsc + build green. e2e NOT run — the /app-flow screenshot needs re-baselining (`test:e2e:update`).
+Touched: server/router.ts, src/app/app.tsx, src/app/layout.tsx, src/components/inbox/card.tsx (new),
+cliffnotes.md, ui.md; deleted src/components/inbox/rail.tsx.
+
+## 2026-08-12 — Go-wide wave 2: auth hardening + free-tier entitlements (server-side)
+Asked: per-USER cost budgets, email-verification gates, token cap, tier/first-run magic, cookie
+pinning, error-log redaction (audit fix-list items 2/5/7/8).
+Built prisma `MonthlyUsage` (per-user/month meter, `@@unique([userId,month])`); server/limits.ts
+(FREE 900s / PRO 72000s transcribe, PRO 1000 polish, MAX_ACTIVE_TOKENS 10, `monthKey` UTC);
+`userIsPro` + `pro` feature in features.ts; server/usage.ts (first-walkthrough magic = zero finalized
+uploads → unmetered; admins unmetered; free/pro caps, atomic reserve in a tx; `cloudStatus` read).
+Wired ingest.ts: /transcribe estimates seconds from WAV bytes (÷32000) then reserves → 429; /polish
+reserves → 429; declare + both AI passes gate on token owner's emailVerified (admins exempt, reads
+open); GET /context now returns `cloud:{transcribeRemainingSeconds,polishAllowed,firstWalkthroughMagic}`.
+tokens.create: verified-email FORBIDDEN gate + MAX_ACTIVE_TOKENS PRECONDITION_FAILED cap. TokenAuth
+carries emailVerified (one select, no extra query). auth.ts: trustedOrigins pinned + advanced cookie
+attrs (lax/secure-on-https/httpOnly). server.ts onError redacts input for walkthroughs.shared/fileUrl.
+tsc + build green; db:generate only (NO db push — MonthlyUsage table not yet created on any DB).
+Touched: prisma/schema.prisma, server/{limits,usage,features,walkthroughs-api,ingest,router,auth}.ts, server.ts
+
+## 2026-08-12 — Go-wide wave 1: retention, cost levers, hardening (2 Opus builders)
+Asked: greenlight the audit fixes — expiry, R2, bitrate throttle, headers, privacy transparency.
+Built server/retention.ts (resolved→30d expiry via expiryFor in both status paths, 14d human-raw
+purge post-render, 7d unfinalized reap, hourly S3-first sweep) + Keep control + expires-in-Nd UI;
+cli/backfill-expiry.ts (one-shot, NOT run on prod yet); S3_ENDPOINT/R2 support + cli/migrate-storage.ts
+(cutover OWNER-GATED); bitrate throttle mirrored ext 1.8.1 (~1.0→0.45 GB/hr agent; publish pending);
+security headers in server.ts; /privacy retention+processors rewrite; /admin/costs R2 preset +
+throttled fallbacks. tsc + build green; local live run blocked on `db push --accept-data-loss`
+(permission-denied — Sal to run). Wave 2 (verification gates, budgets, token cap) building.
+Touched: server/{retention,storage,env,router}.ts, server.ts, prisma/schema.prisma, cli/{backfill-expiry,migrate-storage}.ts, extension/src/sidepanel/recorder.ts, src/lib/capture/live.ts, src/app/privacy.tsx, src/components/viewer/*, src/app/admin/costs.tsx, cliffnotes.md, decisions.md
+
+## 2026-08-12 — Go-wide prep: cost estimator, security/retention audit, marketing plan
+Asked: real costs + interactive estimator in admin; security audit (can a video leak by URL?) +
+deletion/expiry; a marketing plan.
+Built /admin/costs (admin.costStats live anchors — measured ~1.0 GB/recorded-hr agent-kind on
+prod — unit prices, scenario sliders, tier margins); audit verdict: no URL leak / no IDOR, 5 med
+findings (headers, cost-endpoint abuse, admin-token blast radius, no self-serve deletion,
+unverified email) + retention design in plans/2026-08-12-security-retention-audit.md; marketing
+plan + homepage top-10 (no OG image is launch-blocking) in plans/2026-08-12-marketing-plan.md.
+Pricing + auto-expiry decisions recorded. tsc + build green; /admin/costs unviewed live (.env
+points at prod — flip before `bun run dev`).
+Touched: server/router.ts, src/app/admin/{costs.tsx,layout.tsx}, src/app/routes.tsx, plans/×2, decisions.md, cliffnotes.md
+
 ## 2026-08-12 — Arbitrary section cuts; editor opened to agent-kind walkthroughs
 Asked: "I should be able to just cut out a big section — person mode or not."
 ⇧-drag carve + "cut from here / to here" in-point pair (both commit instantly, no selection

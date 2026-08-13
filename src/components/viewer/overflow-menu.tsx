@@ -82,6 +82,8 @@ export function OverflowMenu({ walkthrough }: { walkthrough: Walkthrough }) {
 
   const setKind = useMutation(trpc.walkthroughs.setKind.mutationOptions({ onSettled: invalidate }))
 
+  const keep = useMutation(trpc.walkthroughs.keep.mutationOptions({ onSettled: invalidate }))
+
   const share = useMutation(
     trpc.walkthroughs.share.mutationOptions({
       onSuccess: (result) => {
@@ -202,6 +204,22 @@ export function OverflowMenu({ walkthrough }: { walkthrough: Walkthrough }) {
                   </button>
                 </>
               )}
+            </>
+          )}
+
+          {/* A resolved walkthrough on a retention clock: Keep cancels the
+              scheduled auto-deletion. Safe and reversible, so it's a plain item,
+              not an armed one. */}
+          {walkthrough.expiresAt && (
+            <>
+              <div className={DIVIDER} />
+              <button
+                type="button"
+                className={ITEM}
+                disabled={keep.isPending}
+                onClick={() => keep.mutate({ walkthroughId: walkthrough.id })}>
+                {keep.isPending ? 'keeping…' : 'Keep — cancel auto-delete'}
+              </button>
             </>
           )}
 

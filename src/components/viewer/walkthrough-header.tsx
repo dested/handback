@@ -19,6 +19,20 @@ import { useCopy } from './use-copy'
 const ITEM =
   'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent/50 disabled:opacity-60'
 
+const DAY_MS = 24 * 60 * 60 * 1000
+
+/**
+ * How soon a resolved walkthrough auto-deletes, for the meta line. Days, ceil;
+ * "expires today" inside the last day. Null when nothing is scheduled. The
+ * header only ever renders client-side (the page shows a skeleton during SSR),
+ * so reading the clock here is hydration-safe.
+ */
+function expiresLabel(expiresAt: string | null): string | null {
+  if (!expiresAt) return null
+  const days = (new Date(expiresAt).getTime() - Date.now()) / DAY_MS
+  return days < 1 ? 'expires today' : `expires in ${Math.ceil(days)}d`
+}
+
 /** What the agent needs to find this walkthrough and report back when it's done. */
 function agentBrief(walkthrough: Walkthrough): string {
   return (
@@ -165,6 +179,7 @@ export function WalkthroughHeader({ walkthrough }: { walkthrough: Walkthrough })
     walkthrough.droppedCount > 0 ? `${walkthrough.droppedCount} dropped from other tabs` : null,
     megabytes(walkthrough.bytes),
     walkthrough.uploadedByName ? `uploaded by ${walkthrough.uploadedByName}` : null,
+    expiresLabel(walkthrough.expiresAt),
   ].filter((part): part is string => part !== null)
 
   return (

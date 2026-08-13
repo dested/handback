@@ -500,6 +500,12 @@ export function PhonePage() {
           clip, distils it into keyframes and a transcript, and files it as a walkthrough your agent
           can read.
         </p>
+        <p className="text-muted-foreground text-xs">
+          Where your recording goes →{' '}
+          <Link to="/privacy#processors" className="text-cobalt hover:underline">
+            /privacy#processors
+          </Link>
+        </p>
       </header>
 
       {phase === 'guide' && (

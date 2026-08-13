@@ -13,6 +13,7 @@ import { AdminTeamPage } from './admin/team'
 import { AdminWalkthroughsPage } from './admin/walkthroughs'
 import { AdminWalkthroughDebugPage } from './admin/walkthrough-debug'
 import { AdminUsagePage } from './admin/usage'
+import { AdminCostsPage } from './admin/costs'
 import { InboxPage } from './app'
 import { ConnectPage } from './connect'
 import { RouteErrorBoundary } from './error-boundary'
@@ -151,6 +152,7 @@ export const routes: RouteObject[] = [
           { path: 'walkthroughs', Component: AdminWalkthroughsPage },
           { path: 'walkthroughs/:walkthroughId', Component: AdminWalkthroughDebugPage },
           { path: 'usage', Component: AdminUsagePage },
+          { path: 'costs', Component: AdminCostsPage },
         ],
       },
       { path: 'dashboard', loader: () => redirect('/app') },
