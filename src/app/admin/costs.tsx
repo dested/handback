@@ -11,12 +11,12 @@ import { ErrorText, Loading, PageHeader, SectionTitle, StatTile, Td, Th, fmtByte
 
 // ---- pricing constants (editable on the page) -------------------------------
 
-// TODO: flip default to R2_PRICES after cutover
+// Defaults are Cloudflare R2 — the live store since the 2026-08-13 cutover.
 const DEFAULT_PRICES = {
-  /** S3 Standard, us-west-2, first 50 TB. */
-  storagePerGbMonth: 0.023,
-  /** S3 data transfer out to the internet — every presigned GET a viewer plays. */
-  egressPerGb: 0.09,
+  /** R2 storage. */
+  storagePerGbMonth: 0.015,
+  /** R2 egress is free — the reason we migrated. */
+  egressPerGb: 0,
   /** Groq whisper-large-v3-turbo, per audio hour. Paid tiers only — free tier is
    *  local-first (on-device transcription), so it never bills this. */
   transcribePerHour: 0.04,
@@ -24,20 +24,20 @@ const DEFAULT_PRICES = {
    *  Paid tiers only — the free tier's one cloud walkthrough + 15 cloud-min/mo cap
    *  keeps its transcribe/polish spend negligible; everything else is local. */
   polishPerHour: 0.07,
-  /** S3 PUT requests — an agent-kind hour uploads ~600–2500 keyframe files. */
-  requestsPerHour: 0.015,
+  /** R2 Class A writes — an agent-kind hour uploads ~600–2500 keyframe files. */
+  requestsPerHour: 0.012,
   /** The ECS task, shared Postgres box, Resend, domains — everything usage-independent. */
   fixedPerMonth: 60,
 }
 
 type Prices = typeof DEFAULT_PRICES
 
-/** Cloudflare R2: cheaper storage, zero egress, ops ≈ noise. The migration candidate. */
-const R2_PRICES: Prices = {
+/** AWS S3 (us-west-2) — what we migrated OFF 2026-08-13. Kept for comparison. */
+const S3_PRICES: Prices = {
   ...DEFAULT_PRICES,
-  storagePerGbMonth: 0.015,
-  egressPerGb: 0,
-  requestsPerHour: 0.012, // Class A $4.50/M vs S3 PUT $5/M — effectively unchanged
+  storagePerGbMonth: 0.023,
+  egressPerGb: 0.09, // data transfer out — every presigned GET a viewer played
+  requestsPerHour: 0.015, // S3 PUT $5/M vs R2 Class A $4.50/M
 }
 
 const RETENTIONS = [
@@ -515,8 +515,8 @@ export function AdminCostsPage() {
             <div className="flex gap-1">
               {(
                 [
-                  ['S3', DEFAULT_PRICES],
-                  ['R2', R2_PRICES],
+                  ['R2', DEFAULT_PRICES],
+                  ['S3', S3_PRICES],
                 ] as const
               ).map(([name, preset]) => {
                 const active =
