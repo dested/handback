@@ -201,7 +201,11 @@ src/
     edit/               editor.tsx — THE transcript-first editor for human handbacks: delete a
                         line to cut its seconds, silence gap chips (veto-able), Tighten slider,
                         EDL preview player (skips cuts live), take ↑/↓ reorder. No timeline
-                        selection — that stays dead (decisions.md 2026-08-01 + 2026-08-12)
+                        selection — that stays dead (decisions.md 2026-08-01 + 2026-08-12) ·
+                        cloud-editor.tsx — the same editor over an UPLOADED walkthrough
+                        (extension human handbacks): downloads raws via presigned GETs, takes
+                        keyed by `take.dir`, renders + attaches via presignEdit/finalizeEdit;
+                        "Tighten & share" / "re-edit this cut" on the viewer
   lib/
     space.tsx           SpaceProvider/useActiveSpace — Personal + teams; active space in
                         localStorage `handback.activeSpace` ('personal' | teamId); never null
@@ -231,7 +235,9 @@ src/
                         though the UI only removes + reorders takes), silence.ts (RMS envelope
                         ∩ no-words → proposed cuts), remux.ts (mediabunny stream-copy so cueless
                         MediaRecorder webm can seek), render.ts (EDL → H.264+AAC final.mp4 via
-                        mediabunny/WebCodecs, hardware encode, odd-dimension canvas fallback)
+                        mediabunny/WebCodecs, hardware encode, odd-dimension canvas fallback),
+                        transcript.ts (edited-clock line re-timing, shared by both send paths),
+                        transfer.ts (XHR GET/PUT with byte progress + 3-try retry)
     trpc.tsx / auth-client.ts / utils.ts
   styles/app.css        ALL design tokens (light only) + .rule/.stamp/.ink-underline utilities
 public/                 manifest.webmanifest (PWA: standalone, share_target, shortcut) · sw.js
@@ -748,6 +754,17 @@ reaches the container on a plain push.
   only where the RMS envelope (adaptive threshold from the take's own distribution — raw audio,
   no NS, every room differs) is quiet AND no padded transcript line overlaps. Words always win.
   Vetoed silence chips stay vetoed across Tighten re-runs (matched by take + ~position).
+- **An extension human handback is raw takes + a promise.** The extension (1.8.0) can't edit
+  and the page can't read its IDB, so it uploads pristine raws (`kind: 'human'`, no frames/
+  report/MANIFEST) and the VIEWER is the editor: `cloud-editor.tsx` → `walkthroughs.presignEdit`
+  (path allowlist EXACTLY `final.mp4|transcript.json|edit.json` — never widen it, those become
+  S3 keys) → PUTs → `finalizeEdit` (recomputes `bytes` from uploaded rows, `durationMs` = the
+  render). Raws stay after the render, so re-edit works — and quota keeps paying for them
+  (deliberate, undecided). `kind` itself is switchable per viewer select (`walkthroughs.setKind`,
+  pure reclassification). File caps are 2 GB/file, 4 GB/walkthrough since 2026-08-12 (512 MB
+  couldn't hold a real 20-minute pristine webm).
+- **Prettier never touches markdown here** — `*.md` is in `.prettierignore` because it rewrote
+  `*`-bearing inline code spans and emphasis across updates.md (recovered). Format code, not prose.
 - **final.mp4 downloads through a second presign.** `presignGet(key, { downloadAs })` signs a
   `ResponseContentDisposition` — the `download` attribute is ignored cross-origin, so the
   Download button needs the URL itself to say attachment. `get`/`shared` return it as
@@ -840,6 +857,12 @@ reaches the container on a plain push.
   mediabunny MP4 render + upload (`final.mp4`/`transcript.json`/`edit.json`), share-on-success.
   Typecheck + build green; **no live browser run** (the `.env`-points-at-prod hazard again) —
   the whole record→edit→render→share loop wants a human at a keyboard.
+- **Done (2026-08-12, night)** — **extension human handback**
+  (`plans/2026-08-12-extension-human-handback.md`, built by an Opus subagent, reviewed): panel
+  "for a person" picker + pristine capture (extension 1.8.0 — REMEMBER: needs
+  `bun run publish:extension`, a push ships only the server), raw-take human uploads,
+  `presignEdit`/`finalizeEdit`/`setKind`, the viewer's cloud editor with re-edit, kind switch
+  select in the controls row. Typecheck/build/extension-build green; still no live run.
 - **Next** — **deploy, then re-test the loop**: `/mcp` and `/connect` only exist locally until the
   next push to `main`, so the command `/connect` prints for handback.dev 404s until then. Sal's
   Drydock/DNS checklist in the rename plan (zone, project, S3 via
@@ -872,3 +895,6 @@ reaches the container on a plain push.
   the two accepted divergences, the pop-out gesture rule.
 - `plans/2026-08-12-human-handback.md` — **done** (code; live run pending). The kind split,
   share links, the transcript-first editor, the mediabunny decision, and the four waves.
+- `plans/2026-08-12-extension-human-handback.md` — **done** (code; live run pending). Record in
+  the extension, resolve on the web: the cloud-bridge argument, the presignEdit contract, the
+  switchable kind.

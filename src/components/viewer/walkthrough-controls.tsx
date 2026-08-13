@@ -44,6 +44,7 @@ export function WalkthroughControls({ walkthrough }: { walkthrough: Walkthrough 
   const assignProject = useMutation(
     trpc.walkthroughs.assignProject.mutationOptions({ onSettled: invalidate })
   )
+  const setKind = useMutation(trpc.walkthroughs.setKind.mutationOptions({ onSettled: invalidate }))
   const remove = useMutation(
     trpc.walkthroughs.delete.mutationOptions({
       onSuccess: () => {
@@ -82,6 +83,7 @@ export function WalkthroughControls({ walkthrough }: { walkthrough: Walkthrough 
   const projectId = assignProject.isPending
     ? (assignProject.variables?.projectId ?? '')
     : (walkthrough.project?.id ?? '')
+  const kind = setKind.isPending ? (setKind.variables?.kind ?? walkthrough.kind) : walkthrough.kind
 
   // Deleting a team's walkthrough is admin-only server-side; your own personal
   // space is always yours to delete from.
@@ -160,6 +162,26 @@ export function WalkthroughControls({ walkthrough }: { walkthrough: Walkthrough 
           </select>
         )}
 
+        {/* Who it's for is a judgement, not a property of the recording — a
+            walkthrough filed for an agent can turn out to be the thing you
+            just want to send someone. Nothing is rewritten either way. */}
+        {canAssign && (
+          <select
+            aria-label="Who this is for"
+            className="border-input bg-background text-foreground rounded-md border px-2 py-1.5 text-sm disabled:opacity-60"
+            value={kind}
+            disabled={setKind.isPending}
+            onChange={(e) =>
+              setKind.mutate({
+                walkthroughId: walkthrough.id,
+                kind: e.target.value === 'human' ? 'human' : 'agent',
+              })
+            }>
+            <option value="agent">for an agent</option>
+            <option value="human">for a person</option>
+          </select>
+        )}
+
         {canAssign && destinations.length > 0 && (
           <select
             aria-label="Move to space"
@@ -180,8 +202,9 @@ export function WalkthroughControls({ walkthrough }: { walkthrough: Walkthrough 
 
         {/* A human handback is FOR a person — the share link is its point, and
             an agent brief would tell an agent to pull a walkthrough that its
-            list deliberately hides. */}
-        {walkthrough.kind !== 'human' && (
+            list deliberately hides. Reads the optimistic `kind`, so flipping the
+            select above takes the brief with it on the same click. */}
+        {kind !== 'human' && (
           <Button variant="outline" onClick={() => copy(agentBrief(walkthrough))}>
             {copied ? 'Copied' : 'Copy agent brief'}
           </Button>

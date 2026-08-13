@@ -6,9 +6,10 @@ import type {
   RecordingFrame,
   ServerLink,
   Session,
+  SessionKind,
   Settings,
 } from '../lib/types';
-import { DEFAULT_SERVER, DEFAULT_SETTINGS, activeLink, linkId } from '../lib/types';
+import { DEFAULT_SERVER, DEFAULT_SETTINGS, activeLink, linkId, sessionKind } from '../lib/types';
 import { fetchContext, spaceProjects, type ServerContext } from '../lib/context';
 import { send } from '../lib/messages';
 import { blobs } from '../lib/db';
@@ -113,7 +114,8 @@ function DestinationPicker({
         className="dest-trigger"
         disabled={disabled}
         onClick={() => setOpen((o) => !o)}
-        aria-label="Destination">
+        aria-label="Destination"
+      >
         <span className="dest-space">{spaceLabel}</span>
         <span className="dest-sep">·</span>
         <span className="dest-proj">{projectLabel}</span>
@@ -139,13 +141,16 @@ function DestinationPicker({
                           type="button"
                           key={r.id || 'general'}
                           className={`dest-opt${on ? ' on' : ''}`}
-                          onClick={() => choose(l, s.teamId, r.id, r.id ? r.name : '')}>
+                          onClick={() => choose(l, s.teamId, r.id, r.id ? r.name : '')}
+                        >
                           <span className="dest-mark" />
                           <span className="dest-opt-name">{r.name}</span>
                         </button>
                       );
                     })}
-                    {here && !ctx && !ctxFailed && <div className="dest-note">loading projects…</div>}
+                    {here && !ctx && !ctxFailed && (
+                      <div className="dest-note">loading projects…</div>
+                    )}
                     {here && ctxFailed && (
                       <div className="dest-note">
                         projects unavailable ·{' '}
@@ -220,6 +225,7 @@ interface Bundle {
 interface Shipped {
   url: string;
   title: string;
+  /** Empty for a human handback: the brief is written for an agent, and this one never meets one. */
   brief: string;
   /** Whether the brief naming the URL made it onto the clipboard without a fresh click. */
   copied: boolean;
@@ -295,6 +301,12 @@ export function App() {
    * Leaving a walkthrough must never be the same gesture as ending one.
    */
   const [browsing, setBrowsing] = useState(false);
+  /**
+   * Who the *next* walkthrough is for, while no walkthrough exists yet to hold
+   * the answer. Once one is open its own `kind` wins — this is only the seed
+   * `recording:start` carries into a fresh session.
+   */
+  const [pendingKind, setPendingKind] = useState<SessionKind>('agent');
   /** Discard is armed: the second click is the one that deletes takes. */
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   /** The gear's panel, under the header. Nothing in here is needed to use the product. */
@@ -355,6 +367,15 @@ export function App() {
   );
 
   /**
+   * Who the recording in front of us is for. An open walkthrough answers for
+   * itself (pre-1.8.0 rows answer 'agent'); with nothing open it is whatever
+   * was picked on the hero.
+   */
+  const kind: SessionKind = session ? sessionKind(session) : pendingKind;
+  /** A walkthrough with a take in it is committed — the two capture differently. */
+  const kindLocked = Boolean(session) && state.recordings.length > 0;
+
+  /**
    * The server uploads go to. A recorder can hold keys to several; everything
    * that used to read `settings.serverUrl` / `settings.apiToken` reads this.
    */
@@ -381,6 +402,24 @@ export function App() {
     setFlash(text);
     window.setTimeout(() => setFlash(null), 1700);
   }, []);
+
+  /**
+   * The kind picker. With a walkthrough open the choice is a mutation on it (the
+   * worker refuses once it holds a take); with none, it is just the seed the
+   * next `recording:start` carries into the session it opens.
+   */
+  const pickKind = useCallback(
+    (next: SessionKind) => {
+      setPendingKind(next);
+      const open = state.activeSessionId;
+      if (!open || state.recordings.length > 0) return;
+      void (async () => {
+        await send({ type: 'session:kind', id: open, kind: next });
+        await refresh();
+      })();
+    },
+    [state.activeSessionId, state.recordings.length, refresh],
+  );
 
   useEffect(() => {
     void refresh();
@@ -597,6 +636,7 @@ export function App() {
       scope.startsWith('http') ? scope : '',
       id,
       Dictation,
+      kind === 'human',
     );
     // Chrome's screen-share dialog is a separate OS surface; the panel would sit
     // blank behind it, so it says what the dialog is waiting on instead.
@@ -619,6 +659,9 @@ export function App() {
         id,
         name: 'Walkthrough',
         origin: r.scope,
+        // Only read when this opens a fresh walkthrough; joining an open one
+        // keeps that one's mode, which is the same mode `kind` already is.
+        kind,
       });
       if (!started?.sessionId) throw new Error('recording:start refused');
     } catch {
@@ -706,6 +749,11 @@ export function App() {
    */
   const buildFileSet = useCallback(
     async (target: Session, recorded: Recording[]): Promise<Bundle> => {
+      // A human handback ships the raw takes and nothing written for a reader:
+      // no frames (there are none), no contact sheets, no report.md, no
+      // MANIFEST. The editing happens in Handback — see the cloud editor — and
+      // it needs exactly the video, the machine-readable take, and the words.
+      const human = sessionKind(target) === 'human';
       const files: GripeFile[] = [];
       const takes: Recording[] = [];
       let missing = 0;
@@ -717,7 +765,7 @@ export function App() {
         const dir = recDirName(rec.index);
         const kept: RecordingFrame[] = [];
         const gridFrames: GridFrame[] = [];
-        for (const f of rec.meta.frames) {
+        for (const f of human ? [] : rec.meta.frames) {
           const blob = await blobs.get(`${rec.id}:frame:${f.index}`);
           if (!blob) {
             missing++;
@@ -746,8 +794,10 @@ export function App() {
       }
       // The summaries describe the whole set, so they go last — written from the takes
       // as shipped, not as recorded.
-      text('report.md', buildReport(target, takes));
-      text('MANIFEST.txt', buildManifestTxt(target, takes));
+      if (!human) {
+        text('report.md', buildReport(target, takes));
+        text('MANIFEST.txt', buildManifestTxt(target, takes));
+      }
       return { files, takes, missing };
     },
     [],
@@ -785,9 +835,14 @@ export function App() {
       target.projectId && projects.some((p) => p.id === target.projectId)
         ? target.projectId
         : undefined;
-    await navigator.clipboard
-      .writeText(agentPrompt(target, undefined, takes.length))
-      .catch(() => {});
+    // A human handback has no agent brief to hand anyone — the artifact is the
+    // video, and the next step is the editor on the web.
+    const human = sessionKind(target) === 'human';
+    if (!human) {
+      await navigator.clipboard
+        .writeText(agentPrompt(target, undefined, takes.length))
+        .catch(() => {});
+    }
     setUploadError(null);
     setShowErrDetail(false);
     setProgress({ phase: 'declare', done: 0, total: 0, bytesDone: 0, bytesTotal: 0 });
@@ -803,13 +858,20 @@ export function App() {
         target,
         bundle.takes,
         bundle.files,
-        { projectId, teamId: teamId || undefined, onProgress: setProgress },
+        {
+          projectId,
+          teamId: teamId || undefined,
+          kind: human ? 'human' : 'agent',
+          onProgress: setProgress,
+        },
       );
-      const brief = agentPrompt(target, url, bundle.takes.length);
-      const copied = await navigator.clipboard
-        .writeText(brief)
-        .then(() => true)
-        .catch(() => false);
+      const brief = human ? '' : agentPrompt(target, url, bundle.takes.length);
+      const copied = brief
+        ? await navigator.clipboard
+            .writeText(brief)
+            .then(() => true)
+            .catch(() => false)
+        : false;
       await send({ type: 'session:close', id: target.id, uploadedUrl: url });
       await refresh();
       setShipped({ url, title: target.name, brief, copied });
@@ -986,7 +1048,9 @@ export function App() {
               </button>
             )}
           </div>
-          {showErrDetail && explained.detail && <pre className="err-detail">{explained.detail}</pre>}
+          {showErrDetail && explained.detail && (
+            <pre className="err-detail">{explained.detail}</pre>
+          )}
         </div>
       )}
       {!uploading && !uploadError && hasContent && whisperLabel && (
@@ -1006,12 +1070,18 @@ export function App() {
       <a className="shipped-link" href={shipped.url} target="_blank" rel="noreferrer">
         {shipped.title || 'the walkthrough'} →
       </a>
-      {shipped.copied ? (
+      {!shipped.brief ? (
+        // A human handback lands raw. Tightening it into the video you send is
+        // the next step, and it happens on the web — the panel doesn't edit.
+        <div className="note">open it in Handback to tighten it up and get a share link</div>
+      ) : shipped.copied ? (
         <div className="note">the brief is on your clipboard — paste it into Claude Code</div>
       ) : (
         <button
           className="link"
-          onClick={() => void navigator.clipboard.writeText(shipped.brief).then(() => say('copied'))}
+          onClick={() =>
+            void navigator.clipboard.writeText(shipped.brief).then(() => say('copied'))
+          }
         >
           copy the brief for Claude Code
         </button>
@@ -1047,7 +1117,11 @@ export function App() {
           <section className="settings">
             <div className="settings-head">
               <span>Settings</span>
-              <button className="icon" title="Close settings" onClick={() => setShowSettings(false)}>
+              <button
+                className="icon"
+                title="Close settings"
+                onClick={() => setShowSettings(false)}
+              >
                 ×
               </button>
             </div>
@@ -1075,7 +1149,8 @@ export function App() {
             <span className="dot pulse" />
             <span className="clock">{mmss(recUpdate.elapsedMs)}</span>
             <span className="stat">
-              {plural(recUpdate.frameCount, 'frame')} kept · {plural(recUpdate.segmentCount, 'line')}
+              {plural(recUpdate.frameCount, 'frame')} kept ·{' '}
+              {plural(recUpdate.segmentCount, 'line')}
             </span>
           </div>
           {/* The words being heard are the reason to look at this block at all, so
@@ -1086,7 +1161,9 @@ export function App() {
             <button
               className="ticker warn"
               title="Open the permission page in a tab"
-              onClick={() => void chrome.tabs.create({ url: chrome.runtime.getURL('micperm.html') })}
+              onClick={() =>
+                void chrome.tabs.create({ url: chrome.runtime.getURL('micperm.html') })
+              }
             >
               microphone blocked — no narration this take · fix it
             </button>
@@ -1108,8 +1185,8 @@ export function App() {
           )}
           {recUpdate.sysAudio === 'silent' && recUpdate.elapsedMs > 5000 && (
             <div className="note">
-              app audio is shared but silent so far — if sound is playing, it isn’t reaching
-              Chrome (check Windows’ default output device)
+              app audio is shared but silent so far — if sound is playing, it isn’t reaching Chrome
+              (check Windows’ default output device)
             </div>
           )}
           {pageDock && <div className="note">draw and stop from the little bar on the page</div>}
@@ -1126,6 +1203,9 @@ export function App() {
           ctx={ctx}
           ctxFailed={ctxFailed}
           shipped={shippedCard}
+          kind={kind}
+          kindLocked={kindLocked}
+          onPickKind={pickKind}
           onRecord={() => void startRecording()}
           onOpenSession={(id) => void switchSession(id)}
           onDeleteSession={(id) =>
@@ -1166,9 +1246,7 @@ export function App() {
               <span className="spacer" />
               {confirmDiscard ? (
                 <span className="confirm">
-                  <span>
-                    discard{hasContent ? ` ${plural(takes.length, 'take')}` : ' this'}?
-                  </span>
+                  <span>discard{hasContent ? ` ${plural(takes.length, 'take')}` : ' this'}?</span>
                   <button className="link danger" onClick={() => void discardSession()}>
                     yes, discard
                   </button>
@@ -1308,9 +1386,9 @@ function MicGate({ onOpenTab, onSkip }: { onOpenTab: () => void; onSkip: () => v
     <section className="gate">
       <h2 className="gate-title">First, turn on your microphone</h2>
       <p className="gate-lead">
-        A walkthrough carries your voice, so Handback needs the mic — just this once.
-        Chrome won't ask inside this panel, so it opens a quick permission tab. Say
-        yes there and recording starts on its own.
+        A walkthrough carries your voice, so Handback needs the mic — just this once. Chrome won't
+        ask inside this panel, so it opens a quick permission tab. Say yes there and recording
+        starts on its own.
       </p>
       <button
         className="gate-cta"
@@ -1414,8 +1492,8 @@ function PickGate({
           wherever it was last time, and with it off the app records silent.
         </p>
         <p className="gate-lead">
-          A <b>window</b> can’t share audio at all — pick the tab, or the entire screen if you
-          need more than one.
+          A <b>window</b> can’t share audio at all — pick the tab, or the entire screen if you need
+          more than one.
         </p>
       </section>
     );
@@ -1424,8 +1502,8 @@ function PickGate({
     <section className="gate">
       <h2 className="gate-title">Nothing picked yet</h2>
       <p className="gate-lead">
-        The share dialog closed without a choice. Pick a screen, window, or tab and your
-        walkthrough starts recording.
+        The share dialog closed without a choice. Pick a screen, window, or tab and your walkthrough
+        starts recording.
       </p>
       <button className="gate-cta" onClick={onRetry}>
         <span className="dot" /> Choose a screen

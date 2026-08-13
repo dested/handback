@@ -143,6 +143,13 @@ export interface Recording {
   meta: RecordingMeta;
 }
 
+/**
+ * Who a walkthrough is FOR, which is the one thing that changes how it is
+ * captured: 'agent' distils (10 fps, keyframes, report.md); 'human' is the
+ * video itself (30 fps, no keyframes, tightened and shared on the web).
+ */
+export type SessionKind = 'agent' | 'human';
+
 export interface Session {
   id: string;
   name: string;
@@ -150,6 +157,12 @@ export interface Session {
   createdAt: number;
   updatedAt: number;
   origin: string;
+  /**
+   * Optional on purpose: every session recorded before 1.8.0 is on disk without
+   * it, and a required field would be a lie about those rows. Read it through
+   * `sessionKind()`, which answers 'agent' for them.
+   */
+  kind?: SessionKind;
   /** How many takes this gripe holds — the next one is `recCount + 1`. Deleting a
    *  take renumbers the rest contiguously, so this is always their count. */
   recCount: number;
@@ -231,6 +244,11 @@ export const DEFAULT_SETTINGS: Settings = {
 /** The id of the link for a server. Kept as a helper so call sites stay uniform. */
 export function linkId(serverUrl: string): string {
   return serverUrl;
+}
+
+/** A session's kind, with the pre-1.8.0 rows that have none reading as 'agent'. */
+export function sessionKind(session: Pick<Session, 'kind'> | null | undefined): SessionKind {
+  return session?.kind === 'human' ? 'human' : 'agent';
 }
 
 export function activeLink(settings: Settings): ServerLink | null {

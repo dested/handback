@@ -195,7 +195,10 @@ function drawCrosshair(ctx: CanvasRenderingContext2D, x: number, y: number, widt
   const arm = r * 2.2;
   ctx.save();
   ctx.lineCap = 'round';
-  for (const [color, lineWidth] of [['rgba(0,0,0,0.6)', r / 2], [COBALT, r / 4.5]] as const) {
+  for (const [color, lineWidth] of [
+    ['rgba(0,0,0,0.6)', r / 2],
+    [COBALT, r / 4.5],
+  ] as const) {
     ctx.strokeStyle = color;
     ctx.lineWidth = lineWidth;
     ctx.beginPath();
@@ -286,6 +289,16 @@ export class Recorder {
     readonly id: string,
     /** The live dictation class. Absent = frames and Whisper only, no interim line. */
     private ticker: TickerCtor | null = null,
+    /**
+     * Pristine capture, for a human handback: the video IS the deliverable, so
+     * ask for 30 fps instead of 10, pin the encoder bitrate to the surface area
+     * instead of Chrome's throwaway default, and never sample a keyframe —
+     * there is no distill, and the sampling loop would only steal CPU from the
+     * encode. Everything else (mix, mic shadow, chunk persistence, recovery) is
+     * identical. Mirrors `src/lib/capture/live.ts`'s flag of the same name;
+     * change one and change the other.
+     */
+    private readonly pristine = false,
   ) {}
 
   // ── lifecycle ───────────────────────────────────────────────────────────
@@ -296,7 +309,7 @@ export class Recorder {
     // box is ticked on a tab or full-screen surface — a window share has no box —
     // so its absence is a normal outcome, surfaced in the HUD, never an error.
     const displayOptions: DisplayOptions = {
-      video: { frameRate: { ideal: 10 } },
+      video: { frameRate: { ideal: this.pristine ? 30 : 10 } },
       audio: { ...RAW_AUDIO },
       systemAudio: 'include',
     };
@@ -338,7 +351,16 @@ export class Recorder {
 
     this.mime = MIME_TYPES.find((type) => MediaRecorder.isTypeSupported(type)) ?? 'video/webm';
     const recorded = new MediaStream([...stream.getVideoTracks(), ...this.mixAudio()]);
-    const recorder = new MediaRecorder(recorded, { mimeType: this.mime });
+    // ~4 bits per pixel per second of captured area: 1080p ≈ 8 Mbps, 1440p ≈
+    // 15 Mbps, clamped so a 4K share doesn't fill the disk. Only in pristine
+    // mode — a distill source is read once for keyframes and never watched.
+    const bitrate = this.pristine
+      ? Math.round(Math.min(16e6, Math.max(6e6, video.videoWidth * video.videoHeight * 4)))
+      : undefined;
+    const recorder = new MediaRecorder(recorded, {
+      mimeType: this.mime,
+      ...(bitrate ? { videoBitsPerSecond: bitrate } : {}),
+    });
     recorder.ondataavailable = (e) => {
       if (!e.data.size) return;
       this.chunks.push(e.data);
@@ -381,18 +403,20 @@ export class Recorder {
       this.dictation.start();
     }
 
-    this.sampleTimer = window.setInterval(() => {
-      // Only replace `pending` when a sample actually starts — a tick that
-      // no-ops against an in-flight sample must not mask the real promise,
-      // or finish() would thin/renumber while that sample is still writing.
-      if (!this.sampling) this.pending = this.sample();
-    }, SAMPLE_MS);
+    if (!this.pristine) {
+      this.sampleTimer = window.setInterval(() => {
+        // Only replace `pending` when a sample actually starts — a tick that
+        // no-ops against an in-flight sample must not mask the real promise,
+        // or finish() would thin/renumber while that sample is still writing.
+        if (!this.sampling) this.pending = this.sample();
+      }, SAMPLE_MS);
+    }
     this.tickTimer = window.setInterval(() => {
       this.pollAudio();
       this.emit();
       this.saveProgress();
     }, 1000);
-    this.pending = this.sample();
+    if (!this.pristine) this.pending = this.sample();
   }
 
   stop(): Promise<RecordingMeta> {
@@ -511,6 +535,8 @@ export class Recorder {
    */
   force(why: 'click' | 'nav', origin?: string) {
     if (!this.stream) return;
+    // A pristine take keeps no frames at all, so there is nothing to force.
+    if (this.pristine) return;
     if (!this.inScope(origin)) return;
     if (why === 'click') {
       const now = Date.now();
@@ -701,7 +727,8 @@ export class Recorder {
     this.dictation = null;
 
     await this.pending;
-    await this.sample(); // the last screen state gets its fair shot through dedup, nothing more
+    // The last screen state gets its fair shot through dedup, nothing more.
+    if (!this.pristine) await this.sample();
 
     const allowed = frameBudget(this.elapsed());
     if (this.frames.length > allowed) {

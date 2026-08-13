@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
-import type { ServerLink, Session, SessionSummary, Settings } from '../lib/types';
+import type { ServerLink, Session, SessionKind, SessionSummary, Settings } from '../lib/types';
 import { spaceName, spaceProjects, type ServerContext } from '../lib/context';
 import { send } from '../lib/messages';
 import { ago, hostOf, mmss, plural } from '../lib/format';
@@ -47,6 +47,14 @@ interface HomeProps {
   ctxFailed: boolean;
   /** The just-handed-over card, when a session closed a moment ago. */
   shipped: ReactNode;
+  /** Who the next take is for — the fork that decides how it is captured. */
+  kind: SessionKind;
+  /**
+   * The open walkthrough already holds a take, so the mode is settled: the two
+   * capture differently and one walkthrough can't hold both.
+   */
+  kindLocked: boolean;
+  onPickKind: (kind: SessionKind) => void;
   onRecord: () => void;
   onOpenSession: (id: string) => void;
   onDeleteSession: (id: string) => void;
@@ -66,6 +74,9 @@ export function Home({
   ctx,
   ctxFailed,
   shipped,
+  kind,
+  kindLocked,
+  onPickKind,
   onRecord,
   onOpenSession,
   onDeleteSession,
@@ -185,13 +196,41 @@ export function Home({
       {shipped}
 
       <section className="hero">
+        {/* Who it's for decides everything downstream — frame rate, whether
+            anything is distilled, where it ends up — so it is the first choice,
+            not a setting. Locked once the open walkthrough holds a take. */}
+        <div className="kindpick" role="radiogroup" aria-label="Who is this recording for?">
+          {(
+            [
+              { value: 'agent', label: 'for an agent' },
+              { value: 'human', label: 'for a person' },
+            ] as const
+          ).map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              role="radio"
+              aria-checked={kind === option.value}
+              className={`kindpick-opt${kind === option.value ? ' on' : ''}`}
+              disabled={kindLocked && kind !== option.value}
+              title={
+                kindLocked ? 'This walkthrough already has a take — its mode is settled' : undefined
+              }
+              onClick={() => onPickKind(option.value)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+
         <button className="rec-hero" onClick={onRecord}>
           <span className="dot" />
-          Record a walkthrough
+          {kind === 'human' ? 'Record a video' : 'Record a walkthrough'}
         </button>
         <p className="hero-sub">
-          Screen + voice. Talk through what's wrong — it becomes a brief your team's agent can act
-          on.
+          {kind === 'human'
+            ? 'Full-rate, full-quality video for a person to watch. Nothing is distilled — you tighten it up in Handback and send a link.'
+            : "Screen + voice. Talk through what's wrong — it becomes a brief your team's agent can act on."}
         </p>
         <p className="hero-keys">alt+shift+D draw on the page</p>
       </section>
@@ -259,7 +298,12 @@ export function Home({
                 the filter — and their counts are the only summary anyone wants. */}
             {feed && feed.length > 0 && (
               <div className="chips">
-                <Chip label="all" n={feed.length} on={status === 'all'} pick={() => setStatus('all')} />
+                <Chip
+                  label="all"
+                  n={feed.length}
+                  on={status === 'all'}
+                  pick={() => setStatus('all')}
+                />
                 {(['open', 'in_review', 'resolved'] as const).map((s) => (
                   <Chip
                     key={s}
@@ -336,7 +380,10 @@ export function Home({
                   </span>
                 </span>
                 {w.errorCount > 0 && (
-                  <span className="wt-err" title="Console errors the page threw while it was recorded">
+                  <span
+                    className="wt-err"
+                    title="Console errors the page threw while it was recorded"
+                  >
                     {w.errorCount} err
                   </span>
                 )}

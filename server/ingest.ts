@@ -64,8 +64,11 @@ const GB = 1024 * 1024 * 1024
 // space quota below is the actual backstop — raise it per customer when someone
 // legitimately needs it. Quota is per space: a user's personal space and each of
 // their teams each get their own allowance.
-const MAX_FILE_BYTES = 2 * GB
-const MAX_WALKTHROUGH_BYTES = 4 * GB
+// Exported because the cloud editor writes into an existing walkthrough over
+// tRPC (`walkthroughs.presignEdit`) rather than through declare, and a second
+// set of numbers is a second set to forget to raise.
+export const MAX_FILE_BYTES = 2 * GB
+export const MAX_WALKTHROUGH_BYTES = 4 * GB
 export const SPACE_QUOTA_BYTES = 20 * GB
 export const SPACE_MAX_WALKTHROUGHS = 500
 

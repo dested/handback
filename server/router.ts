@@ -13,7 +13,12 @@ import {
 import { inviteEmail, sendEmail } from './email'
 import { env } from './env'
 import { isPlatformAdmin, requireAdmin, teamHasFeature, userHasFeature } from './features'
-import { SPACE_MAX_WALKTHROUGHS, SPACE_QUOTA_BYTES } from './ingest'
+import {
+  MAX_FILE_BYTES,
+  MAX_WALKTHROUGH_BYTES,
+  SPACE_MAX_WALKTHROUGHS,
+  SPACE_QUOTA_BYTES,
+} from './ingest'
 import { log } from './logger'
 import { briefFrameLimit, formatWalkthrough } from './mcp-format'
 import { prisma } from './prisma'
@@ -27,6 +32,7 @@ import {
   walkthroughPrefix,
   isSafePath,
   presignGet,
+  presignPut,
 } from './storage'
 import { protectedProcedure, publicProcedure, router } from './trpc'
 import {
@@ -701,6 +707,44 @@ const walkthroughListSelect = {
   _count: { select: { takes: true } },
 } as const
 
+/**
+ * The only paths the in-viewer editor may write, and the whole of what an edit
+ * produces: the render, its transcript on the edited clock, and the EDL that
+ * made it. Everything else about a walkthrough arrives through ingest's declare
+ * — this is a narrow second door for a walkthrough that already exists, so it
+ * is an allowlist rather than `isSafePath`.
+ */
+const EDIT_PATHS = ['final.mp4', 'transcript.json', 'edit.json'] as const
+
+const editPathSchema = z.enum(EDIT_PATHS)
+
+/** Sizes in a refusal are for a person to read, so they are gigabytes. */
+const gbLabel = (bytes: number | bigint) =>
+  `${(Number(bytes) / (1024 * 1024 * 1024)).toFixed(1)} GB`
+
+/**
+ * A walkthrough the caller may attach an edit to: human, finalized, and in a
+ * space they belong to. Read access isn't enough — this writes.
+ */
+async function requireEditable(userId: string, walkthroughId: string) {
+  const g = await prisma.walkthrough.findUnique({
+    where: { id: walkthroughId },
+    select: { id: true, teamId: true, userId: true, kind: true, finalizedAt: true, bytes: true },
+  })
+  if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
+  await requireSpaceAccess(userId, g)
+  if (g.kind !== 'human') {
+    throw new TRPCError({ code: 'BAD_REQUEST', message: 'Only a human handback can be edited' })
+  }
+  if (!g.finalizedAt) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: 'This walkthrough never finished uploading',
+    })
+  }
+  return g
+}
+
 const walkthroughsRouter = router({
   list: protectedProcedure
     .input(
@@ -895,6 +939,30 @@ const walkthroughsRouter = router({
       return { ok: true }
     }),
 
+  /**
+   * Reclassify who a walkthrough is for. Pure metadata — no file is written,
+   * moved or deleted; what changes is who can see it and how this page reads
+   * it. agent→human hides it from every agent list and, if the raw takes are
+   * still there, makes it tightenable. human→agent hands it back to the agents;
+   * a walkthrough with no report.md already degrades to a null report in the
+   * brief rather than breaking one, which is what makes this direction safe.
+   */
+  setKind: protectedProcedure
+    .input(z.object({ walkthroughId: z.string(), kind: z.enum(['agent', 'human']) }))
+    .mutation(async ({ ctx, input }) => {
+      const g = await prisma.walkthrough.findUnique({
+        where: { id: input.walkthroughId },
+        select: { teamId: true, userId: true },
+      })
+      if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
+      await requireSpaceAccess(ctx.session.user.id, g)
+      await prisma.walkthrough.update({
+        where: { id: input.walkthroughId },
+        data: { kind: input.kind },
+      })
+      return { ok: true }
+    }),
+
   /** Same access bar as setStatus — anyone who can see the walkthrough can title it. */
   rename: protectedProcedure
     .input(z.object({ walkthroughId: z.string(), title: z.string().trim().min(1).max(300) }))
@@ -1023,6 +1091,138 @@ const walkthroughsRouter = router({
         data: { shareToken: null, sharedAt: null },
       })
       return { ok: true }
+    }),
+
+  /**
+   * Presigned PUTs for the artifacts the in-viewer editor produces. The mirror
+   * of ingest's declare, one walkthrough down: same per-file cap, same
+   * per-walkthrough cap, same space quota, same `ContentLength`-signed PUT so
+   * S3 rejects an upload that doesn't match what was declared.
+   *
+   * Rows go back to 'pending' as they are re-declared, which is deliberate:
+   * between this call and `finalizeEdit` the object in the bucket is being
+   * overwritten, and a viewer pointed at it would be pointed at half a file.
+   */
+  presignEdit: protectedProcedure
+    .input(
+      z.object({
+        walkthroughId: z.string(),
+        files: z
+          .array(
+            z.object({
+              path: editPathSchema,
+              size: z.number().int().min(1).max(MAX_FILE_BYTES),
+              contentType: z.string().min(1).max(120),
+            })
+          )
+          .min(1)
+          .max(EDIT_PATHS.length),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const g = await requireEditable(ctx.session.user.id, input.walkthroughId)
+      const space: SpaceOwner = { teamId: g.teamId, userId: g.userId }
+
+      const paths = input.files.map((f) => f.path)
+      if (new Set(paths).size !== paths.length) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Duplicate path' })
+      }
+
+      // What the walkthrough will weigh once these land: everything already
+      // uploaded that this call is *not* replacing, plus what it declares.
+      const replacing = new Set<string>(paths)
+      const existing = await prisma.walkthroughFile.findMany({
+        where: { walkthroughId: g.id, status: 'uploaded' },
+        select: { path: true, size: true },
+      })
+      const keptBytes = existing
+        .filter((f) => !replacing.has(f.path))
+        .reduce((sum, f) => sum + f.size, 0)
+      const nextBytes = keptBytes + input.files.reduce((sum, f) => sum + f.size, 0)
+      if (nextBytes > MAX_WALKTHROUGH_BYTES) {
+        throw new TRPCError({
+          code: 'PAYLOAD_TOO_LARGE',
+          message: `This walkthrough would be ${gbLabel(nextBytes)}; the limit is ${gbLabel(MAX_WALKTHROUGH_BYTES)}`,
+        })
+      }
+
+      // Quota is per space and counted after this write, so a re-edit doesn't
+      // pay twice for the render it is replacing.
+      const stored = await prisma.walkthrough.aggregate({
+        where: spaceWhere(space),
+        _sum: { bytes: true },
+      })
+      const otherBytes = (stored._sum.bytes ?? 0n) - g.bytes
+      if (otherBytes + BigInt(nextBytes) > BigInt(SPACE_QUOTA_BYTES)) {
+        throw new TRPCError({
+          code: 'PAYLOAD_TOO_LARGE',
+          message: `Storage quota reached: this space holds ${gbLabel(otherBytes)} of ${gbLabel(SPACE_QUOTA_BYTES)}.`,
+        })
+      }
+
+      const uploads: Array<{ path: string; contentType: string; url: string }> = []
+      for (const f of input.files) {
+        await prisma.walkthroughFile.upsert({
+          where: { walkthroughId_path: { walkthroughId: g.id, path: f.path } },
+          create: {
+            walkthroughId: g.id,
+            path: f.path,
+            size: f.size,
+            contentType: f.contentType,
+            status: 'pending',
+          },
+          update: { size: f.size, contentType: f.contentType, status: 'pending' },
+        })
+        uploads.push({
+          path: f.path,
+          contentType: f.contentType,
+          url: await presignPut(
+            walkthroughKey(spaceId(space), g.id, f.path),
+            f.contentType,
+            f.size
+          ),
+        })
+      }
+      return { walkthroughId: g.id, uploads }
+    }),
+
+  /**
+   * The other half: the PUTs landed, so the rows become real, the walkthrough's
+   * duration becomes the render's (the inbox should read as the video someone
+   * will watch, not the raw takes it was cut from), and `bytes` is recomputed
+   * from what is actually uploaded rather than adjusted by a delta.
+   */
+  finalizeEdit: protectedProcedure
+    .input(
+      z.object({
+        walkthroughId: z.string(),
+        paths: z.array(editPathSchema).min(1).max(EDIT_PATHS.length),
+        /** The render's length. Capped at a day — a typo must not become the row. */
+        durationMs: z
+          .number()
+          .int()
+          .min(0)
+          .max(24 * 60 * 60 * 1000),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const g = await requireEditable(ctx.session.user.id, input.walkthroughId)
+      await prisma.walkthroughFile.updateMany({
+        where: { walkthroughId: g.id, path: { in: input.paths } },
+        data: { status: 'uploaded' },
+      })
+      const uploaded = await prisma.walkthroughFile.aggregate({
+        where: { walkthroughId: g.id, status: 'uploaded' },
+        _sum: { size: true },
+      })
+      const bytes = BigInt(uploaded._sum.size ?? 0)
+      await prisma.walkthrough.update({
+        where: { id: g.id },
+        data: { durationMs: input.durationMs, bytes },
+      })
+      log.info(`[edit] attached render to walkthrough ${g.id} (${input.paths.join(', ')})`)
+      // BigInt doesn't survive JSON; the viewer reads a Number like everywhere else.
+      return { ok: true, durationMs: input.durationMs, bytes: Number(bytes) }
     }),
 
   /**

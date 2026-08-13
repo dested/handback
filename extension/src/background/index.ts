@@ -5,7 +5,14 @@ import type {
   ExternalRequest,
   Request,
 } from '../lib/messages';
-import type { RecordingMeta, ServerLink, Session, SessionSummary, Settings } from '../lib/types';
+import type {
+  RecordingMeta,
+  ServerLink,
+  Session,
+  SessionKind,
+  SessionSummary,
+  Settings,
+} from '../lib/types';
 import { COBALT, DEFAULT_SERVER, DEFAULT_SETTINGS, activeLink, linkId } from '../lib/types';
 import {
   blobs,
@@ -158,7 +165,7 @@ async function uniqueSlug(label: string, now: number): Promise<string> {
   return slug;
 }
 
-async function createSession(name: string, origin: string): Promise<Session> {
+async function createSession(name: string, origin: string, kind: SessionKind): Promise<Session> {
   const now = Date.now();
   const label = name.trim() || 'Session';
   const session: Session = {
@@ -168,6 +175,7 @@ async function createSession(name: string, origin: string): Promise<Session> {
     createdAt: now,
     updatedAt: now,
     origin,
+    kind,
     recCount: 0,
   };
   await putSession(session);
@@ -175,11 +183,15 @@ async function createSession(name: string, origin: string): Promise<Session> {
   return session;
 }
 
-/** Every part lands in the open gripe; only closing it starts a new one. */
-async function ensureSession(name: string, origin: string): Promise<Session> {
+/**
+ * Every part lands in the open gripe; only closing it starts a new one — which
+ * is also why `kind` is only read on the fresh path. A take joining a
+ * walkthrough that already exists is captured the way that walkthrough is.
+ */
+async function ensureSession(name: string, origin: string, kind: SessionKind): Promise<Session> {
   const current = await activeSession();
   if (current && !current.closed) return current;
-  return createSession(name, origin);
+  return createSession(name, origin, kind);
 }
 
 /** What a part starts life with — `recording:progress` overwrites it wholesale. */
@@ -314,6 +326,19 @@ chrome.runtime.onMessage.addListener((message: Request, _sender, sendResponse) =
         await broadcast();
         return { ok: true };
       }
+      case 'session:kind': {
+        const session = await getSession(message.id);
+        if (!session) return { ok: false };
+        // Capture differs between the two (frame rate, bitrate, whether
+        // keyframes are sampled at all), so a walkthrough that already holds a
+        // take is committed. The panel locks the control for the same reason;
+        // this is the half that can't be clicked around.
+        const takes = await listRecordings(session.id);
+        if (takes.length) return { ok: false, locked: true };
+        await putSession({ ...session, kind: message.kind, updatedAt: Date.now() });
+        await broadcast();
+        return { ok: true };
+      }
       case 'session:delete': {
         await deleteSession(message.id);
         if ((await kv.get<string>(ACTIVE_SESSION)) === message.id) await resumeOpen();
@@ -368,7 +393,11 @@ chrome.runtime.onMessage.addListener((message: Request, _sender, sendResponse) =
       }
       case 'recording:start': {
         const now = Date.now();
-        const session = await ensureSession(message.name.trim() || 'Walkthrough', message.origin);
+        const session = await ensureSession(
+          message.name.trim() || 'Walkthrough',
+          message.origin,
+          message.kind,
+        );
         const index = session.recCount + 1;
         await putRecording({
           id: message.id,

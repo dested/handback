@@ -4,3 +4,6 @@ bun.lock
 e2e/__screenshots__
 playwright-report
 test-results
+# Prettier mangles this repo's markdown: *emphasis* → _emphasis_, and it
+# corrupts inline code spans containing * (learned on updates.md, 2026-08-12).
+*.md

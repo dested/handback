@@ -1,4 +1,4 @@
-import type { Recording, Session } from './types';
+import type { Recording, Session, SessionKind } from './types';
 import { recDirName } from './format';
 
 /**
@@ -96,6 +96,7 @@ function declaration(
   files: GripeFile[],
   projectId?: string,
   teamId?: string,
+  kind: SessionKind = 'agent',
 ) {
   const paths = new Set(files.map((f) => f.path));
   const takes = [...recordings]
@@ -123,6 +124,10 @@ function declaration(
     ...(projectId ? { projectId } : {}),
     // Which space this lands in: absent = the token owner's personal one.
     ...(teamId ? { teamId } : {}),
+    // 'human' hides this from every agent list and tells the viewer the video
+    // is the deliverable. The server defaults absent to 'agent'; sending it
+    // always keeps the two clients (this and cli/push.ts) reading alike.
+    kind,
     recordedAt: new Date(session.createdAt).toISOString(),
     durationMs: takes.reduce((sum, t) => sum + t.durationMs, 0),
     frameCount: takes.reduce((sum, t) => sum + t.frameCount, 0),
@@ -197,16 +202,27 @@ export async function pushGripe(
   session: Session,
   recordings: Recording[],
   files: GripeFile[],
-  opts?: { projectId?: string; teamId?: string; onProgress?: (p: UploadProgress) => void },
+  opts?: {
+    projectId?: string;
+    teamId?: string;
+    /** 'human' ships raw takes with no report/frames — see the guard below. */
+    kind?: SessionKind;
+    onProgress?: (p: UploadProgress) => void;
+  },
 ): Promise<UploadResult> {
   const onProgress = opts?.onProgress;
+  const kind: SessionKind = opts?.kind ?? 'agent';
   const server = normalizeServer(target.serverUrl);
   const token = target.apiToken.trim();
   if (!server) throw new Error('no Handback server — set one in settings');
   if (!token) throw new Error('no API token — paste one in settings');
   if (!token.startsWith('hb_')) throw new Error('that token is not a Handback token (hb_…)');
   if (!recordings.length) throw new Error('nothing recorded yet');
-  if (!files.some((f) => f.path === 'report.md')) throw new Error('the report is missing');
+  // A human handback carries no report.md by design — there is no agent on the
+  // other end of it, and the brief would be written for nobody.
+  if (kind !== 'human' && !files.some((f) => f.path === 'report.md')) {
+    throw new Error('the report is missing');
+  }
 
   const bytesTotal = totalBytes(files);
   const report = (p: Partial<UploadProgress> & { phase: UploadProgress['phase'] }) =>
@@ -216,7 +232,9 @@ export async function pushGripe(
   const declareRes = await fetch(`${server}/api/ingest/walkthroughs`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-    body: JSON.stringify(declaration(session, recordings, files, opts?.projectId, opts?.teamId)),
+    body: JSON.stringify(
+      declaration(session, recordings, files, opts?.projectId, opts?.teamId, kind),
+    ),
   });
   if (!declareRes.ok) throw await explain('declare', declareRes);
   const { walkthroughId, uploads } = (await declareRes.json()) as {

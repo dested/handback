@@ -2,6 +2,27 @@
 
 > ADR-lite: what was decided, why, what was rejected. Append-only.
 
+## 2026-08-12 — Extension human handback rides the cloud; the web is the editor
+**Why:** owner's directive ("record in extension and resolve on web — make it"). A page can
+never read the extension's IndexedDB (chrome-extension:// origin) and external messaging
+JSON-serializes, so raw takes MUST travel through ingest: the extension (1.8.0) records
+pristine and declares `kind: 'human'` with raw `rec-NN/walkthrough.webm` + recording.json +
+transcript.txt (no frames/report), and the viewer's cloud editor downloads them, cuts, renders
+`final.mp4` in the browser, and attaches it via `walkthroughs.presignEdit`/`finalizeEdit`
+(session-authed tRPC, path allowlist of exactly final.mp4/transcript.json/edit.json).
+**Consequence, embraced:** these walkthroughs are re-editable — raws + edit.json live
+server-side, unlike /record's local-only flow. **Caps raised with it:** 512 MB/file was
+already too small for a real 20-minute webm; now 2 GB/file, 4 GB/walkthrough — the 20 GB
+space quota stays the actual backstop.
+**Rejected:** extension→page blob handoff (impossible), panel-side editing (two editors to
+maintain), base64 chunking through messaging (hundreds of MB through JSON).
+
+## 2026-08-12 — `kind` is a judgement, switchable from the viewer
+**Why:** owner ("I should be able to switch it… why not"). Nothing structural separates the
+kinds — `walkthroughs.setKind` just writes the column. agent→human hides it from agent queues
+and (raws present) makes it tightenable; human→agent surfaces it, with report.md degrading to
+null in the brief. No file mutations either way.
+
 ## 2026-08-12 — Human handback is a Walkthrough `kind`, not a second model
 **Why:** owner's call (asked directly). A video recorded *for a person* shares everything an
 agent walkthrough has — spaces, quota, inbox, S3 layout, admin — and differs only in artifact

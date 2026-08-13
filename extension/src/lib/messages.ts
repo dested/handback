@@ -2,6 +2,7 @@ import type {
   PageEvent,
   PointerSample,
   RecordingMeta,
+  SessionKind,
   Settings,
   TranscriberId,
   TranscriptSegment,
@@ -25,6 +26,10 @@ export type Request =
   // Pin this gripe to one project in the active space. '' clears both fields
   // and hands routing back to the server's origin hints.
   | { type: 'session:project'; id: string; projectId: string; projectName: string }
+  // Who this walkthrough is for. It decides how the next take is captured, so
+  // the worker refuses it once the session holds one — the two modes can't mix
+  // inside a walkthrough.
+  | { type: 'session:kind'; id: string; kind: SessionKind }
   | { type: 'state:get' }
   // sessionId → SessionSummary for every session on this machine. Its own message
   // rather than a field on `state:get`, which lands on every broadcast: this walks
@@ -32,7 +37,9 @@ export type Request =
   | { type: 'sessions:summary' }
   // The panel minted `id` and got the screen share; this opens the part inside
   // the active gripe (or a fresh one) and answers with its part number.
-  | { type: 'recording:start'; id: string; name: string; origin: string }
+  // `kind` only takes effect when this opens a *fresh* walkthrough; a take that
+  // lands in one already open inherits whatever that one is.
+  | { type: 'recording:start'; id: string; name: string; origin: string; kind: SessionKind }
   // Fires every couple of seconds while recording — meta so far, plus how many
   // 1s chunk blobs are on disk (video, and the mic-only shadow when one runs).
   // Deliberately silent: no broadcast.

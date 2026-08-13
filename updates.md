@@ -2,6 +2,37 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-08-12 — Extension human handback: record in the panel, resolve on the web
+Asked: the extension needs "for a person" too — record in the extension, edit on the web. Built per
+plans/2026-08-12-extension-human-handback.md. **Extension 1.8.0**: `Session.kind` (optional on disk,
+read through `sessionKind()` so pre-1.8.0 rows answer 'agent'), a two-pill picker on the panel's
+idle hero (panel.css `.kindpick`, locked once the walkthrough holds a take — the worker refuses
+`session:kind` then too), `recording:start` carries the kind into a fresh session, and `Recorder`
+gains the same `pristine` flag `capture/live.ts` has (30 fps ideal, area-scaled
+`videoBitsPerSecond` clamped [6,16] Mbps, no sampling loop, `force()` inert). A human upload
+declares `kind:'human'` and ships only `rec-NN/{walkthrough.webm,recording.json,transcript.txt}` —
+no frames, sheets, report.md or MANIFEST — so `pushGripe`'s report guard is now kind-aware and the
+handoff skips the agent brief. **Server**: `walkthroughs.presignEdit` / `finalizeEdit` (protected,
+`requireSpaceAccess`, human + finalized only, path allowlist final.mp4 | transcript.json |
+edit.json, ingest's per-file/per-walkthrough caps + space quota reused — both now exported,
+pending→uploaded, `bytes` recomputed from what is uploaded, `durationMs` = the render's), plus
+`walkthroughs.setKind` for reclassifying after the fact. **Web**: `components/edit/cloud-editor.tsx`
+downloads the raw takes, adapts them to `LiveTake` keyed by `take.dir` (stable across browsers,
+which is what edit.json's takeOrder/cuts need), reuses `Editor` + edl/silence/remux/render
+unchanged, seeds from a prior edit.json via `parseEditState` else auto-tightens at 800 ms, then
+renders → presigns → PUTs → finalizes → invalidates `walkthroughs.get`. `/walkthroughs/:id` offers
+"Tighten & share" when a human walkthrough has raw takes and no final.mp4, "re-edit this cut" when
+it has both, and a for-an-agent/for-a-person select in `WalkthroughControls`. Transcript re-timing
+extracted to `lib/edit/transcript.ts` and shared with `sendHumanWalkthrough`; new
+`lib/edit/transfer.ts` (XHR get/put, byte progress, 3 tries).
+Typecheck + both builds + the extension build green. **Not live-verified** — `.env` still points at
+PROD, so no dev server and no real record→upload→edit run; that loop wants a human at a keyboard.
+Touched: extension/{package.json, public/manifest.json, src/lib/{types,messages,upload}.ts,
+src/background/index.ts, src/sidepanel/{App.tsx,Home.tsx,recorder.ts,panel.css}},
+server/{router,ingest}.ts, src/app/walkthrough.tsx, src/components/edit/cloud-editor.tsx,
+src/components/viewer/walkthrough-controls.tsx, src/lib/edit/{transcript,transfer}.ts,
+src/lib/capture/live-upload.ts
+
 ## 2026-08-12 — Human handback: pristine video, in-browser tight edit, share links
 Asked: record video *for a person* (not an agent), auto-tighten pauses in a browser editor, share
 it. Built per plans/2026-08-12-human-handback.md: `Walkthrough.kind` + token-guarded share links

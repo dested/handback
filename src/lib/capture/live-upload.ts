@@ -1,4 +1,5 @@
-import { sourceToOutputMs, type EditSegment, type EditState } from '../edit/edl'
+import type { EditSegment, EditState } from '../edit/edl'
+import { editedTranscriptLines } from '../edit/transcript'
 import { decodeMono } from './audio'
 import { containerFor } from './container'
 import { recDirName } from './format'
@@ -323,26 +324,14 @@ export async function sendHumanWalkthrough(
     recCount: ordered.length,
   }
 
-  // Surviving lines, moved onto the edited clock. A line whose start was cut
-  // is gone — its words are not in the video, and a transcript that says
-  // otherwise would lie to the person scrubbing by it.
-  const byId = new Map(ordered.map((t) => [t.id, t]))
-  const lines: Array<{ at: string; tMs: number; endMs: number; text: string }> = []
-  for (const takeId of edit.state.takeOrder) {
-    const take = byId.get(takeId)
-    if (!take) continue
-    for (const line of take.meta.transcript) {
-      const out = sourceToOutputMs(edit.segments, takeId, line.t)
-      if (out === null) continue
-      lines.push({
-        at: new Date(take.meta.startedAt + line.t).toISOString(),
-        tMs: Math.round(out),
-        endMs: Math.round(Math.min(out + (line.d ?? 1500), edit.durationMs)),
-        text: line.text,
-      })
-    }
-  }
-  lines.sort((a, b) => a.tMs - b.tMs)
+  // Surviving lines, moved onto the edited clock — the same re-timing the
+  // viewer's cloud editor runs, so both doors write one transcript.json.
+  const lines = editedTranscriptLines(
+    ordered.map((t) => ({ id: t.id, startedAt: t.meta.startedAt, transcript: t.meta.transcript })),
+    edit.state,
+    edit.segments,
+    edit.durationMs
+  )
 
   const files: CaptureFile[] = [
     { path: 'final.mp4', blob: edit.video, contentType: 'video/mp4' },
