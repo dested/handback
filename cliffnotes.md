@@ -243,12 +243,18 @@ src/
                         walkthrough-header (masthead — status segments, project popover, one
                         kind-appropriate primary action, ⋯ overflow) · overflow-menu (usePopover +
                         kind/move/share/delete, inline arming, no window.confirm) · agent-view
-                        (one player + transcript/console rail + timeline + frames + report) ·
+                        (Video/Frames view switch; video = player + rail + timeline, hidden
+                        not unmounted; holds the staged-deletes stack — undo pops, "done"
+                        commits batches over walkthroughs.deleteFrames; Frames mode
+                        lays stage+filmstrip 2/3 wide with the transcript as a
+                        full-height right rail on lg) ·
                         timeline (THE scrubber: source-global axis, cut tags are the only cut
                         toggle, one-gesture drag, empty→one muted line) · use-segment-player
                         (multi-take playback, rAF playhead) · agent-answer (the review thread +
-                        Approve/Send back sign-off + agent-activity line) · frames-grid (numbered
-                        contact sheet) · transcript-panel (borderless, live active line) · events-panel
+                        Approve/Send back sign-off + agent-activity line) · slideshow (shot-by-shot
+                        frames: big still + filmstrip + synced dialog strip, edit-mode frame
+                        deletion via walkthroughs.deleteFrames; replaced frames-grid
+                        2026-08-14) · transcript-panel (borderless, live active line) · events-panel
                         (mono, red/violet ticks) · section-head · report-panel · status-control ·
                         share-control (url·copy·revoke pill) · final-cut · skeleton · types ·
                         format · use-copy · split-panel (SplitPanel — the propose/apply split
@@ -326,8 +332,9 @@ extension/              Handback Recorder — the Chrome MV3 extension (own npm 
                         still on this machine), recorder (getDisplayMedia incl. system audio + raw
                         mic, Web Audio mix + dedup — see the audio gotcha), transcription
                         (transcribeCloud.ts → the workspace; transcribeWorker.ts → on-device),
-                        polish.ts (the cleanup pass, after transcription), Timeline editor
-                        (a scrubber — see the gotcha), grids contact sheets, App.tsx orchestration
+                        polish.ts (the cleanup pass, after transcription), Parts list
+                        (the review screen — one card per recording, see the gotcha),
+                        grids contact sheets, App.tsx orchestration
   scripts/              make-icons, copy-ort, prune-dist, preview.mjs + preview/ (layout harness)
 ```
 
@@ -709,39 +716,36 @@ reaches the container on a plain push.
   reaches into `settings.links`, so a stub still carrying the flat 1.1.x `serverUrl`/`apiToken`
   fields throws on first render and the harness comes up **blank with no clue why**. That is exactly
   how it sat broken from the multi-workspace change until 2026-08-01.
-  Modes: `rec` (one 2:19 take) · `long` (the acceptance seed) · **`fresh`** (a take still running
-  with no frame kept yet — the empty-timeline case) · `home` · `empty`, plus `?unlinked=1` and
+  Modes: `rec` (one 2:19 part) · `long` (the acceptance seed) · **`fresh`** (a part still running
+  with no frame kept yet — the live/collapse case) · `home` · `empty`, plus `?unlinked=1` and
   **`?ctx=none|fail`** (a workspace with no projects / a dead context fetch — the two states the
   destination row's project control has to survive on screen).
-- **The panel's timeline is a scrubber and nothing else** (2026-08-01, owner's directive: "just the
-  scrobble please with dragging. no selection"). Pointer-down anywhere on the ruler, the filmstrip,
-  the voice lane or bare track scrubs, and holding keeps scrubbing — **one gesture, no modifiers, no
-  click-vs-drag fork**. There is no selection model at all: the range sweep, the marquee, the
-  shift/ctrl clicks, the `delete N items` bar and the drag-to-move are gone, and with them the
-  `timeline:move` / `timeline:delete` / `recording:frame:delete` / `recording:line:delete` messages.
-  What is left that mutates: **fixing a line** (`recording:line:update`, from the readout row or the
-  transcript list — an emptied line is a deleted line) and **deleting a take**. Don't reintroduce a
-  selection; it is the single thing the owner named as unusable.
-- **A take is deletable, and deleting one renumbers the rest.** `take:delete` (`lib/messages.ts` →
-  `background/index.ts`, modelled on `session:delete`) drops the recording row, its frames and its
-  blobs, then re-lays the survivors as `index` 1..N in `createdAt` order and sets
-  `Session.recCount` to their count — `rec-NN` is a position in the walkthrough, not a serial, and
-  a hole in it would put a hole in the axis `lib/timeline.ts` walks. The control is the take's own
-  label in the filmstrip (`.tl-take`); it arms into an inline question that is **clamped into the
-  scroll viewport** rather than anchored to a take that may be four seconds wide, and it is disabled
-  while recording or uploading (`busy` prop). Deleting the last take leaves exactly the fresh-session
-  empty state.
-- **The empty timeline has its own branch.** With no frames *and* no transcript the whole component
-  renders one muted line (`.tl.bare`) — no monitor, no ruler, no well, no zoom, no scrollbar. The
-  `.tl-scroll` floor and `.tl-monitor` cap below exist to protect the *populated* layout; letting the
-  empty case inherit them is what put ~500px of dead grey track and an orphan scrollbar under a
-  walkthrough three seconds old. Judge it at `?mode=fresh` in the harness.
-- **The axis takes the slack; the monitor gives it up.** `.tl-scroll` is `flex: 1 1 auto` with a
-  floor of one ruler + the take lane + two lanes, and `.tl-monitor` is capped at 50% of the panel and
-  collapses outright (`.bare`) when there is no frame to show. It used to be the reverse — a monitor
-  that grew unbounded over a `flex: 0 1 auto` axis — which crushed the ruler and both lanes to a
-  sliver under a tall blank picture. **There is only one shape now**: the popped-out editor strip and
-  its `wide` layout are gone (2026-08-01), so nothing is scoped `:not(.wide)` any more.
+- **The panel review screen is a parts list, not a timeline** (2026-08-14, owner directive;
+  decisions.md). The scrubber `Timeline` (monitor + ruler + filmstrip + voice lane + zoom) is
+  **deleted** — `Parts.tsx` renders one `PartCard` per finished recording, in `createdAt` order,
+  divided by hairlines. A card is: a head row (`part N · m:ss`, its quiet `×`), the **video in a dark
+  well** (`blobs.get('<id>:video')`), a control row (play/pause + a slim cobalt seek bar + a mono
+  clock, drawn only once the video loads), a mono meta line (frames captured / `full-rate video`, ·
+  console errors, · recovered, · transcribing…), and the transcript in **its own scroll region**
+  (click a line seeks, double-click fixes it, active line cobalt-washed). The word **"take" is banned
+  from extension UI copy** — the noun is **part** (or "recording" where that reads better); internal
+  identifiers (`take:delete`, `Recording`, `rec-NN`, report.md, upload fields) are unchanged.
+- **MediaRecorder webm has no duration** — a fresh `<video>` reports `duration === Infinity` and
+  won't seek. On `loadedMetadata`, `PartCard` sets `currentTime = 1e9` and, on the resulting `seeked`,
+  snaps it back to 0; that forces Chrome to index the file so the seek bar works. The seek scale is
+  `rec.meta.durationMs` (the video's own duration stays unreliable), and the clock display is clamped
+  because the hack briefly reports a garbage `currentTime`.
+- **A part is deletable, and deleting one renumbers the rest.** `take:delete` (`lib/messages.ts` →
+  `background/index.ts`, modelled on `session:delete`; the message name is unchanged) drops the
+  recording row, its frames and its blobs, then re-lays the survivors as `index` 1..N in `createdAt`
+  order and sets `Session.recCount` to their count — `rec-NN` is a position in the walkthrough, not a
+  serial. The control is the card's quiet `×` (`.part-kill`); it arms **inline in the head row**
+  (fixed height, so the row never grows) and is disabled while recording or uploading (`busy` prop).
+- **The empty review screen is one muted line.** With no finished part and nothing live-recording,
+  `.parts` renders a single `.parts-empty` line — no card, no well. The video well is the only dark
+  surface, and a recording with no `:video` blob on this machine (a recovered session, or the preview
+  harness, which seeds only frame blobs) shows the first keyframe dimmed with `video isn't on this
+  machine`, never a broken player. Judge it at `?mode=fresh`/`?mode=long` in the harness.
 - **`Dockerfile`, `drydock.yaml` and `.github/workflows/drydock.yml` are Drydock's** — it overwrites
   all three on every wire/re-wire. Change the deploy in the portal, not in the repo.
 - **`env.ts` parses at import time**, so a missing S3/auth var is a boot crash, not a runtime error —

@@ -219,7 +219,7 @@ export function createOverlay(): Overlay {
 
   const layer = html(`
     <div class="layer">
-      <canvas class="live"></canvas>
+<!--      <canvas class="live"></canvas>
       <div class="frame"><span class="tag glass">drawing <i class="cap">esc</i> to click</span></div>
       <div class="dock glass">
         <span class="dock-live"><span class="dot"></span><span class="clock">0:00</span></span>
@@ -227,7 +227,7 @@ export function createOverlay(): Overlay {
         <button class="draw" data-act="draw"><span class="lbl">draw</span><i class="cap">d</i></button>
         <button data-act="clear"><span class="lbl">clear</span><i class="cap">c</i></button>
         <button class="stop" data-act="stop"><span class="lbl">stop</span><i class="cap">s</i></button>
-      </div>
+      </div>-->
     </div>
   `);
   shadow.append(layer);

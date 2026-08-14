@@ -29,6 +29,7 @@ import { expiryFor } from './retention'
 import { indexWalkthrough, searchWalkthroughIds } from './search'
 import {
   copyObject,
+  deleteKeys,
   deletePrefix,
   getObjectText,
   spacePrefix,
@@ -1376,6 +1377,58 @@ const walkthroughsRouter = router({
         data: { title: input.title },
       })
       return { ok: true }
+    }),
+
+  /**
+   * Prune keyframes from a walkthrough — the slideshow's edit mode. Only paths
+   * under a take's frames/ dir are deletable this way; the video, transcript and
+   * report are not frames and stay out of reach. Rows go first, S3 second: a
+   * crash in between leaves orphaned objects (wiped with the walkthrough's
+   * prefix eventually), never rows presigning dead keys.
+   */
+  deleteFrames: protectedProcedure
+    .input(
+      z.object({ walkthroughId: z.string(), paths: z.array(z.string().min(1)).min(1).max(1000) })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const g = await prisma.walkthrough.findUnique({
+        where: { id: input.walkthroughId },
+        select: { teamId: true, userId: true, frameCount: true, bytes: true },
+      })
+      if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
+      await requireSpaceAccess(ctx.session.user.id, g)
+      if (input.paths.some((p) => !isSafePath(p) || !p.includes('/frames/'))) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Only keyframes can be deleted' })
+      }
+      const files = await prisma.walkthroughFile.findMany({
+        where: { walkthroughId: input.walkthroughId, path: { in: input.paths }, status: 'uploaded' },
+      })
+      if (files.length === 0) return { ok: true, deleted: 0 }
+      await prisma.walkthroughFile.deleteMany({ where: { id: { in: files.map((f) => f.id) } } })
+      // Keep the take/walkthrough frame math honest — the meta line and the
+      // brief's frame cap both read these counts.
+      const byDir = new Map<string, number>()
+      for (const f of files) {
+        const dir = f.path.split('/')[0] ?? ''
+        byDir.set(dir, (byDir.get(dir) ?? 0) + 1)
+      }
+      for (const [dir, n] of byDir) {
+        await prisma.take.updateMany({
+          where: { walkthroughId: input.walkthroughId, dir, frameCount: { gte: n } },
+          data: { frameCount: { decrement: n } },
+        })
+      }
+      const bytesFreed = files.reduce((n, f) => n + f.size, 0)
+      const bytes = g.bytes - BigInt(bytesFreed)
+      await prisma.walkthrough.update({
+        where: { id: input.walkthroughId },
+        data: {
+          frameCount: Math.max(0, g.frameCount - files.length),
+          bytes: bytes < 0n ? 0n : bytes,
+        },
+      })
+      await deleteKeys(files.map((f) => walkthroughKey(spaceId(g), input.walkthroughId, f.path)))
+      return { ok: true, deleted: files.length }
     }),
 
   assignProject: protectedProcedure

@@ -2,6 +2,72 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-08-14 — Frames mode: transcript beside the slideshow, not below it
+Asked: in the viewer's Frames mode, keep the transcript to the right of the stills, not below them.
+Then: the transcript must also auto-follow the playhead in Video mode.
+Done: `viewer/slideshow.tsx` now lays out a `lg:grid-cols-3` — stage + filmstrip in a 2/3 left
+column, the transcript `<ul>` as a full-height right rail (`lg:absolute lg:inset-0` inside a
+relative cell so it borrows the left column's height and scrolls instead of stretching the row);
+below lg it stacks beneath the filmstrip as before (`max-h-52`). No lines → left column spans all 3.
+`viewer/transcript-panel.tsx` (the Video-mode rail) now auto-scrolls the active line to centre as
+`activeMs` advances — same offsetTop-in-a-`relative`-`<ul>` trick as the slideshow; holds position
+in the gaps between lines (activeIndex -1). Verified in the browser (dev :3995): Frames switch lays
+the rail right; seeking deep in Video mode moves the cobalt-wash line and scrolls the container
+(scrollTop 0 → 1502) to keep it visible. Typecheck clean. ui.md/cliffnotes updated.
+
+## 2026-08-14 — Extension panel: scrubber timeline → vertical parts list; "take" banned from UI copy
+Asked: delete the side panel's scrubber `Timeline` and present the walkthrough as a vertical list of
+"parts" — one card per recording the person can play, read, fix, delete and add to; and remove the
+word "take" from every user-facing string (noun is now "part").
+Done: new `Parts.tsx` (`PartCard` per finished recording, `createdAt` order, hairline-divided) —
+head row (`part N · m:ss` + inline-arming `×`), video in a dark well (click to play), control row
+(play/pause + slim cobalt seek bar + mono clock, drawn once the video loads; handles the
+MediaRecorder `duration === Infinity` seek hack + a keyframe poster fallback when the `:video` blob
+isn't on this machine), mono meta line (frames/full-rate · console errors · recovered · transcribing),
+and the transcript in its own scroll region (click seeks, double-click fixes, Escape cancels without
+committing). End-of-list cobalt-outline ghost is the only add button; App's title-row add removed.
+Deleted `Timeline.tsx` + `timeline.css` and the dead `--cell-w` token; `lib/timeline.ts` stays (report
+builder). Copy sweep across App/Home/Parts (take→part / recording); internal ids (`take:delete`,
+`rec-NN`, report/upload fields) unchanged. Verified: extension typecheck + root typecheck clean, build
+green, and the panel driven in the harness (`rec`/`long`/`fresh`) — poster fallback, meta counts,
+inline delete arm/keep (row height stable), line edit commit + Escape-cancel all correct. Doc kit
+(ui.md, cliffnotes.md, decisions.md) updated.
+
+## 2026-08-14 — Viewer frames: contact sheet → shot-by-shot slideshow + frame deletion
+Asked: the thousands of square tiles at the bottom of the viewer don't work — a slideshow instead,
+shot for shot, with the dialog scrolling under it and the spoken part highlighted; deleting
+screenshots possible but tucked behind a mode.
+Done (two passes, owner feedback between): `viewer/slideshow.tsx` replaces frames-grid.tsx +
+lightbox — big still with ←/→, filmstrip auto-centring (cobalt ring = viewed shot, bottom tick =
+playhead), transcript strip auto-scrolling with the spoken line cobalt-washed (click jumps the
+slideshow). The viewer's main area is now a **Video / Frames segmented switch** (video view
+hidden, not unmounted — playback position survives; switching pauses audio); `play from here`
+switches back to Video + seeks. Deletion: NO confirm — staged locally with infinite undo
+(`undo (N)` / Cmd-Ctrl+Z / Delete key), committed as one batch on `done — delete N` via new
+`walkthroughs.deleteFrames` (frames/-paths only, rows-then-S3, per-take + walkthrough
+frameCount/bytes kept honest), `saving…/retry` line on the commit. Scroll-clamp bug fixed (both
+auto-scroll containers must be `relative` — offsetTop reads from the positioned ancestor). Frames
+with no uploaded file drop out of the viewer instead of "missing" tiles. Third pass (owner): the
+filmstrip grew to judgeable size (h-24/h-28, numbered mono chips) so before/after reads at a
+glance, and in edit mode every thumb carries its own hover ✕ (staged like any delete; deleting a
+neighbour before the current shot keeps the big view on the same image). Typecheck green. Spec
+Fable, build one Opus agent (two passes) + one direct Fable pass.
+Touched: src/components/viewer/{slideshow.tsx new, frames-grid.tsx deleted, agent-view.tsx,
+video-stage.tsx}, server/router.ts, ui.md, cliffnotes.md, decisions.md
+
+## 2026-08-14 — Toolbar icon invisible on dark/themed toolbars
+Asked: the Chrome extension action icon is unusable — invisible no matter the toolbar colour (a
+thin two-tone stroke on transparent; its near-black ink half vanished on dark chrome, only the
+faint cobalt arrow survived).
+Done: rewrote `extension/scripts/make-icons.mjs` to draw the returning-stroke mark on a solid
+**cobalt rounded tile** with the stroke **knocked out in warm paper** — the tile carries its own
+contrast on any toolbar (MV3 action icons get no dark/light signal, so per-theme art isn't an
+option). Unified to one stroke (no ink/cobalt split), bolder half-width (1.9) for 16px punch,
+centred via a rounded-rect SDF. Regenerated all four PNGs + rebuilt `dist`. Verified on
+dark/white/blue grounds at 16–128px (scratchpad composite). Not published — Web Store pickup needs
+a manifest version bump + republish; `store-listing/store-icon-128.png` still shows the old art.
+Touched: extension/scripts/make-icons.mjs, extension/public/icons/*.png, extension/dist/icons/*.png
+
 ## 2026-08-13 — Wave 3: split-into-tasks structuring pass + voice-only capture
 Asked: finish the picked backlog — C1 (LLM structuring, on-demand from the viewer) + C3 (voice-only
 capture); commit local, no push (per plans/2026-08-13-loop-and-team-wave.md, now done).

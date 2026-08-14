@@ -36,9 +36,6 @@
   --fs-4: 18px;
   --gap: 10px;
   --radius: 6px;
-
-  /* Timeline */
-  --cell-w: 72px;
 }
 
 @media (min-width: 480px) {

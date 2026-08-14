@@ -4,15 +4,17 @@
 // will actually read.
 
 import { useCallback, useMemo, useRef, useState } from 'react'
-import { useQueries } from '@tanstack/react-query'
+import { useMutation, useQueries, useQueryClient } from '@tanstack/react-query'
 import { Button } from '~/components/ui/button'
 import type { EditSegment } from '~/lib/edit/edl'
+import { useTRPC } from '~/lib/trpc'
+import { cn } from '~/lib/utils'
 import { CommentsPanel } from './comments-panel'
 import { EventsPanel } from './events-panel'
 import { mmss } from './format'
-import { FramesGrid, type GridFrame } from './frames-grid'
 import { ReportPanel } from './report-panel'
 import { SectionHead } from './section-head'
+import { Slideshow, type ViewerFrame } from './slideshow'
 import { Timeline, type TimelineTake, type TimelineVoiceBar } from './timeline'
 import { TranscriptPanel } from './transcript-panel'
 import type { TakeEvent, TakeRecording, Walkthrough } from './types'
@@ -105,12 +107,46 @@ export function AgentView({
   )
 
   const [showReport, setShowReport] = useState(false)
+  const [mode, setMode] = useState<'video' | 'frames'>('video')
+
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  // Server S3 deletes can't be undone, so deletes are staged locally (the shot
+  // just vanishes from `frames`) and committed as one batch on leaving edit mode.
+  // The stack is ordered so undo pops the most recent.
+  const [staged, setStaged] = useState<string[]>([])
+  const stagedSet = useMemo(() => new Set(staged), [staged])
+  const stageDelete = useCallback((path: string) => {
+    setStaged((prev) => (prev.includes(path) ? prev : [...prev, path]))
+  }, [])
+  const undoDelete = useCallback(() => setStaged((prev) => prev.slice(0, -1)), [])
+  const deleteFrames = useMutation(
+    trpc.walkthroughs.deleteFrames.mutationOptions({
+      // Clear only what this call sent — more may have been staged while it saved.
+      onSuccess: async (_data, vars) => {
+        await queryClient.invalidateQueries({
+          queryKey: trpc.walkthroughs.get.queryKey({ walkthroughId: walkthrough.id }),
+        })
+        setStaged((prev) => prev.filter((p) => !vars.paths.includes(p)))
+      },
+    })
+  )
+  const commitDeletes = useCallback(() => {
+    for (let i = 0; i < staged.length; i += 500) {
+      deleteFrames.mutate({ walkthroughId: walkthrough.id, paths: staged.slice(i, i + 500) })
+    }
+  }, [staged, deleteFrames, walkthrough.id])
+  const commitState = deleteFrames.isPending
+    ? 'saving'
+    : deleteFrames.isError
+      ? 'error'
+      : 'idle'
 
   // useQueries hands back a fresh array every render and the playhead re-renders
   // ~30×/s; the strips only change when a recording actually lands.
   const landed = recordings.map((query) => (query.data ? '1' : '0')).join('')
   const { frames, lines, events, voice } = useMemo(() => {
-    const frames: GridFrame[] = []
+    const frames: ViewerFrame[] = []
     const lines: Line[] = []
     const events: TakeEvent[] = []
     const spoken: Array<{ startMs: number; endMs: number }> = []
@@ -121,11 +157,11 @@ export function AgentView({
       const offset = offsets.byTakeId.get(take.id) ?? 0
       for (const frame of detail.frames) {
         const atMs = offset + frame.tMs
-        frames.push({
-          atMs,
-          url: urlByPath.get(`${take.dir}/${frame.file}`) ?? null,
-          label: mmss(atMs),
-        })
+        const path = `${take.dir}/${frame.file}`
+        const url = urlByPath.get(path)
+        // A frame that never uploaded has nothing to show; a staged one is gone.
+        if (url === undefined || stagedSet.has(path)) continue
+        frames.push({ atMs, url, label: mmss(atMs), path })
       }
       for (const line of detail.transcript) {
         lines.push({ tMs: offset + line.tMs, endMs: offset + line.endMs, text: line.text })
@@ -145,7 +181,7 @@ export function AgentView({
     }
 
     return { frames, lines, events, voice }
-  }, [takes, urlByPath, offsets, landed])
+  }, [takes, urlByPath, offsets, landed, stagedSet])
 
   const timelineTakes = useMemo<TimelineTake[]>(
     () =>
@@ -207,56 +243,94 @@ export function AgentView({
 
   return (
     <div className="space-y-8">
-      <div className="grid gap-6 lg:grid-cols-3">
-        <div ref={playerRef} className="scroll-mt-4 lg:col-span-2">
-          <VideoStage player={player} frames={frames} />
-        </div>
-
-        <div className="space-y-5 lg:col-span-1">
-          <section className="space-y-2">
-            <SectionHead>transcript</SectionHead>
-            {noRecordings ? (
-              <p className="text-muted-foreground text-sm">No narration was uploaded.</p>
-            ) : recordingsFailed ? (
-              <p className="text-muted-foreground text-sm">
-                Couldn't load the narration — reload the page to try again.
-              </p>
-            ) : (
-              <TranscriptPanel
-                lines={lines}
-                activeMs={player.outputMs}
-                onSeek={(ms) => player.seekOutput(ms)}
-              />
-            )}
-          </section>
-
-          {events.length > 0 && (
-            <section className="border-border space-y-2 border-t pt-5">
-              <SectionHead>console</SectionHead>
-              <EventsPanel events={events} />
-            </section>
-          )}
-        </div>
+      <div>
+        <ModeSwitch
+          mode={mode}
+          onMode={(next) => {
+            // Leaving the video for the stills — stop the sound playing behind them.
+            if (next === 'frames' && player.playing) player.togglePlay()
+            setMode(next)
+          }}
+        />
       </div>
 
-      <Timeline
-        totalMs={offsets.totalMs}
-        takes={timelineTakes}
-        frames={frames}
-        voice={voice}
-        playheadMs={player.outputMs}
-        onScrub={(ms) => player.seekOutput(ms)}
-      />
+      {/* The player and its <video> elements stay mounted across the switch so
+          playback position survives — hidden, not unmounted, in frames mode. */}
+      <div className={cn('space-y-8', mode !== 'video' && 'hidden')}>
+        <div className="grid gap-6 lg:grid-cols-3">
+          <div ref={playerRef} className="scroll-mt-4 lg:col-span-2">
+            <VideoStage player={player} frames={frames} />
+          </div>
 
-      {onEdit && (
-        <div className="-mt-4 flex justify-end">
-          <button
-            type="button"
-            onClick={onEdit}
-            className="text-muted-foreground hover:text-foreground font-mono text-xs underline underline-offset-4">
-            cut this video down
-          </button>
+          <div className="space-y-5 lg:col-span-1">
+            <section className="space-y-2">
+              <SectionHead>transcript</SectionHead>
+              {noRecordings ? (
+                <p className="text-muted-foreground text-sm">No narration was uploaded.</p>
+              ) : recordingsFailed ? (
+                <p className="text-muted-foreground text-sm">
+                  Couldn't load the narration — reload the page to try again.
+                </p>
+              ) : (
+                <TranscriptPanel
+                  lines={lines}
+                  activeMs={player.outputMs}
+                  onSeek={(ms) => player.seekOutput(ms)}
+                />
+              )}
+            </section>
+
+            {events.length > 0 && (
+              <section className="border-border space-y-2 border-t pt-5">
+                <SectionHead>console</SectionHead>
+                <EventsPanel events={events} />
+              </section>
+            )}
+          </div>
         </div>
+
+        <Timeline
+          totalMs={offsets.totalMs}
+          takes={timelineTakes}
+          frames={frames}
+          voice={voice}
+          playheadMs={player.outputMs}
+          onScrub={(ms) => player.seekOutput(ms)}
+        />
+
+        {onEdit && (
+          <div className="-mt-4 flex justify-end">
+            <button
+              type="button"
+              onClick={onEdit}
+              className="text-muted-foreground hover:text-foreground font-mono text-xs underline underline-offset-4">
+              cut this video down
+            </button>
+          </div>
+        )}
+      </div>
+
+      {mode === 'frames' && (
+        <Slideshow
+          frames={frames}
+          lines={lines}
+          activeMs={player.outputMs}
+          onSeek={(ms) => {
+            // Bridge back to the video: the wrapper only unhides after the
+            // re-render, so scroll it into view on the next frame.
+            setMode('video')
+            player.seekOutput(ms, true)
+            requestAnimationFrame(() =>
+              playerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+            )
+          }}
+          canEdit={walkthrough.viewerIsMember}
+          stagedCount={staged.length}
+          commitState={commitState}
+          onDelete={stageDelete}
+          onUndo={undoDelete}
+          onCommit={commitDeletes}
+        />
       )}
 
       <section className="rule space-y-3 pt-8">
@@ -269,12 +343,45 @@ export function AgentView({
         />
       </section>
 
-      <section className="rule space-y-3 pt-8">
-        <SectionHead>frames</SectionHead>
-        <FramesGrid frames={frames} activeMs={player.outputMs} onSeek={seekAndReveal} />
-      </section>
-
       {report}
+    </div>
+  )
+}
+
+/** The main-area view switch — status-control's segmented anatomy, two ways. */
+function ModeSwitch({
+  mode,
+  onMode,
+}: {
+  mode: 'video' | 'frames'
+  onMode: (mode: 'video' | 'frames') => void
+}) {
+  const segments: { value: 'video' | 'frames'; label: string }[] = [
+    { value: 'video', label: 'Video' },
+    { value: 'frames', label: 'Frames' },
+  ]
+  return (
+    <div
+      role="group"
+      aria-label="Viewer mode"
+      className="border-input inline-flex overflow-hidden rounded-md border">
+      {segments.map((segment, i) => {
+        const active = segment.value === mode
+        return (
+          <button
+            key={segment.value}
+            type="button"
+            aria-pressed={active}
+            onClick={() => !active && onMode(segment.value)}
+            className={cn(
+              'px-3 py-1.5 text-sm font-medium transition-colors',
+              i > 0 && 'border-input border-l',
+              active ? 'bg-cobalt-wash text-cobalt' : 'text-muted-foreground hover:bg-accent/50'
+            )}>
+            {segment.label}
+          </button>
+        )
+      })}
     </div>
   )
 }

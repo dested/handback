@@ -1,7 +1,7 @@
 # Handback — UI
 
 > Visual-language source of truth. Follow exactly; deviations are bugs.
-> Last updated: 2026-08-12.
+> Last updated: 2026-08-14.
 
 ## The one law
 
@@ -127,24 +127,25 @@ properties in `extension/src/sidepanel/styles.css` (no Tailwind there).
   point at `/recorder` (cobalt-wash callout), they never demand a pasted token. Upload errors are a
   white card with a 2px danger left rule: mono `UPLOAD FAILED` head, one human
   sentence, `try again`/`details` links — never a raw server body.
-- **Timeline** (`timeline.css`): white track on paper, mono ruler, a cobalt
-  playhead (the only cobalt on the axis), dashed hairline take seams, thumbnail
-  filmstrip, voice lane as ink-gray density bars. **It is a scrubber**:
-  pointer-down anywhere on the ruler, filmstrip, voice lane or bare track scrubs
-  and dragging keeps scrubbing — one gesture, no modifiers, and **no selection of
-  any kind** (no sweep, no marquee, no selected-cell outline, no action bar).
-  Above the filmstrip runs the **take lane**: one mono `take N · m:ss` label per
-  take over the stretch it owns, each with a quiet `×` that arms into one inline
-  question clamped into the viewport (`delete take 2 (3:38)? yes / keep`, the yes
-  in `--danger`) — never a browser `confirm()`, never a row that grows. Zoom is
-  `− ▭ + fit`, small and muted at the right end of the readout row, never a
-  full-width band of its own. With no frames and no words the whole component
-  collapses to one muted line: an empty editor draws no ruler, no well, no
-  scrollbar.
-- **Transcript list** (`.tl-script`): the whole transcript under the timeline —
-  cobalt mono times, current line cobalt-washed with an inset bar, click seeks,
-  double-click edits in place. Open by default — it is the readable surface, and
-  the axis above it is deliberately terse.
+- **Parts list** (`Parts.tsx`, panel.css): the review screen. A walkthrough is a
+  vertical list of **parts** — one card per recording, in recorded order, divided
+  by hairline rules, never boxes. The word "take" never reaches the user; the noun
+  is **part** (or "recording" where that reads better). Each card: a mono head row
+  (`part N · m:ss`) with a quiet `×` that **arms inline in the same row**
+  (`delete part 1 (2:19)? yes / keep`, the yes in `--danger`, the row never
+  grows — never a browser `confirm()`); the **video in a dark well** (the one dark
+  surface, because a video needs it) that plays on click; a control row under it —
+  a small cobalt play/pause glyph, a slim 4px seek bar with a cobalt played fill,
+  and a mono tabular clock `0:04 / 2:19` — drawn only once the video has loaded; a
+  mono muted meta line (`N frames captured` / `full-rate video`, `· N console
+  errors`, `· recovered after the panel closed`, `· transcribing…`); and the
+  **transcript in its own scroll region** so a long part stays a compact card:
+  cobalt mono times, the active line cobalt-washed with an inset bar, click seeks,
+  double-click fixes a line in place. A recording whose video isn't on this machine
+  (recovered, or the preview harness) shows the first keyframe dimmed with
+  `video isn't on this machine` — never a broken player. At the foot of the list, a
+  full-width cobalt-*outline* ghost button (`● record another part`) is the only
+  add/record control on the screen; empty, the list is one muted line.
 - **On-page dock** (`content/ui.ts`): white pill, hairline border, mono keycaps
   for its three keys — **draw `d`**, **clear `c`**, **stop `s`**; ink strokes
   draw in cobalt. Never dark, never orange.
@@ -152,7 +153,7 @@ properties in `extension/src/sidepanel/styles.css` (no Tailwind there).
   inset frame with one top tag (`drawing · esc to click`), and the dock never
   fades. The frame is captured in the recording on purpose.
 - Judged in the preview harness (`npm run preview` → `:8777/gallery.html`),
-  acceptance seed is `mode=long` (10:18, two takes, 150 frames). `mode=fresh` is
+  acceptance seed is `mode=long` (10:18, two parts, 150 frames). `mode=fresh` is
   the other one that has to hold: a walkthrough seconds old must be one quiet
   line, not a stack of empty scaffolding.
 
@@ -202,12 +203,42 @@ properties in `extension/src/sidepanel/styles.css` (no Tailwind there).
   pending in-point a dashed cobalt line. A manual cut's tag deletes it outright
   (silence cuts stay vetoed, line cuts belong to the transcript). Empty
   timeline collapses to one muted mono line.
-- **Frames** are a numbered contact sheet (`frames-grid.tsx`): legible 2/3/4-col
-  tiles, mono `N m:ss` caption over each keyframe, the current one cobalt-ringed.
-  Clicking a tile opens a **lightbox** (full-size still, ←→/Esc, `frame N / total`)
-  with a cobalt **Play from here** that force-plays the player and scroll-reveals
-  it — a 64px thumbnail was never viewable, and seeking a player scrolled off the
-  top did nothing you could watch.
+- **The viewer's main area is a two-way view switch** (2026-08-14): a segmented
+  **Video / Frames** control (status-control anatomy, cobalt-wash active) as the
+  first thing under the masthead. **Video** = player + transcript/console rail +
+  Timeline + the `cut this video down` link; **Frames** = the slideshow,
+  full-width. The video view is hidden, never unmounted (playback position
+  survives the switch); switching to Frames pauses playback. Comments and the
+  report sit below in both views.
+- **Frames view** is a shot-by-shot **slideshow** (`slideshow.tsx` — replaced
+  the contact sheet + lightbox 2026-08-14; thousands of tiles were unreadable):
+  one big still on a dark well with overlay ←/→ arrows (arrow keys work while
+  the stage has focus), a mono `frame N / total · m:ss` readout with quiet
+  `play from here` / `edit frames` mono links on its right, a horizontal
+  filmstrip that auto-centres the selected thumb — **legible size on purpose**
+  (`h-24 sm:h-28`, each thumb numbered with a tiny mono chip): before/after
+  must be judgeable at a glance for delete decisions, never a 56px scrubber
+  (cobalt ring = the shot you're on; a 2px cobalt bottom tick = where the video
+  playhead is — two different facts, keep both), and the dialog in a **right
+  rail** (lg+): stage + filmstrip take a 2/3 column and the full transcript
+  scrolls in a bordered strip beside them — absolute-positioned so it borrows
+  the left column's height instead of stretching the row; below lg it stacks
+  beneath the filmstrip. The line spoken at this shot is cobalt-washed and
+  auto-centred.
+  Both auto-scroll containers are `relative` on purpose — offsetTop/offsetLeft
+  read from the nearest positioned ancestor, and without it the strips clamp.
+  Clicking a transcript line jumps the slideshow, never the player;
+  `play from here` is the bridge back (switches to Video, seeks, scroll-reveals).
+  **Edit mode** (members only): `delete this frame` (destructive mono, white
+  chip on the stage) deletes with NO confirm — deletes are **staged** locally
+  with **infinite undo** (`undo (N)` link, Cmd/Ctrl+Z, Delete key deletes the
+  current shot) and commit as one batch via `done — delete N`; a mono
+  `saving… / couldn't save — retry` line reports the commit. Every filmstrip
+  thumb also carries its own ✕ (hover-revealed; always shown on the current
+  one) so neighbours die without navigating to them — deleting one before the
+  current shot re-indexes to keep the big view on the same image. Same position
+  shows the next shot after a delete, so pruning near-duplicates is
+  delete-delete-delete.
 - **Transcript** (`transcript-panel.tsx`) is a borderless list: cobalt mono
   times, the playing line cobalt-washed, click seeks. **Console**
   (`events-panel.tsx`): mono lines with a 2px left tick — red error, violet

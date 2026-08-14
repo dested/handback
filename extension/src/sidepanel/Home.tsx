@@ -214,7 +214,9 @@ export function Home({
               className={`kindpick-opt${kind === option.value ? ' on' : ''}`}
               disabled={kindLocked && kind !== option.value}
               title={
-                kindLocked ? 'This walkthrough already has a take — its mode is settled' : undefined
+                kindLocked
+                  ? 'This walkthrough already has a recording — its mode is settled'
+                  : undefined
               }
               onClick={() => onPickKind(option.value)}
             >
@@ -371,7 +373,7 @@ export function Home({
                     {[
                       STATUS_LABEL[w.status],
                       mmss(w.durationMs),
-                      w.takeCount > 1 ? plural(w.takeCount, 'take') : '',
+                      w.takeCount > 1 ? plural(w.takeCount, 'part') : '',
                       w.projectName ?? (w.origin ? hostOf(w.origin) : ''),
                       ago(w.recordedAt),
                     ]
@@ -424,7 +426,7 @@ export function Home({
           {local.map((s) => {
             const sum = summaries[s.id];
             const meta = [
-              sum && sum.takes ? plural(sum.takes, 'take') : 'nothing recorded',
+              sum && sum.takes ? plural(sum.takes, 'part') : 'nothing recorded',
               sum && sum.durationMs ? mmss(sum.durationMs) : '',
               s.origin ? hostOf(s.origin) : '',
               ago(s.updatedAt || s.createdAt),

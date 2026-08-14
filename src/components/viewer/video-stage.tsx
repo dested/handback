@@ -20,7 +20,7 @@ import {
 } from 'lucide-react'
 import { cn } from '~/lib/utils'
 import { mmss } from './format'
-import type { GridFrame } from './frames-grid'
+import type { ViewerFrame } from './slideshow'
 import { usePopover } from './overflow-menu'
 import type { SegmentPlayer } from './use-segment-player'
 
@@ -44,7 +44,7 @@ export function VideoStage({
   maxHeightClass?: string
   /** Keyframes on the output clock — the exact stills the agent reads. When
    *  present, the transport ticks each capture and the well flashes the shot. */
-  frames?: GridFrame[]
+  frames?: ViewerFrame[]
 }): React.ReactElement {
   const { videoRef, currentSrc, playing, outputMs, durationMs, togglePlay, seekOutput } = player
 

@@ -1,8 +1,8 @@
 /*
- * The side panel's own styles — the shell around the timeline: header, the live
- * readout, the gripe's title line, settings, and the handoff row. `styles.css` is
- * the shared token sheet (paper, ink, cobalt, the type scale); this is the surface
- * built out of those tokens, the same way `timeline.css` dresses the editor.
+ * The side panel's own styles — the whole shell: header, the live readout, the
+ * gripe's title line, the parts list that is the review screen, settings, and the
+ * handoff row. `styles.css` is the shared token sheet (paper, ink, cobalt, the
+ * type scale); this is the surface built out of those tokens.
  *
  * Handback's one law: light only, nothing orange. Warm paper ground, white cards
  * brighter than the page, hairline rules instead of boxes, one cobalt accent, mono
@@ -1001,6 +1001,294 @@ button.ticker.warn:hover {
 .titlerow .rec.ghost .dot {
   width: 6px;
   height: 6px;
+}
+
+/* ── The parts ──────────────────────────────────────────────────────────── */
+/* The review screen: a walkthrough as a vertical list of parts, one recording
+ * each, in recorded order. It is the scrolling middle of the panel, between the
+ * title section and the handoff footer — so it, not the panel, owns the scroll.
+ * Cards divide with hairlines, never boxes; the one dark surface is the video
+ * well, dark because a video needs it. */
+.parts {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 12px 12px;
+}
+.parts-empty {
+  padding: 14px 0;
+  font-size: var(--fs-1);
+  color: var(--muted);
+}
+
+.part {
+  padding: 12px 0;
+}
+.part + .part {
+  border-top: 1px solid var(--border);
+}
+
+/* Which part this is and how long it runs, with the one control that removes it.
+ * The delete arms in place — the row holds its height so the question never shoves
+ * the card below it around while it is being answered. */
+.part-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 20px;
+}
+.part-n {
+  font-family: var(--font-mono);
+  font-size: var(--fs-0);
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.part-sp {
+  flex: 1;
+}
+/* Styled after `.kill`, but a cell in the row rather than an absolute corner. */
+.part-kill {
+  flex: none;
+  padding: 2px 4px;
+  background: none;
+  border: 0;
+  color: var(--muted);
+  font-size: var(--fs-2);
+  line-height: 1;
+}
+.part-kill:hover:not(:disabled) {
+  color: var(--danger);
+}
+.part-kill:disabled {
+  opacity: 0.35;
+}
+.part-arm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-0);
+  color: var(--ink);
+}
+.part-arm button {
+  padding: 0;
+  background: none;
+  border: 0;
+  font: inherit;
+  color: var(--cobalt);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.part-arm .part-yes {
+  color: var(--danger);
+}
+
+/* The video, in its dark well — click it to play or pause. */
+.part-well {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  max-height: 300px;
+  margin: 8px 0;
+  background: #17181c;
+  border-radius: var(--radius);
+  overflow: hidden;
+  cursor: pointer;
+}
+.part-well.poster {
+  min-height: 120px;
+  cursor: default;
+}
+.part-video {
+  display: block;
+  width: 100%;
+  max-height: 300px;
+  object-fit: contain;
+}
+/* The webm never made it to this machine (a recovered session, or the preview
+ * harness): the first keyframe stands in, dimmed, and says so — never a broken
+ * player. */
+.part-still {
+  display: block;
+  width: 100%;
+  max-height: 300px;
+  object-fit: contain;
+  opacity: 0.4;
+}
+.part-novideo {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: var(--fs-0);
+  color: rgba(255, 255, 255, 0.7);
+  pointer-events: none;
+}
+
+/* Under the video: play/pause, a slim seek bar, and the clock. Only drawn once
+ * the video has loaded — a seek bar over a player that can't seek is a lie. */
+.part-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.part-play {
+  flex: none;
+  width: 26px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--cobalt);
+  font-size: var(--fs-0);
+  line-height: 1;
+}
+.part-play:hover {
+  border-color: var(--cobalt);
+}
+/* 4px of track, ~16px of hit area around it — a slim bar is easier to read than
+ * to grab, so the grab area is bigger than the mark. */
+.part-seek {
+  position: relative;
+  flex: 1;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  touch-action: none;
+}
+.part-seek-track {
+  position: relative;
+  width: 100%;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.part-seek-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: block;
+  height: 100%;
+  background: var(--cobalt);
+  border-radius: 2px;
+}
+.part-clock {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--fs-0);
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.part-meta {
+  margin-top: 6px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-0);
+  color: var(--muted);
+}
+
+/* The narration, in its own scroll region so a long part stays a compact card and
+ * the auto-follow never yanks the whole panel. */
+.part-script {
+  margin-top: 8px;
+}
+.part-script-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-0);
+  color: var(--muted);
+}
+/* The count is the fact and stays whole; the hint is the affordance and is the
+ * one that truncates when the panel gets narrow. */
+.part-script-head > span:first-child {
+  flex: none;
+  white-space: nowrap;
+}
+.part-hint {
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+  opacity: 0.75;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.part-noscript {
+  margin-top: 4px;
+  font-size: var(--fs-1);
+  font-style: italic;
+  color: var(--muted);
+}
+.part-lines {
+  max-height: 220px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin-top: 4px;
+}
+.part-line {
+  display: flex;
+  gap: 10px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  font-size: var(--fs-2);
+  line-height: 1.5;
+  color: var(--ink);
+  cursor: pointer;
+}
+.part-line:hover {
+  background: rgba(35, 38, 46, 0.04);
+}
+.part-line.now {
+  background: var(--cobalt-wash);
+  box-shadow: inset 2px 0 0 var(--cobalt);
+}
+.part-line-t {
+  flex: none;
+  min-width: 34px;
+  padding-top: 2px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-0);
+  text-align: right;
+  color: var(--cobalt);
+}
+.part-line-x {
+  flex: 1;
+  min-width: 0;
+}
+.part-linein {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 6px;
+  background: var(--card);
+  border: 1px solid var(--cobalt);
+  border-radius: 4px;
+  outline: 0;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--fs-2);
+  caret-color: var(--cobalt);
+}
+
+/* The only add button on the screen now — full width at the foot of the list,
+ * the cobalt outline ghost so it never outshouts send. */
+.parts-add {
+  display: flex;
+  width: 100%;
+  justify-content: center;
+  margin-top: 12px;
 }
 
 .empty {

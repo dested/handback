@@ -29,7 +29,7 @@ import { Dictation } from '../content/speech';
 import { makeGrids, type GridFrame } from './grids';
 import { polishTranscript } from './polish';
 import { transcribeRecording, type TranscribeProgress } from './transcribe';
-import { Timeline } from './Timeline';
+import { Parts } from './Parts';
 import { Home } from './Home';
 import './panel.css';
 
@@ -581,7 +581,7 @@ export function App() {
       const meta = await r.stop();
       await send({ type: 'recording:finish', id: r.id, meta });
       await refresh();
-      say('saved — on the timeline');
+      say('saved — added below');
       // Transcription is queued, not awaited: Record has to be pressable again
       // right now — stopping and starting again is what takes are for.
       enqueueWhisper(r.id);
@@ -987,7 +987,7 @@ export function App() {
   const summary = [
     // Duration, not a count — the panel presents one timeline.
     takes.length ? `${mmss(totalMs(partSpans(takes)))} recorded` : '',
-    takes.length > 1 ? `${takes.length} takes` : '',
+    takes.length > 1 ? `${takes.length} parts` : '',
   ]
     .filter(Boolean)
     .join(' · ');
@@ -1165,7 +1165,7 @@ export function App() {
                 void chrome.tabs.create({ url: chrome.runtime.getURL('micperm.html') })
               }
             >
-              microphone blocked — no narration this take · fix it
+              microphone blocked — no narration on this part · fix it
             </button>
           ) : (
             <div className={`ticker${recUpdate.interim ? '' : ' idle'}`}>
@@ -1246,7 +1246,7 @@ export function App() {
               <span className="spacer" />
               {confirmDiscard ? (
                 <span className="confirm">
-                  <span>discard{hasContent ? ` ${plural(takes.length, 'take')}` : ' this'}?</span>
+                  <span>discard{hasContent ? ` ${plural(takes.length, 'part')}` : ' this'}?</span>
                   <button className="link danger" onClick={() => void discardSession()}>
                     yes, discard
                   </button>
@@ -1258,13 +1258,14 @@ export function App() {
                 <button
                   className="link"
                   disabled={recording || uploading}
-                  title="Delete this walkthrough and its takes from this machine"
+                  title="Delete this walkthrough and its parts from this machine"
                   onClick={() => setConfirmDiscard(true)}
                 >
                   discard
                 </button>
               )}
             </div>
+            {/* Just the name now — the add lives at the end of the parts list. */}
             <div className="titlerow">
               <input
                 className="title"
@@ -1274,21 +1275,16 @@ export function App() {
                 onBlur={(e) => void renameSession(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
               />
-              {/* It says what it does: another take, on this walkthrough. "add
-                  more" said neither what was added nor to what. */}
-              {!recording && (
-                <button
-                  className="rec ghost"
-                  title="Record another take into this walkthrough"
-                  onClick={() => void startRecording()}
-                >
-                  <span className="dot" />
-                  add another recording
-                </button>
-              )}
             </div>
           </section>
-          <Timeline session={session} recordings={state.recordings} busy={recording || uploading} />
+          <Parts
+            session={session}
+            recordings={state.recordings}
+            busy={recording || uploading}
+            transcribing={whisperIds}
+            onAdd={() => void startRecording()}
+            onSay={say}
+          />
         </>
       )}
 
@@ -1488,7 +1484,7 @@ function PickGate({
         <ShareDialogMock />
         <p className="gate-lead">
           <b>Turn on “Also share tab audio.”</b> That switch is how the sound your app makes —
-          everything you’re hearing in your headphones — gets into the take. Chrome leaves it
+          everything you’re hearing in your headphones — gets into the recording. Chrome leaves it
           wherever it was last time, and with it off the app records silent.
         </p>
         <p className="gate-lead">

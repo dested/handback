@@ -1,9 +1,14 @@
 /**
- * Generates the extension icons (the Handback mark: one returning stroke — out
- * in ink, back in cobalt with an arrowhead) with zero dependencies — a tiny
+ * Generates the extension icons (the Handback mark on a solid cobalt tile: the
+ * returning stroke knocked out in warm paper) with zero dependencies — a tiny
  * hand-rolled PNG encoder plus node's zlib. Beats checking binaries into git,
  * and the mark stays editable as code. Encoder ported from the original Gripe
  * icon script; only the art changed.
+ *
+ * WHY a filled tile: a Chrome MV3 action icon gets no reliable dark/light
+ * toolbar signal, so a transparent two-tone stroke can't stay legible — its ink
+ * half vanished on dark toolbars. The tile carries its own contrast on any
+ * toolbar (light, dark, or a custom theme), so the mark is always visible.
  */
 import { deflateSync } from 'node:zlib';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -12,8 +17,8 @@ import { fileURLToPath } from 'node:url';
 
 const OUT_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'public', 'icons');
 const SIZES = [16, 32, 48, 128];
-const INK = [35, 38, 46]; // near-black
-const COBALT = [47, 86, 216]; // the reviewer's pen
+const COBALT = [47, 86, 216]; // the reviewer's pen — the tile ground
+const PAPER = [250, 249, 245]; // warm paper — the stroke, knocked out of the tile
 
 const crcTable = (() => {
   const table = new Int32Array(256);
@@ -60,14 +65,6 @@ function encodePng(size, rgba) {
   ]);
 }
 
-/**
- * The mark: one returning stroke, drawn in the web mark's 28×20 coordinate
- * space (src/components/logo.tsx is the source of truth). Out along the top in
- * ink, a U-turn on the right, back along the bottom in cobalt, arrowhead
- * landing on the left. Cobalt wins overlaps — the pen sits on top. Returns
- * null (transparent) or an [r,g,b] colour for a point in normalised space
- * (-1..1 both axes).
- */
 function distSeg(px, py, ax, ay, bx, by) {
   const dx = bx - ax;
   const dy = by - ay;
@@ -75,22 +72,45 @@ function distSeg(px, py, ax, ay, bx, by) {
   return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
 }
 
+// The cobalt tile: a rounded square filling the icon, in normalised -1..1 space.
+// Signed distance (<0 inside) so supersampling anti-aliases the corners.
+const TILE_E = 0.94; // half-extent — near full-bleed for maximum toolbar contrast
+const TILE_R = 0.34; // corner radius
+function tileDist(nx, ny) {
+  const qx = Math.abs(nx) - (TILE_E - TILE_R);
+  const qy = Math.abs(ny) - (TILE_E - TILE_R);
+  return Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - TILE_R;
+}
+
+/**
+ * The mark: one returning stroke, drawn in the web mark's 28×20 coordinate
+ * space (src/components/logo.tsx is the source of truth) — out along the top, a
+ * U-turn on the right, back along the bottom, arrowhead landing on the left. On
+ * the tile it is a single knocked-out stroke (no ink/cobalt split — the tile is
+ * the only colour). Centred and scaled to sit inside the tile with margin.
+ * Returns the distance to the nearest stroke in mark units.
+ */
+function markDist(nx, ny) {
+  const mx = 12.9 + nx * 14.8; // mark centre (12.9, 12.2) at the tile centre
+  const my = 12.2 + ny * 14.8;
+  // U-turn arc: centre (18,10) r 3.8, right half only.
+  const arc = mx >= 18 ? Math.abs(Math.hypot(mx - 18, my - 10) - 3.8) : Infinity;
+  return Math.min(
+    arc,
+    distSeg(mx, my, 4, 6.2, 18, 6.2), // out along the top
+    distSeg(mx, my, 8, 13.8, 18, 13.8), // back along the bottom
+    distSeg(mx, my, 11.4, 9.4, 6.2, 13.8), // arrowhead, upper barb
+    distSeg(mx, my, 6.2, 13.8, 11.4, 18.2), // arrowhead, lower barb
+  );
+}
+
+const HW = 1.9; // half stroke width in mark units — bold enough to read at 16px
+
+// Returns [r,g,b] for a point in normalised space, or null (transparent).
 function sample(nx, ny) {
-  // Normalised -1..1 → mark units (viewBox 0 0 28 20, centred, slight padding).
-  const mx = nx * 15.5 + 14;
-  const my = ny * 15.5 + 10;
-  const HW = 1.6; // half stroke width, thicker than the web 1.2 for icon punch
-  // U-turn arc: centre (18,10) r 3.8; right half only, split at the midline.
-  const arcDist = Math.abs(Math.hypot(mx - 18, my - 10) - 3.8);
-  const onArc = arcDist <= HW && mx >= 18;
-  const cobalt =
-    (onArc && my >= 10) ||
-    distSeg(mx, my, 8, 13.8, 18, 13.8) <= HW ||
-    distSeg(mx, my, 11.4, 9.4, 6.2, 13.8) <= HW ||
-    distSeg(mx, my, 6.2, 13.8, 11.4, 18.2) <= HW;
-  if (cobalt) return COBALT;
-  if ((onArc && my < 10) || distSeg(mx, my, 4, 6.2, 18, 6.2) <= HW) return INK;
-  return null;
+  if (tileDist(nx, ny) > 0) return null; // outside the tile
+  if (markDist(nx, ny) <= HW) return PAPER; // the knocked-out stroke
+  return COBALT; // the tile ground
 }
 
 function render(size) {

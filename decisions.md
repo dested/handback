@@ -2,6 +2,47 @@
 
 > ADR-lite: what was decided, why, what was rejected. Append-only.
 
+## 2026-08-14 — The extension panel's review screen is a parts list, not a timeline
+**Why:** owner directive — a walkthrough is now presented as a collection of **parts** the person
+plays, reads, fixes, deletes and adds to (how they choose to cut it up), not one continuous axis to
+scrub. The scrubber `Timeline` (monitor + ruler + filmstrip + voice lane + zoom, `Timeline.tsx` +
+`timeline.css`) is **deleted**; `Parts.tsx` renders one card per recording in recorded order,
+divided by hairlines, each with its video in a dark well, a slim cobalt seek bar, a mono meta line,
+and the transcript in its own scroll region (click seeks, double-click fixes, inline armed delete).
+The end-of-list cobalt-outline ghost is the only add/record button. The word **"take" is banned from
+every user-facing string in the extension** — the noun is **part** (or "recording" where that reads
+better); the panel/Home/App copy was swept. **This supersedes the 2026-08-01 panel-scrubber design
+notes** (one-gesture scrub, no selection, the take lane, the empty-timeline collapse) wherever they
+conflict — they described the deleted component. **Unchanged:** every internal identifier —
+`take:delete` and its renumbering, `Recording`, `rec-NN` dirs, `report.md` builder text, upload field
+names, and `lib/timeline.ts` (the report builder and App's duration summary still use `partSpans` /
+`totalMs`). The web viewer/editor timeline is a separate surface and is untouched.
+**Rejected:** keeping the scrubber (owner: the axis is the wrong mental model for a set of parts);
+renaming the internal `take` vocabulary (it is the S3/report/MCP contract — only UI copy changes).
+
+## 2026-08-14 — Viewer frames: slideshow replaces the contact sheet; deletion is an inline mode
+**Why:** owner directive — a wall of thousands of tiles is unreadable, and the reviewer's real
+motion is shot-for-shot with the narration in view. `viewer/slideshow.tsx` (big still + filmstrip
++ auto-scrolling dialog strip) replaces `frames-grid.tsx` and its lightbox, amending the
+2026-08-12 chassis on that one point. Frame deletion exists but is deliberately out of the
+everyday path: a quiet `edit frames` toggle inside the Frames view (members only). No confirm —
+an S3 delete can't be undone, so deletes are STAGED client-side (the shot vanishes instantly)
+with infinite undo (link / Cmd-Ctrl+Z / Delete key) and commit as one batch on "done — delete N";
+until then nothing has left the browser. The viewer's main area is a Video / Frames segmented
+switch (same-day follow-up); the video view hides rather than unmounts so playback position
+survives. Server: `walkthroughs.deleteFrames` accepts only
+`frames/` paths (video/report unreachable), deletes rows before S3 keys (a crash orphans objects
+— the walkthrough-prefix wipe collects them later — rather than leaving rows presigning dead
+keys), and keeps per-take + walkthrough `frameCount`/`bytes` honest. `recording.json` is NOT
+rewritten — it stays immutable/cached; the viewer drops frames with no uploaded file row, so
+deleted (and never-uploaded) frames simply vanish, and the MCP brief follows the files list.
+**Rejected:** a page-level edit mode like the editor/split panel (deletion is curation, not a
+different page); an arm/confirm per delete (owner: undo beats confirm — first cut shipped with
+inline arming and was replaced same day); per-delete server calls (kills undo — the batch commit
+IS what makes undo free); multi-select/range delete (delete-then-advance + Delete-key covers the
+burst-pruning case); rewriting recording.json on delete (breaks the immutable-file cache contract
+for zero reader benefit).
+
 ## 2026-08-13 — Split-out tasks are metadata-only child rows; the brief IS their report
 **Why:** what an agent needs from a split-out task is the task text plus a pointer at the
 evidence — copying frames/takes/report into N children would multiply storage, break the
