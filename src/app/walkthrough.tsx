@@ -12,6 +12,7 @@ import { AgentAnswer } from '~/components/viewer/agent-answer'
 import { AgentView } from '~/components/viewer/agent-view'
 import { FinalCut } from '~/components/viewer/final-cut'
 import { SectionHead } from '~/components/viewer/section-head'
+import { SplitChildren, SplitPanel, TaskBrief } from '~/components/viewer/split-panel'
 import { WalkthroughHeader } from '~/components/viewer/walkthrough-header'
 import { ViewerSkeleton } from '~/components/viewer/skeleton'
 import { useTRPC } from '~/lib/trpc'
@@ -25,6 +26,8 @@ export function WalkthroughPage() {
   })
   /** The inline edit mode. It replaces the takes while it's up. */
   const [editing, setEditing] = useState(false)
+  /** The split-into-tasks mode — same pattern, replaces the page while it's up. */
+  const [splitting, setSplitting] = useState(false)
 
   const walkthrough = walkthroughQuery.data
 
@@ -67,6 +70,23 @@ export function WalkthroughPage() {
       urlByPath.has(take.videoPath ?? `${take.dir}/walkthrough.webm`)
     )
   const canEdit = hasRawTakes && walkthrough.viewerIsMember
+  // A split-out task is its brief; there is nothing to split further and no
+  // recording of its own to review.
+  const isChild = walkthrough.briefMd !== null
+  const canSplit = walkthrough.viewerIsMember && !human && !isChild
+
+  if (splitting && canSplit) {
+    return (
+      <div className="space-y-8">
+        <div className="space-y-5">
+          <WalkthroughHeader walkthrough={walkthrough} />
+        </div>
+        <div className="rule pt-8">
+          <SplitPanel walkthrough={walkthrough} onClose={() => setSplitting(false)} />
+        </div>
+      </div>
+    )
+  }
 
   if (editing && canEdit) {
     return (
@@ -87,15 +107,37 @@ export function WalkthroughPage() {
     )
   }
 
+  // A split-out task: the brief is the page. No takes, no files, no filmstrip —
+  // just the task, the review thread, and the way back to the recording.
+  if (isChild) {
+    return (
+      <div className="space-y-8">
+        <div className="space-y-5">
+          <WalkthroughHeader walkthrough={walkthrough} />
+        </div>
+        <AgentAnswer walkthrough={walkthrough} />
+        <div className="rule pt-8">
+          <TaskBrief walkthrough={walkthrough} />
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-8">
       <div className="space-y-5">
-        <WalkthroughHeader walkthrough={walkthrough} />
+        <WalkthroughHeader
+          walkthrough={walkthrough}
+          onSplit={canSplit ? () => setSplitting(true) : undefined}
+        />
       </div>
 
       {/* The review thread + sign-off, right under the masthead: when an agent
           has answered, approving or sending back IS the job of this page. */}
       <AgentAnswer walkthrough={walkthrough} />
+
+      {/* What was carved out of this recording, when a split has run. */}
+      <SplitChildren walkthrough={walkthrough} />
 
       {/* Recorded for a person, uploaded raw, never tightened: the edit is the
           only thing anyone wants from this page, so it is the page. */}

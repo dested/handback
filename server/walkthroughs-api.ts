@@ -284,15 +284,19 @@ export async function getWalkthroughDetail(
   const space = spaceId({ teamId: walkthrough.teamId, userId: walkthrough.userId })
 
   // report.md is the whole point of the pull, but a walkthrough is still usable
-  // without it (bad upload, hand-declared walkthrough) — degrade to null.
-  const reportMd = await getObjectText(walkthroughKey(space, walkthrough.id, 'report.md')).catch(
-    (err: unknown) => {
-      log.warn(
-        `[walkthroughs] report.md unreadable for walkthrough ${walkthrough.id}: ${String(err)}`
-      )
-      return null
-    }
-  )
+  // without it (bad upload, hand-declared walkthrough) — degrade to null. A
+  // split-out task carries no files at all: its brief IS the report, and it
+  // points the agent at the parent for the recording itself.
+  const reportMd =
+    walkthrough.briefMd ??
+    (await getObjectText(walkthroughKey(space, walkthrough.id, 'report.md')).catch(
+      (err: unknown) => {
+        log.warn(
+          `[walkthroughs] report.md unreadable for walkthrough ${walkthrough.id}: ${String(err)}`
+        )
+        return null
+      }
+    ))
 
   return {
     id: walkthrough.id,

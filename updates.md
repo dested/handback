@@ -2,6 +2,22 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-08-13 — Wave 3: split-into-tasks structuring pass + voice-only capture
+Asked: finish the picked backlog — C1 (LLM structuring, on-demand from the viewer) + C3 (voice-only
+capture); commit local, no push (per plans/2026-08-13-loop-and-team-wave.md, now done).
+Done: `server/structure.ts` (claude-opus-5 structured outputs over report.md+comments → 1–10
+proposed tasks, m:ss stamps parsed/clamped server-side, degrade-to-null like polish; childBriefMd
+writes each child's brief); `proposeSplit`/`applySplit` (requireSplittable gates, metered via
+checkAndReservePolish, human confirms before rows exist); `Walkthrough.parentId`+`briefMd`
+children — metadata-only rows, finalized at birth, briefMd served as reportMd to MCP; viewer
+SplitPanel/TaskBrief/SplitChildren + ⋯ "Split into tasks…". /record gained kind "just talk":
+mic-only MediaRecorder voice note, in-memory (no IDB, deliberate), sent through the unchanged
+phone distill pipeline with a pre-supplied hasVideo:false probe; VOICE_RECORD_ROWS stage list.
+Typecheck + build green; schema pushed nowhere (.env → prod), no live run.
+Touched: prisma/schema.prisma, server/{structure(new),router,walkthroughs-api}.ts,
+src/components/viewer/{split-panel(new),walkthrough-header,overflow-menu}.tsx,
+src/components/phone/stages.tsx, src/app/{walkthrough,record}.tsx
+
 ## 2026-08-13 — Wave 2: timestamped comments, full-text search, Monday digest
 Asked: continue the picked backlog (all of B) — B2 comments, B3 search, B4 digest.
 Done: `WalkthroughComment` (optional atMs on the output clock; CommentsPanel in AgentView —

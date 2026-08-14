@@ -229,6 +229,17 @@ model Walkthrough {
   // agent kind, the transcript for human kind. Searched with a query-time
   // to_tsvector — no GIN index yet, deliberate at current row counts.
   searchText   String?   @map("search_text")
+  // The split (server/structure.ts): a child task is a metadata-only row —
+  // no files, no takes, ~0 bytes — whose brief lives in `briefMd` and whose
+  // evidence (frames, video, report) lives on the parent. SetNull so children
+  // survive the parent's deletion as plain standalone tasks.
+  parentId     String?   @map("parent_id")
+  parent       Walkthrough?  @relation("split", fields: [parentId], references: [id], onDelete: SetNull)
+  children     Walkthrough[] @relation("split")
+  // The child's whole content: markdown authored by the structuring pass
+  // (severity, repro, acceptance criteria, source time ranges). When set, the
+  // agent brief serves it as the report.
+  briefMd      String?   @map("brief_md")
 
   takes    Take[]
   files    WalkthroughFile[]

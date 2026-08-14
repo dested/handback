@@ -45,6 +45,15 @@ export const HUMAN_RECORD_ROWS: StageRow[] = RECORD_ROWS.filter(
   (row) => !row.stages.includes('frames') && !row.stages.includes('build')
 )
 
+/**
+ * A voice note's rows: no picture, so no keyframes — but unlike the human path
+ * the report still gets built (the transcript IS the walkthrough, and the
+ * report is how an agent reads it).
+ */
+export const VOICE_RECORD_ROWS: StageRow[] = RECORD_ROWS.filter(
+  (row) => !row.stages.includes('frames')
+)
+
 /** The stages past which cancelling would leave a half-declared walkthrough behind. */
 const COMMITTED: CaptureStage[] = ['declare', 'upload', 'finalize']
 

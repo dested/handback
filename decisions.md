@@ -2,6 +2,34 @@
 
 > ADR-lite: what was decided, why, what was rejected. Append-only.
 
+## 2026-08-13 — Split-out tasks are metadata-only child rows; the brief IS their report
+**Why:** what an agent needs from a split-out task is the task text plus a pointer at the
+evidence — copying frames/takes/report into N children would multiply storage, break the
+"one recording, one prefix" S3 layout, and go stale the moment the parent is re-edited. So a
+child is a Walkthrough row with `parentId` + `briefMd` and nothing else: no files, no takes,
+zero bytes, `finalizedAt` at birth (lists/inbox/MCP all show it with no special casing), and
+`getWalkthroughDetail` serves `briefMd` as `reportMd` so both MCP servers and /admin's debug
+brief work unchanged. The brief's Source section sends the agent to `get_walkthrough(parent)`
+for frames/console. `onDelete: SetNull` — children outlive a deleted parent as standalone
+tasks. The pass itself: claude-opus-5 with structured outputs (assistant prefill 400s on
+Opus 5 — the Haiku prefill trick in polish.ts does NOT port), refusal stop_reason checked,
+every failure → null; metered through the existing polish budget; and the propose/apply split
+means a human confirms every task before a row exists.
+**Rejected:** copying evidence into children (storage × N, stale copies); a separate Task
+table (every surface — inbox, MCP, status, comments, review thread — would need a second
+implementation); auto-split at finalize (owner: on-demand only, never auto); the server-side
+fallbacks beta for the model call (typing risk on SDK 0.115; degrade-to-null already covers
+refusals, which are unlikely for bug reports about your own product).
+
+## 2026-08-13 — Voice notes are memory-only and ride the phone pipeline untouched
+**Why:** /record's "just talk" holds ~30s of audio; IDB crash-recovery machinery (the take
+store, chunk families, resume flows) costs more than re-recording ever would, so the blob
+lives in component state and the UI says a reload loses it. Upload is `distillAndUpload` with
+a pre-supplied `hasVideo: false` probe — the audio-only path /phone's voice notes already
+exercise — so there is no fourth pipeline to mirror.
+**Rejected:** IDB persistence (machinery > value at this duration); a dedicated voice
+endpoint (the phone pipeline already builds report/transcript/MANIFEST for audio-only clips).
+
 ## 2026-08-13 — Full-text search is a plain corpus column + query-time tsvector, unindexed
 **Why:** the searchable text (report.md / transcript) lives in S3, not Postgres, so *something*
 must be copied into the DB — a plain `searchText` column filled once at finalize is the whole

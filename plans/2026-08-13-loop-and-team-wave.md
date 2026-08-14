@@ -1,7 +1,7 @@
 # Close the loop + team productivity + capture quality (3 waves)
 
 - **Date:** 2026-08-13
-- **Status:** active
+- **Status:** done
 - **Type:** plan
 - **What:** the picked backlog — A1 result post-back, A2 send-back, A5 activity trace, B1–B4
   (email notify, comments, search, digest), C1 structuring, C3 voice capture — specced as three

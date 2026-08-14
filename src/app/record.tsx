@@ -20,7 +20,7 @@ import { useMutation } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { Editor } from '~/components/edit/editor'
 import { DestinationControl, type Destination } from '~/components/phone/destination'
-import { RECORD_ROWS, StageList, isCommitted } from '~/components/phone/stages'
+import { RECORD_ROWS, StageList, VOICE_RECORD_ROWS, isCommitted } from '~/components/phone/stages'
 import { RecordingHud } from '~/components/record/hud'
 import { RecordingPanel } from '~/components/record/panel'
 import { PipHost, usePipWindow } from '~/components/record/pip'
@@ -31,6 +31,7 @@ import { Label } from '~/components/ui/label'
 import { useCopy } from '~/components/viewer/use-copy'
 import { useCaptureToken } from '~/lib/capture-token'
 import { fetchContext, type ServerContext } from '~/lib/capture/context'
+import { distillAndUpload } from '~/lib/capture/distill'
 import { mmss } from '~/lib/capture/format'
 import {
   canRecordScreen,
@@ -110,15 +111,30 @@ export function RecordPage() {
 
   // Who the recording is FOR — the fork the whole page follows. 'agent' =
   // distill into keyframes + report; 'human' = pristine 30 fps video, no
-  // distill, tightened and shared with a person. Fixed once a take exists:
-  // the two modes capture differently, and a session can't mix them.
-  const [kind, setKind] = useState<'agent' | 'human'>('agent')
+  // distill, tightened and shared with a person; 'voice' = mic only, no screen
+  // at all — the transcript is the walkthrough (kind 'agent' on the server).
+  // Fixed once a take exists: the modes capture differently and can't mix.
+  const [kind, setKind] = useState<'agent' | 'human' | 'voice'>('agent')
   const [title, setTitle] = useState('')
   const [placeholder, setPlaceholder] = useState('Walkthrough')
   const [progress, setProgress] = useState<StageProgress | null>(null)
   const [result, setResult] = useState<DistillResult | null>(null)
   const [failure, setFailure] = useState<string | null>(null)
   const [discarding, setDiscarding] = useState(false)
+
+  // The voice note. One take, held in memory — a voice mode exists so someone
+  // can say it in thirty seconds, and thirty seconds is not worth IndexedDB's
+  // recovery machinery. The blob dies with the tab; the review screen says so.
+  const [voiceBlob, setVoiceBlob] = useState<Blob | null>(null)
+  const [voiceUrl, setVoiceUrl] = useState<string | null>(null)
+  const [voiceMs, setVoiceMs] = useState(0)
+  const [voiceElapsed, setVoiceElapsed] = useState(0)
+  const voiceRec = useRef<{
+    recorder: MediaRecorder
+    stream: MediaStream
+    chunks: Blob[]
+    startedAt: number
+  } | null>(null)
 
   // The human-handback edit. Envelopes and raw blobs live in refs (decoded
   // once, never rendered); the object URLs feed the preview and are revoked
@@ -241,6 +257,9 @@ export function RecordPage() {
   // The draft is what lets a reload land back on the same walkthrough rather
   // than an untitled one pointed at the wrong space.
   useEffect(() => {
+    // A voice note never touches the take store, so it has no draft to save —
+    // and the Draft type only knows the two screen kinds.
+    if (kind === 'voice') return
     if (!takes.length || !session.current) return
     void saveDraft({
       sessionId: session.current,
@@ -309,6 +328,146 @@ export function RecordPage() {
     }
   }, [takes.length, kind])
 
+  // ── the voice note ──────────────────────────────────────────────────────
+
+  const startVoice = useCallback(async () => {
+    if (voiceRec.current) return
+    setRecordError(null)
+    try {
+      // Browser defaults on purpose (echo cancellation and all): this is one
+      // person talking at their laptop, not app audio worth preserving raw.
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mime = ['audio/webm;codecs=opus', 'audio/webm'].find((t) =>
+        MediaRecorder.isTypeSupported(t)
+      )
+      const recorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined)
+      const entry = { recorder, stream, chunks: [] as Blob[], startedAt: Date.now() }
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) entry.chunks.push(event.data)
+      }
+      recorder.onstop = () => {
+        stream.getTracks().forEach((track) => track.stop())
+        const blob = new Blob(entry.chunks, { type: recorder.mimeType || 'audio/webm' })
+        voiceRec.current = null
+        setVoiceMs(Date.now() - entry.startedAt)
+        setVoiceBlob(blob.size > 0 ? blob : null)
+        setPhase(blob.size > 0 ? 'review' : 'idle')
+        if (blob.size === 0) setRecordError("nothing was recorded — check the mic and try again")
+      }
+      recorder.start(1000)
+      voiceRec.current = entry
+      setVoiceElapsed(0)
+      setPhase('recording')
+    } catch {
+      setRecordError("this browser wouldn't open the microphone — check the permission")
+    }
+  }, [])
+
+  const stopVoice = useCallback(() => {
+    const entry = voiceRec.current
+    if (entry && entry.recorder.state !== 'inactive') entry.recorder.stop()
+  }, [])
+
+  /** Drop the note and start over — memory only, nothing else to clean. */
+  const discardVoice = useCallback(() => {
+    setVoiceBlob(null)
+    setVoiceMs(0)
+    setDiscarding(false)
+    setPhase('idle')
+  }, [])
+
+  /** The phone pipeline, handed one audio file: transcript, cleanup pass,
+   *  report, upload. No frames — the probe below says so up front. */
+  const sendVoice = useCallback(async () => {
+    if (!voiceBlob) return
+    const controller = new AbortController()
+    abort.current = controller
+    stalled.current = false
+    heardAt.current = Date.now()
+    setProgress(null)
+    setFailure(null)
+    setPhase('working')
+    try {
+      const file = new File([voiceBlob], 'voice-note.webm', {
+        type: voiceBlob.type || 'audio/webm',
+        lastModified: Date.now(),
+      })
+      const sent = await withToken((token) =>
+        distillAndUpload(
+          [
+            {
+              file,
+              // We recorded it; there is nothing a probe could tell us. Handing
+              // one over also skips the <video>-element duration hack a
+              // MediaRecorder webm would otherwise need.
+              probe: { durationMs: voiceMs, width: 0, height: 0, hasVideo: false, posterUrl: null },
+            },
+          ],
+          {
+            token,
+            teamId: destination.teamId,
+            projectId: destination.projectId,
+            title: sendTitle,
+            onProgress: (update) => {
+              heardAt.current = Date.now()
+              setProgress(update)
+            },
+            signal: controller.signal,
+          }
+        )
+      )
+      setVoiceBlob(null)
+      setVoiceMs(0)
+      setResult(sent)
+      setPhase('done')
+    } catch (error) {
+      if (stalled.current) return
+      if (controller.signal.aborted || (error instanceof Error && error.message === 'cancelled')) {
+        setPhase('review')
+        return
+      }
+      setFailure(
+        error instanceof AuthError
+          ? "this browser's link to your account expired — sign in again"
+          : error instanceof Error
+            ? error.message
+            : "the voice note didn't finish uploading"
+      )
+      setPhase('failed')
+    } finally {
+      abort.current = null
+    }
+  }, [voiceBlob, voiceMs, destination, sendTitle, withToken])
+
+  // The clock on the voice card, ticking only while the mic is live.
+  useEffect(() => {
+    if (phase !== 'recording' || kind !== 'voice') return
+    const timer = window.setInterval(() => {
+      const entry = voiceRec.current
+      if (entry) setVoiceElapsed(Date.now() - entry.startedAt)
+    }, 250)
+    return () => window.clearInterval(timer)
+  }, [phase, kind])
+
+  // The playback URL follows the blob; both die together.
+  useEffect(() => {
+    if (!voiceBlob) {
+      setVoiceUrl(null)
+      return
+    }
+    const url = URL.createObjectURL(voiceBlob)
+    setVoiceUrl(url)
+    return () => URL.revokeObjectURL(url)
+  }, [voiceBlob])
+
+  // A mic left open when the page goes away would stay on with nothing
+  // recording into it.
+  useEffect(() => {
+    return () => {
+      voiceRec.current?.stream.getTracks().forEach((track) => track.stop())
+    }
+  }, [])
+
   const removeTake = useCallback(async (take: LiveTake) => {
     await deleteTake(take).catch(() => {})
     const left = await renumberTakes(await listTakes())
@@ -372,7 +531,9 @@ export function RecordPage() {
           token,
           teamId: destination.teamId,
           projectId: destination.projectId,
-          kind,
+          // Voice never reaches this path (it has no takes); the narrowing is
+          // for the wire type, which only knows the two screen kinds.
+          kind: kind === 'human' ? 'human' : 'agent',
           title: sendTitle,
           onProgress: (update) => {
             heardAt.current = Date.now()
@@ -690,11 +851,12 @@ export function RecordPage() {
               <div
                 role="radiogroup"
                 aria-label="Who is this recording for?"
-                className="grid w-full max-w-xs grid-cols-2 gap-2">
+                className="grid w-full max-w-xs grid-cols-3 gap-2">
                 {(
                   [
                     { value: 'agent', label: 'for an agent' },
                     { value: 'human', label: 'for a person' },
+                    { value: 'voice', label: 'just talk' },
                   ] as const
                 ).map((option) => (
                   <button
@@ -717,18 +879,98 @@ export function RecordPage() {
               <p className="text-muted-foreground max-w-md text-sm leading-relaxed">
                 {kind === 'human'
                   ? 'Full-rate, full-quality video for a person to watch — you tighten it up here, then send a link or the file. Nothing is distilled.'
-                  : "Pick a tab, a window, or your whole screen, and talk through what's wrong. Stop when you're done — the keyframes, transcript and report are built right here."}
+                  : kind === 'voice'
+                    ? "No screen at all — describe what's wrong in words. Your agent reads the transcript; thirty seconds of talking is a ticket."
+                    : "Pick a tab, a window, or your whole screen, and talk through what's wrong. Stop when you're done — the keyframes, transcript and report are built right here."}
               </p>
               <Button
                 type="button"
                 className="h-[46px] w-full max-w-xs"
-                onClick={() => void startTake()}>
-                {kind === 'human' ? 'Record a video' : 'Record a walkthrough'}
+                onClick={() => void (kind === 'voice' ? startVoice() : startTake())}>
+                {kind === 'human'
+                  ? 'Record a video'
+                  : kind === 'voice'
+                    ? 'Record a voice note'
+                    : 'Record a walkthrough'}
               </Button>
               <p className="text-muted-foreground font-mono text-xs">
-                a computer with Chrome or Edge · your mic turns on when the share starts
+                {kind === 'voice'
+                  ? 'any browser with a mic — nothing is captured but your voice'
+                  : 'a computer with Chrome or Edge · your mic turns on when the share starts'}
               </p>
             </div>
+          ) : kind === 'voice' ? (
+            <>
+              <div className="space-y-3">
+                <div className="flex items-baseline justify-between gap-3">
+                  <p className="text-muted-foreground font-mono text-xs tracking-widest uppercase">
+                    voice note
+                  </p>
+                  <p className="text-muted-foreground font-mono text-xs">{mmss(voiceMs)}</p>
+                </div>
+                {voiceUrl && <audio controls src={voiceUrl} className="w-full" />}
+                <p className="text-muted-foreground text-sm">
+                  it lives in this tab until it's sent — a reload loses it.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void startVoice()}
+                  className="text-primary text-sm underline underline-offset-4">
+                  ● record it again instead
+                </button>
+              </div>
+
+              <DestinationControl
+                ctx={ctx}
+                ctxFailed={ctxFailed}
+                spaces={spaces}
+                value={destination}
+                onChange={pickDestination}
+                onRetryContext={() => setCtxAttempt((n) => n + 1)}
+              />
+
+              <div className="space-y-2">
+                <Label htmlFor="record-title">Title</Label>
+                <Input
+                  id="record-title"
+                  value={title}
+                  placeholder={placeholder}
+                  maxLength={120}
+                  autoComplete="off"
+                  onChange={(event) => setTitle(event.target.value)}
+                />
+              </div>
+
+              <Button type="button" className="h-[46px] w-full" onClick={() => void sendVoice()}>
+                Send to Handback
+              </Button>
+
+              {discarding ? (
+                <p className="text-sm">
+                  <span className="text-muted-foreground">discard this voice note? </span>
+                  <button
+                    type="button"
+                    onClick={discardVoice}
+                    className="text-destructive underline underline-offset-4">
+                    yes, discard
+                  </button>
+                  <span className="text-muted-foreground"> · </span>
+                  <button
+                    type="button"
+                    onClick={() => setDiscarding(false)}
+                    className="text-muted-foreground underline underline-offset-4">
+                    keep
+                  </button>
+                </p>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setDiscarding(true)}
+                  className="text-muted-foreground hover:text-destructive text-sm underline underline-offset-4">
+                  discard
+                </button>
+              )}
+            </>
           ) : (
             <>
               <div className="space-y-3">
@@ -823,7 +1065,23 @@ export function RecordPage() {
         </section>
       )}
 
-      {recording && (
+      {recording && kind === 'voice' && (
+        <section className="border-border bg-muted/20 flex flex-col items-center gap-4 rounded-md border px-6 py-12 text-center">
+          <p className="text-muted-foreground font-mono text-xs tracking-widest uppercase">
+            listening
+          </p>
+          <p className="font-display text-4xl font-semibold tabular-nums">{mmss(voiceElapsed)}</p>
+          <p className="text-muted-foreground max-w-md text-sm leading-relaxed">
+            Say what's wrong the way you'd tell a colleague — what you did, what you expected, what
+            happened instead. Product names help; your agent reads every word.
+          </p>
+          <Button type="button" className="h-[46px] w-full max-w-xs" onClick={stopVoice}>
+            Stop
+          </Button>
+        </section>
+      )}
+
+      {recording && kind !== 'voice' && (
         <section className="space-y-4">
           <RecordingPanel
             live={live}
@@ -971,13 +1229,15 @@ export function RecordPage() {
         <section className="space-y-6">
           <div className="space-y-1">
             <p className="text-muted-foreground font-mono text-sm">
-              {takes.length} {takes.length === 1 ? 'take' : 'takes'} · {mmss(totalMs)}
+              {kind === 'voice'
+                ? `voice note · ${mmss(voiceMs)}`
+                : `${takes.length} ${takes.length === 1 ? 'take' : 'takes'} · ${mmss(totalMs)}`}
             </p>
             <p className="text-muted-foreground truncate font-mono text-sm">
               to {destinationName} · {sendTitle}
             </p>
           </div>
-          <StageList progress={progress} rows={RECORD_ROWS} />
+          <StageList progress={progress} rows={kind === 'voice' ? VOICE_RECORD_ROWS : RECORD_ROWS} />
           <p className="text-muted-foreground font-mono text-xs">
             keep this tab open — the work happens here, not on the server
           </p>
@@ -998,9 +1258,9 @@ export function RecordPage() {
             </div>
             <p className="text-sm font-medium">{sendTitle}</p>
             <p className="text-muted-foreground font-mono text-xs">
-              {kind === 'human'
-                ? `${result.lineCount} lines · ${mmss(result.durationMs)}`
-                : `${result.frameCount} keyframes · ${result.lineCount} lines · ${mmss(result.durationMs)}`}
+              {kind === 'agent'
+                ? `${result.frameCount} keyframes · ${result.lineCount} lines · ${mmss(result.durationMs)}`
+                : `${result.lineCount} lines · ${mmss(result.durationMs)}`}
             </p>
           </div>
 
@@ -1073,12 +1333,20 @@ export function RecordPage() {
           </p>
           <p className="text-sm leading-relaxed">{failure}</p>
           <p className="text-muted-foreground text-sm">
-            The takes are still on this machine — nothing was lost.
+            {kind === 'voice'
+              ? 'The note is still in this tab — nothing was lost.'
+              : 'The takes are still on this machine — nothing was lost.'}
           </p>
           <p className="text-sm">
             <button
               type="button"
-              onClick={() => void (kind === 'human' && editState ? renderAndSend() : send())}
+              onClick={() =>
+                void (kind === 'voice'
+                  ? sendVoice()
+                  : kind === 'human' && editState
+                    ? renderAndSend()
+                    : send())
+              }
               className="text-primary underline underline-offset-4">
               try again
             </button>
@@ -1087,7 +1355,11 @@ export function RecordPage() {
               type="button"
               onClick={() => setPhase(kind === 'human' && editState ? 'edit' : 'review')}
               className="text-muted-foreground underline underline-offset-4">
-              {kind === 'human' && editState ? 'back to the edit' : 'back to the takes'}
+              {kind === 'human' && editState
+                ? 'back to the edit'
+                : kind === 'voice'
+                  ? 'back to the note'
+                  : 'back to the takes'}
             </button>
           </p>
         </section>

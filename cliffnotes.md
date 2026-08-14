@@ -1,7 +1,7 @@
 # Handback — CliffNotes
 
 > Living map of the project. Read this before any coding session.
-> Last updated: 2026-08-12. Visual language → `ui.md` · why → `decisions.md` ·
+> Last updated: 2026-08-13. Visual language → `ui.md` · why → `decisions.md` ·
 > log → `updates.md`.
 >
 > **Naming:** the product noun is **walkthrough** (renamed from "gripe" 2026-08-01, owner's
@@ -135,6 +135,10 @@ server/
                         reap; hourly S3-first sweep (startRetentionSweep in server.ts)
   transcribe.ts         speech-to-text via Groq whisper-large-v3-turbo; segments in ms
   polish.ts             transcript cleanup via claude-haiku-4-5 — text only, timings untouched
+  structure.ts          the split pass: report.md + comments → 1–10 proposed tasks via
+                        claude-opus-5 structured outputs (no prefill — 400s on Opus 5); every
+                        failure degrades to null like polish. childBriefMd() writes a child's
+                        brief_md (steps, done-when, "Source: get_walkthrough(parent)")
   email.ts              Resend sender + reset/verify/invite templates; never throws
   ratelimit.ts          in-memory fixed-window limiter (one ECS task, so one process sees all)
   prisma.ts / logger.ts PrismaClient singleton · ANSI request logger
@@ -165,7 +169,9 @@ src/
                         segments with mono counts · Space/Project popover selects that only appear
                         when you have >1 space / any projects). One `walkthroughs.inbox` query,
                         client-side filtering. No provisioning state — Personal always exists
-    walkthrough.tsx     WalkthroughPage: the viewer (assembles src/components/viewer/*)
+    walkthrough.tsx     WalkthroughPage: the viewer (assembles src/components/viewer/*); modes:
+                        editing (CloudEditor), splitting (SplitPanel), child task page (briefMd
+                        set → TaskBrief, no AgentView)
     projects.tsx        Projects list + create (origin-hints field removed from the UI)
     team.tsx            Members / Invites for team spaces (seat line, owner-only role select +
                         ownership transfer); a lone personal card otherwise. No guests
@@ -177,7 +183,9 @@ src/
                         unnumbered reference below. Codex is a "soon" tab.
     record.tsx          /record — THE extension-free recorder: hero → live HUD → takes list +
                         destination + send. Resumes whatever is still in IDB on mount (a take
-                        left mid-recording is rebuilt from its chunks). Nav label "Record"
+                        left mid-recording is rebuilt from its chunks). Nav label "Record".
+                        Third kind "just talk": mic-only voice note (in-memory blob, NO IDB)
+                        sent through the phone distill pipeline with a pre-supplied probe
     recorder.tsx        /recorder — THE recorder onboarding: install (STORE_URL now set → "Add to
                         Chrome" button; zip/load-unpacked collapses behind a disclosure), live
                         install ping across BOTH extension ids (`EXTENSION_IDS`: store + self-hosted),
@@ -225,7 +233,8 @@ src/
     ui/                 button, card, input, label, sidebar (shadcn new-york style, no asChild;
                         sidebar is hand-rolled — no radix — collapse persisted, mobile overlay)
     phone/              guide, clip-list (+AddClips/voice note), destination (one grouped
-                        control), stages (distill progress rows) — /phone's pieces
+                        control), stages (distill progress rows; VOICE_RECORD_ROWS feeds
+                        /record's voice mode) — /phone's pieces
     landing/            hero, how-it-works, distill, walkthrough-manifest, agent-view, pricing,
                         final-cta · demo-shot.tsx (a keyframe as SVG) + demo-data.ts (the one
                         demo walkthrough) + mock.tsx (Pane/ContactSheet/Filmstrip/PlayerStrip/
@@ -242,7 +251,9 @@ src/
                         contact sheet) · transcript-panel (borderless, live active line) · events-panel
                         (mono, red/violet ticks) · section-head · report-panel · status-control ·
                         share-control (url·copy·revoke pill) · final-cut · skeleton · types ·
-                        format · use-copy. take-section/filmstrip/walkthrough-controls DELETED
+                        format · use-copy · split-panel (SplitPanel — the propose/apply split
+                        flow, + TaskBrief child page + SplitChildren parent ledger).
+                        take-section/filmstrip/walkthrough-controls DELETED
     edit/               editor.tsx — THE scrubber-first editor for human handbacks: the viewer's
                         Timeline over a source-global axis (takes at FULL length) with every cut
                         as a toggleable tag, client-extracted thumbs (lib/edit/thumbs.ts) and
@@ -334,7 +345,7 @@ extension/              Handback Recorder — the Chrome MV3 extension (own npm 
 | `/walkthroughs/:walkthroughId` | The viewer (`/gripes/:id` 302s here) | `src/app/walkthrough.tsx` |
 | `/projects` · `/team` | Projects (ALL spaces, grouped; create w/ space select) · "Teams" — every team (roster/invites/seats per team, New team lives HERE) | `src/app/{projects,team}.tsx` |
 | `/connect` | Connect a coding agent — one button mints a token and fills in `claude mcp add`; tokens/disconnect are reference below | `src/app/connect.tsx` |
-| `/record` | **Record with no extension** — live `getDisplayMedia` capture in the page. Kind picker: **for an agent** (distill pipeline) or **for a person** (pristine 30 fps capture → transcript-first editor → mediabunny MP4 render → share link). Multi-take, crash-recoverable, optional always-on-top Document PiP HUD | `src/app/record.tsx` |
+| `/record` | **Record with no extension** — live `getDisplayMedia` capture in the page. Kind picker: **for an agent** (distill pipeline), **for a person** (pristine 30 fps capture → transcript-first editor → mediabunny MP4 render → share link), or **just talk** (mic-only voice note, in-memory, through the phone distill pipeline). Multi-take, crash-recoverable, optional always-on-top Document PiP HUD | `src/app/record.tsx` |
 | `/w/:shareToken` | **Public watch page** for a shared walkthrough — no session, the token IS the credential; plays `final.mp4` + transcript (falls back to takes) | `src/app/watch.tsx` |
 | `/recorder` | Install + one-click-link the extension (detects install, mints token, handshake). Nav label is **"Extension"**; the nav's "Record" is `/record` | `src/app/recorder.tsx` |
 | `/phone` | Phone guide + share-target intake — OS-recorded clips distilled in-browser and uploaded | `src/app/phone.tsx` |
@@ -390,7 +401,9 @@ pulled/status/result, 'pulled' deduped per 10 min) · ApiToken (**user-scoped**,
 sha256 hash only; `hb_` prefix; lastUsedAt stamped on ingest auth) · **WalkthroughComment**
 (margin notes, optional `atMs` on the output clock; rides into the brief; own-delete only) ·
 User.notifyUploads / notifyDigest (email mutes) + digestSentAt · Walkthrough.searchText (the
-FTS corpus, filled at finalize).
+FTS corpus, filled at finalize) · **Walkthrough.parentId / briefMd** (a split-out task: a
+metadata-only child row — no files, takes, or bytes; `briefMd` IS its report; self-relation
+"split" with `onDelete: SetNull` so children outlive a deleted parent as standalone tasks).
 
 ## Storage (Cloudflare R2 since 2026-08-13; S3 before that)
 
@@ -906,6 +919,22 @@ reaches the container on a plain push.
   `ResponseContentDisposition` — the `download` attribute is ignored cross-origin, so the
   Download button needs the URL itself to say attachment. `get`/`shared` return it as
   `downloadUrl`.
+- **A split-out task is metadata, not media** (2026-08-13): `applySplit` children have NO S3
+  objects, zero takes/files/bytes, `finalizedAt` at birth (so they list everywhere), kind
+  'agent', slug `<parent>-task-N` (suffix-until-free per space), and `searchText` filled inline
+  from the brief. `briefMd` IS the report — `getWalkthroughDetail` serves it as `reportMd`
+  before reaching for S3, so MCP agents read a child like any walkthrough; the brief tells them
+  the evidence lives on the parent (`get_walkthrough(parentId)`). The split is gated hard
+  (`requireSplittable`): agent kind, finalized, not itself a child — and `proposeSplit` is
+  METERED via `checkAndReservePolish` and human-confirmed before any row is written (the
+  propose/apply split exists so the model never creates tasks unreviewed). The viewer's
+  child page renders TaskBrief only — don't hand a zero-file walkthrough to AgentView.
+- **A voice note lives in memory until it's sent** (2026-08-13, deliberate): /record's "just
+  talk" holds the MediaRecorder blob in component state — no IDB, a reload loses it, and the
+  UI says so. Thirty seconds of talking isn't worth the crash-recovery machinery. It uploads
+  through the UNCHANGED phone pipeline (`distillAndUpload`) with a pre-supplied probe
+  (`hasVideo: false` skips frame extraction and the webm-duration hack); the audio-only path
+  already existed for /phone voice notes. Don't add persistence and don't fork the pipeline.
 
 ## Status
 
@@ -1032,6 +1061,15 @@ reaches the container on a plain push.
   (User.notifyUploads + HMAC unsubscribe + /team toggle). Typecheck + build green. **Schema is
   pushed NOWHERE** — `.env` points at prod (the standing hazard), so local dev/`handback_test`
   need `db push` by hand and prod gets it via predeploy on the next main push. No live run yet.
+- **Done (2026-08-13, later still)** — **Wave 3** (`plans/2026-08-13-loop-and-team-wave.md`,
+  closes the picked backlog): **split into tasks** — `server/structure.ts` (claude-opus-5
+  structured outputs over report.md + comments → 1–10 proposed tasks; degrade-to-null;
+  skipped the fallbacks beta on purpose), `proposeSplit`/`applySplit` (metered via the polish
+  budget, human confirms before rows exist), `Walkthrough.parentId`+`briefMd` children
+  (metadata-only rows, brief served as reportMd to MCP), viewer SplitPanel/TaskBrief/
+  SplitChildren + ⋯ "Split into tasks…"; and **voice-only capture** — /record's third kind
+  "just talk" (mic-only, in-memory, rides the phone distill pipeline; VOICE_RECORD_ROWS).
+  Typecheck + build green; same schema-push caveat as Waves 1–2, no live run.
 - **Next** — **deploy, then re-test the loop**: `/mcp` and `/connect` only exist locally until the
   next push to `main`, so the command `/connect` prints for handback.dev 404s until then. Sal's
   Drydock/DNS checklist in the rename plan (zone, project, S3 via
@@ -1067,3 +1105,6 @@ reaches the container on a plain push.
 - `plans/2026-08-12-extension-human-handback.md` — **done** (code; live run pending). Record in
   the extension, resolve on the web: the cloud-bridge argument, the presignEdit contract, the
   switchable kind.
+- `plans/2026-08-13-loop-and-team-wave.md` — **done** (code; live run pending). The picked
+  backlog in three waves: the return path + doorbell (W1), comments/search/digest (W2), the
+  split structuring pass + voice capture (W3).

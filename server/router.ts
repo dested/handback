@@ -30,6 +30,7 @@ import { indexWalkthrough, searchWalkthroughIds } from './search'
 import {
   copyObject,
   deletePrefix,
+  getObjectText,
   spacePrefix,
   walkthroughKey,
   walkthroughPrefix,
@@ -37,6 +38,8 @@ import {
   presignGet,
   presignPut,
 } from './storage'
+import { childBriefMd, proposeStructure, structureConfigured } from './structure'
+import { checkAndReservePolish } from './usage'
 import { protectedProcedure, publicProcedure, router } from './trpc'
 import {
   getWalkthroughDetail,
@@ -773,6 +776,60 @@ async function requireEditable(userId: string, walkthroughId: string) {
   return g
 }
 
+/**
+ * A walkthrough the caller may split into tasks: agent kind (a human handback
+ * is a video, not a backlog), finalized, in a space they belong to, and not
+ * itself a child — a task carved out of a task is noise.
+ */
+async function requireSplittable(userId: string, walkthroughId: string) {
+  const g = await prisma.walkthrough.findUnique({
+    where: { id: walkthroughId },
+    select: {
+      id: true,
+      slug: true,
+      title: true,
+      origin: true,
+      teamId: true,
+      userId: true,
+      projectId: true,
+      recordedAt: true,
+      durationMs: true,
+      kind: true,
+      finalizedAt: true,
+      parentId: true,
+    },
+  })
+  if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
+  await requireSpaceAccess(userId, g)
+  if (g.kind !== 'agent') {
+    throw new TRPCError({ code: 'BAD_REQUEST', message: 'Only an agent walkthrough can be split' })
+  }
+  if (!g.finalizedAt) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: 'This walkthrough never finished uploading',
+    })
+  }
+  if (g.parentId) {
+    throw new TRPCError({ code: 'BAD_REQUEST', message: 'This is already a split-out task' })
+  }
+  return g
+}
+
+/** What the human confirms — the proposal, possibly trimmed or retitled. */
+const proposedTaskSchema = z.object({
+  title: z.string().trim().min(1).max(200),
+  severity: z.enum(['low', 'medium', 'high']),
+  repro: z.array(z.string().trim().min(1).max(500)).max(10),
+  acceptance: z.array(z.string().trim().min(1).max(500)).max(10),
+  startMs: z.number().int().min(0).nullable(),
+  endMs: z.number().int().min(0).nullable(),
+})
+
+/** m:ss on the walkthrough clock, for the comment lines the pass reads. */
+const commentStamp = (ms: number) =>
+  `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`
+
 const walkthroughsRouter = router({
   list: protectedProcedure
     .input(
@@ -912,6 +969,10 @@ const walkthroughsRouter = router({
           notes: { orderBy: { createdAt: 'asc' } },
           // The trace is a courtesy line, not a log viewer — the newest few.
           access: { orderBy: { createdAt: 'desc' }, take: 5 },
+          // The split, both directions: where this row came from, and what
+          // was carved out of it.
+          parent: { select: { id: true, title: true } },
+          children: { select: { id: true, title: true, status: true }, orderBy: { slug: 'asc' } },
         },
       })
       if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
@@ -944,6 +1005,10 @@ const walkthroughsRouter = router({
         bytes: Number(g.bytes),
         project: g.project,
         uploadedByName: g.uploadedBy?.name ?? null,
+        // A child task's whole content; null on every ordinary walkthrough.
+        briefMd: g.briefMd,
+        parent: g.parent,
+        children: g.children.map((c) => ({ id: c.id, title: c.title, status: asStatus(c.status) })),
         // Present when an edited render was uploaded (human handbacks) — signed
         // with a content-disposition so Download saves a named file.
         downloadUrl: await (async () => {
@@ -1071,6 +1136,118 @@ const walkthroughsRouter = router({
         data: { status: 'open', resolvedAt: null, expiresAt: expiryFor('open') },
       })
       return { ok: true }
+    }),
+
+  /**
+   * The structuring pass, half one: read the walkthrough and propose the split.
+   * A mutation, not a query — it spends a metered model call (same meter as the
+   * cleanup pass). Nothing is written; the human gets the proposal to trim,
+   * retitle and confirm, and only applySplit creates rows.
+   */
+  proposeSplit: protectedProcedure
+    .input(z.object({ walkthroughId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const g = await requireSplittable(ctx.session.user.id, input.walkthroughId)
+      if (!structureConfigured()) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: "Structuring isn't configured on this server",
+        })
+      }
+      const { allowed } = await checkAndReservePolish(ctx.session.user.id)
+      if (!allowed) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Splitting uses a metered cloud pass — this month’s budget is used up',
+        })
+      }
+      const space: SpaceOwner = { teamId: g.teamId, userId: g.userId }
+      const reportMd = await getObjectText(
+        walkthroughKey(spaceId(space), g.id, 'report.md')
+      ).catch(() => null)
+      if (!reportMd) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'This walkthrough has no report to read',
+        })
+      }
+      const comments = await prisma.walkthroughComment.findMany({
+        where: { walkthroughId: g.id },
+        orderBy: { createdAt: 'asc' },
+      })
+      const tasks = await proposeStructure({
+        title: g.title,
+        durationMs: g.durationMs,
+        reportMd,
+        comments: comments.map(
+          (c) =>
+            `${c.atMs === null ? '' : `[${commentStamp(c.atMs)}] `}${c.authorName}: ${c.text}`
+        ),
+      })
+      if (!tasks) {
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: "The structuring pass didn't come back with a usable proposal — try again",
+        })
+      }
+      return { tasks }
+    }),
+
+  /**
+   * Half two: the human confirmed, so the rows become real. Each child is a
+   * metadata-only walkthrough — no files, no takes, ~0 bytes — whose whole
+   * content is `briefMd` and whose evidence is the parent (the brief says so
+   * in words). Finalized at birth so it lists like anything else.
+   */
+  applySplit: protectedProcedure
+    .input(
+      z.object({
+        walkthroughId: z.string(),
+        tasks: z.array(proposedTaskSchema).min(1).max(10),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const g = await requireSplittable(ctx.session.user.id, input.walkthroughId)
+      const created: Array<{ id: string; slug: string; title: string }> = []
+      for (const [i, task] of input.tasks.entries()) {
+        // Per-space slug dedup, code-enforced like every other slug here. Earlier
+        // children of this same loop are already inserted, so they collide too.
+        const base = `${g.slug}-task-${i + 1}`
+        let slug = base
+        for (
+          let n = 2;
+          await prisma.walkthrough.findFirst({
+            where: { ...spaceWhere({ teamId: g.teamId, userId: g.userId }), slug },
+            select: { id: true },
+          });
+          n++
+        ) {
+          slug = `${base}-${n}`
+        }
+        const child = await prisma.walkthrough.create({
+          data: {
+            teamId: g.teamId,
+            userId: g.userId,
+            projectId: g.projectId,
+            slug,
+            title: task.title,
+            origin: g.origin,
+            status: 'open',
+            kind: 'agent',
+            recordedAt: g.recordedAt,
+            uploadedById: ctx.session.user.id,
+            finalizedAt: new Date(),
+            parentId: g.id,
+            briefMd: childBriefMd(task, g),
+            // The brief is the corpus — no S3 object to index, so it's filled
+            // inline instead of through indexWalkthrough.
+            searchText: childBriefMd(task, g).replace(/\s+/g, ' ').trim(),
+          },
+        })
+        created.push({ id: child.id, slug: child.slug, title: child.title })
+      }
+      log.info(`[structure] split ${g.slug} into ${created.length} tasks`)
+      return { children: created }
     }),
 
   /**

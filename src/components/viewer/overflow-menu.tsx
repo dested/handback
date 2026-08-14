@@ -57,7 +57,14 @@ export function usePopover(): {
   return { open, setOpen, ref }
 }
 
-export function OverflowMenu({ walkthrough }: { walkthrough: Walkthrough }) {
+export function OverflowMenu({
+  walkthrough,
+  onSplit,
+}: {
+  walkthrough: Walkthrough
+  /** Opens the split-into-tasks mode; absent when this walkthrough can't split. */
+  onSplit?: () => void
+}) {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -176,6 +183,23 @@ export function OverflowMenu({ walkthrough }: { walkthrough: Walkthrough }) {
               </button>
             )
           })}
+
+          {/* One recording, several gripes: the structuring pass proposes the
+              split, the human confirms it. Rare enough to live here. */}
+          {kind === 'agent' && onSplit && (
+            <>
+              <div className={DIVIDER} />
+              <button
+                type="button"
+                className={ITEM}
+                onClick={() => {
+                  setOpen(false)
+                  onSplit()
+                }}>
+                Split into tasks…
+              </button>
+            </>
+          )}
 
           {/* A human handback is FOR a person — its share link is the point, so
               the masthead owns it there and this menu stays out of the way. */}

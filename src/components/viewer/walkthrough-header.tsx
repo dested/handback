@@ -137,7 +137,14 @@ function ProjectPicker({ walkthrough }: { walkthrough: Walkthrough }) {
 }
 
 /** Title block: where it came from, and the shape of what was recorded. */
-export function WalkthroughHeader({ walkthrough }: { walkthrough: Walkthrough }) {
+export function WalkthroughHeader({
+  walkthrough,
+  onSplit,
+}: {
+  walkthrough: Walkthrough
+  /** Opens the split-into-tasks mode; absent when this walkthrough can't split. */
+  onSplit?: () => void
+}) {
   const trpc = useTRPC()
   const invalidate = useInvalidateWalkthrough(walkthrough.id)
   const { copied, copy } = useCopy()
@@ -249,7 +256,7 @@ export function WalkthroughHeader({ walkthrough }: { walkthrough: Walkthrough })
                 </Button>
               )}
 
-              <OverflowMenu walkthrough={walkthrough} />
+              <OverflowMenu walkthrough={walkthrough} onSplit={onSplit} />
             </>
           ) : (
             // A platform admin reached this walkthrough from /admin without
