@@ -25,6 +25,6 @@ Prisma 7 + Postgres · better-auth · Tailwind v4.
 
 ## Commands
 
-`bun run dev` (:3995) · `bun run typecheck` · `bun run db:push` / `db:generate` ·
+`bun run dev` (→ https://handback.localhost, portless) · `bun run typecheck` · `bun run db:push` / `db:generate` ·
 `bun cli/dev-bootstrap.ts` (seed login + token) · `bun cli/push.ts <folder>` (upload a gripe) ·
 `E2E_DATABASE_URL=… bun run test:e2e` (isolated DB :3100).

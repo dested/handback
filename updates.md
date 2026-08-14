@@ -2,6 +2,19 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-08-14 — Portless dev URL + extension → 1.9.0
+Asked: put the project on portless; bump the extension version to 1.9.
+Done (portless): `bun add -d portless` (0.15.5), `portless.json` = `{"name":"handback"}`, dev script
+→ `portless run bun --watch server.ts`, `.env` `BETTER_AUTH_URL` → `https://handback.localhost`.
+Server already reads `process.env.PORT` (portless injects it, defaults 3995 otherwise) so nothing in
+server.ts changed; SSR's own loopback tRPC call (`entry-server.tsx`) uses `PORT` too — correct as-is.
+e2e untouched (playwright sets its own `PORT=3100` + `BETTER_AUTH_URL`). HTTPS flips on Secure
+cookies in `server/auth.ts` — a plus. Verified: `bun run dev` serves `https://handback.localhost`
+(healthz 200, landing + /sign-in SSR 200). Docs (cliffnotes/CLAUDE/README) updated. **Open item:**
+R2 bucket CORS doesn't list `https://handback.localhost`, so browser→R2 fetches (recording.json,
+presigned PUT uploads) fail in dev until it's added — Cloudflare-side, needs owner.
+Extension: manifest.json + package.json 1.8.1 → 1.9.0.
+
 ## 2026-08-14 — Frames mode: transcript beside the slideshow, not below it
 Asked: in the viewer's Frames mode, keep the transcript to the right of the stills, not below them.
 Then: the transcript must also auto-follow the playhead in Video mode.

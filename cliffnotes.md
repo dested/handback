@@ -40,7 +40,13 @@ the Gripe extension.
 
 ## Quick Reference
 
-- **Dev:** `bun run dev` → http://localhost:3995 (needs `.env`; see Env below)
+- **Dev:** `bun run dev` → **https://handback.localhost** (portless proxy — no fixed port; it
+  injects `PORT`/`HOST`, server still honors `PORT` for e2e/prod). `portless.json` = `{"name":
+  "handback"}`; TLS CA at `~/.portless/ca.pem`. `.env` `BETTER_AUTH_URL` must equal this origin
+  (HTTPS also flips on Secure cookies — see `server/auth.ts`). Needs `.env`; see Env below.
+  **Caveat:** browser→R2 direct fetches (recording.json, presigned PUT uploads) need this origin in
+  the R2 bucket CORS — not yet added (only handback.dev/www/localhost:3995/3210/chrome-extension
+  are), so viewer frame-loads / uploads fail in dev until R2 CORS includes `https://handback.localhost`.
 - **Type-check:** `bun run typecheck` (`tsgo --noEmit`)
 - **DB:** local Postgres 18 service; `bun run db:push` after schema edits (+`db:generate`)
 - **E2E:** `E2E_DATABASE_URL=postgres://postgres:<pw>@localhost:5432/handback_test bun run test:e2e`

@@ -16,7 +16,7 @@ cp .env.example .env         # then fill in every key from the table below
 createdb handback
 bun run db:push              # sync prisma/schema.prisma to Postgres
 bun cli/dev-bootstrap.ts     # creates a user + org, prints an hb_… API token
-bun run dev                  # → http://localhost:3995
+bun run dev                  # → https://handback.localhost (portless)
 ```
 
 `dev-bootstrap` is idempotent and prints a fresh token each run; the default login is `dev@handback.local` / `handback-dev-password`. Copy the token — it is only shown once, and everything below needs it.
@@ -29,7 +29,7 @@ Point the CLI at a folder the recorder wrote (`report.md` + one `rec-NN/` per ta
 
 ```bash
 bun cli/push.ts ./2026-07-29-1412-checkout-hangs \
-  --server http://localhost:3995 \
+  --server https://handback.localhost \
   --token hb_…
 ```
 
@@ -93,7 +93,7 @@ Validated by `server/env.ts` at import — all of these must be set for the serv
 | ----------------------- | ------------------------------------------------------------- |
 | `DATABASE_URL`          | Postgres connection string.                                   |
 | `BETTER_AUTH_SECRET`    | 32+ random chars. `openssl rand -base64 32`.                  |
-| `BETTER_AUTH_URL`       | Public origin. Defaults to `http://localhost:3995`.           |
+| `BETTER_AUTH_URL`       | Public origin. Dev: `https://handback.localhost` (portless).  |
 | `AWS_REGION`            | Defaults to `us-west-2`.                                      |
 | `S3_BUCKET`             | Bucket holding walkthrough payloads. Block all public access. |
 | `AWS_ACCESS_KEY_ID`     | Credential for that bucket.                                   |
@@ -105,7 +105,7 @@ The CLI and MCP server read `HANDBACK_SERVER` and `HANDBACK_TOKEN` instead — t
 
 | script              | what it does                                              |
 | ------------------- | --------------------------------------------------------- |
-| `bun run dev`       | dev server with HMR + SSR on :3995                        |
+| `bun run dev`       | dev server with HMR + SSR at https://handback.localhost   |
 | `bun run build`     | build client (`dist/client`) + SSR bundle (`dist/server`) |
 | `bun run start`     | production server                                         |
 | `bun run typecheck` | `tsgo --noEmit`                                           |
