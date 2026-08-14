@@ -2,6 +2,20 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-08-13 — Wave 1: agent result post-back, send-back, activity trace, upload emails
+Asked: from the feature brainstorm, build A1 (post_result), A2 (send-back), A5 (agent trace), B1
+(email-only upload notify) — per plans/2026-08-13-loop-and-team-wave.md (waves 2–3 pending).
+Done: `WalkthroughNote` review thread (agent results w/ prUrl/files/body + reviewer send-backs) —
+4th MCP tool `post_result` (both servers + REST `/walkthroughs/:id/result`, auto open→in_review),
+`walkthroughs.sendBack` (note + reopen), thread rendered in the brief (`--- review thread ---`)
+and in the viewer's new AgentAnswer panel (Approve & resolve / Send back, signed-off stamp);
+`WalkthroughAccess` trace ("pulled by <token> 12m ago", token surfaces only, 10-min dedup);
+team upload emails on finalize (verified+unmuted members minus uploader, HMAC unsubscribe link,
+`User.notifyUploads` + /team toggle via new `prefs` router). Typecheck + build green. Schema
+pushed nowhere (.env → prod); no live run.
+Touched: prisma/schema.prisma, server/{walkthroughs-api,mcp-format,mcp,ingest,notify(new),email,router}.ts,
+server.ts, cli/mcp.ts, src/components/viewer/agent-answer.tsx(new), src/app/{walkthrough,team}.tsx
+
 ## 2026-08-13 — Viewer player rebuilt: custom chrome, capture tells, frames lightbox
 Asked: the walkthrough player "sucks / amateur hour," progress bar jumps around; frames grid is
 illegible + clicking seeks a player scrolled off-screen; hide the report behind a button; make the

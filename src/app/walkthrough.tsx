@@ -8,6 +8,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
 import { CloudEditor } from '~/components/edit/cloud-editor'
 import { Button } from '~/components/ui/button'
+import { AgentAnswer } from '~/components/viewer/agent-answer'
 import { AgentView } from '~/components/viewer/agent-view'
 import { FinalCut } from '~/components/viewer/final-cut'
 import { SectionHead } from '~/components/viewer/section-head'
@@ -91,6 +92,10 @@ export function WalkthroughPage() {
       <div className="space-y-5">
         <WalkthroughHeader walkthrough={walkthrough} />
       </div>
+
+      {/* The review thread + sign-off, right under the masthead: when an agent
+          has answered, approving or sending back IS the job of this page. */}
+      <AgentAnswer walkthrough={walkthrough} />
 
       {/* Recorded for a person, uploaded raw, never tightened: the edit is the
           only thing anyone wants from this page, so it is the page. */}

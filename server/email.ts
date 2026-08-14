@@ -80,7 +80,7 @@ function esc(text: string): string {
     .replace(/"/g, '&quot;')
 }
 
-function shell(body: string): string {
+function shell(body: string, footer?: string): string {
   return `<div style="margin:0;padding:32px 16px;background:${PAPER};font-family:'Helvetica Neue',Arial,sans-serif;color:${INK}">
   <div style="max-width:480px;margin:0 auto">
     <div style="font-size:18px;font-weight:600;letter-spacing:-0.01em">Handback</div>
@@ -89,7 +89,7 @@ function shell(body: string): string {
     <div style="height:1px;background:#e6e3dc;margin:28px 0 16px"></div>
     <div style="font-size:12px;color:${MUTED};line-height:1.6">
       Handback — agents fix it, humans sign off.<br>
-      Not expecting this? You can ignore it; nothing happens until the link is used.
+      ${footer ?? 'Not expecting this? You can ignore it; nothing happens until the link is used.'}
     </div>
   </div>
 </div>`
@@ -131,6 +131,36 @@ export function verifyEmail(url: string): Omit<Message, 'to'> {
     </p>
     ${button(url, 'Confirm my email')}
     ${fallbackLine(url)}`),
+  }
+}
+
+export function walkthroughUploadedEmail(opts: {
+  uploader: string
+  team: string
+  title: string
+  kind: string
+  durationMs: number
+  url: string
+  unsubscribeUrl: string
+}): Omit<Message, 'to'> {
+  const { uploader, team, title, kind, durationMs, url, unsubscribeUrl } = opts
+  const minutes = Math.max(1, Math.round(durationMs / 60000))
+  const what =
+    kind === 'human'
+      ? `a ${minutes}-minute video for a person`
+      : `a ${minutes}-minute walkthrough for an agent`
+  return {
+    subject: `${uploader} added a walkthrough to ${team}: ${title}`,
+    text: `${uploader} added ${what} to the ${team} team on Handback.\n\n"${title}"\n\nWatch and triage it here:\n${url}\n\nToo much mail? Stop these: ${unsubscribeUrl}`,
+    html: shell(
+      `<p style="font-size:15px;line-height:1.6;margin:0 0 8px">
+      <strong>${esc(uploader)}</strong> added ${esc(what)} to the <strong>${esc(team)}</strong> team.
+    </p>
+    <p style="font-size:16px;line-height:1.6;margin:0 0 20px;font-weight:600">${esc(title)}</p>
+    ${button(url, 'Watch & triage it')}
+    ${fallbackLine(url)}`,
+      `Too much mail? <a href="${unsubscribeUrl}" style="color:${MUTED}">Stop these upload emails</a> — one click, no sign-in.`
+    ),
   }
 }
 

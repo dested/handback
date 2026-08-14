@@ -3,10 +3,20 @@
 // walkthrough looks identical whichever way it was pulled.
 
 /** Structural, not nominal: the hosted server passes a Prisma-derived object
- *  and the stdio client passes a parsed wire body. Both have these two fields. */
+ *  and the stdio client passes a parsed wire body. Both have these fields
+ *  (`notes` is absent on a wire body from a server that predates it). */
 export type FormattableWalkthrough = {
   reportMd: string | null
   files: Array<{ path: string; url: string }>
+  notes?: Array<{
+    role: string
+    summary: string
+    prUrl: string | null
+    filesTouched: string[]
+    bodyMd: string | null
+    authorName: string
+    createdAt: string
+  }>
   [key: string]: unknown
 }
 
@@ -29,9 +39,24 @@ export function briefFrameLimit(durationMs: unknown): number {
 
 const isFrame = (path: string) => path.includes('/frames/')
 
-/** The metadata JSON, then report.md, then one `path — url` line per file. */
+/** One review-thread entry as brief text. A reviewer entry's summary IS the
+ *  send-back note — the thing an agent re-pulling this walkthrough must read. */
+function formatNote(n: NonNullable<FormattableWalkthrough['notes']>[number]): string {
+  const head =
+    n.role === 'agent'
+      ? `agent result — ${n.authorName} · ${n.createdAt}`
+      : `reviewer sent it back — ${n.authorName} · ${n.createdAt}`
+  const lines = [head, n.summary]
+  if (n.prUrl) lines.push(`PR: ${n.prUrl}`)
+  if (n.filesTouched.length > 0) lines.push(`files: ${n.filesTouched.join(', ')}`)
+  if (n.bodyMd) lines.push(n.bodyMd)
+  return lines.join('\n')
+}
+
+/** The metadata JSON, then report.md, the review thread when one exists, then
+ *  one `path — url` line per file. */
 export function formatWalkthrough(walkthrough: FormattableWalkthrough): string {
-  const { reportMd, files, ...meta } = walkthrough
+  const { reportMd, files, notes, ...meta } = walkthrough
   const maxFrames = briefFrameLimit(meta.durationMs)
 
   let framesShown = 0
@@ -57,6 +82,9 @@ export function formatWalkthrough(walkthrough: FormattableWalkthrough): string {
     JSON.stringify(meta, null, 2),
     '--- report.md ---',
     reportMd ?? '(no report.md was uploaded with this walkthrough)',
+    // Chronological, so "what happened since the recording" reads top to
+    // bottom: result, send-back, result again. Absent entirely when empty.
+    ...(notes && notes.length > 0 ? ['--- review thread ---', notes.map(formatNote).join('\n\n')] : []),
     '--- files ---',
     lines.join('\n'),
   ].join('\n\n')

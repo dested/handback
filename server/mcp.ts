@@ -3,7 +3,7 @@
 //   claude mcp add --transport http handback https://handback.dev/mcp \
 //     --header "Authorization: Bearer hb_…"
 //
-// Same three tools as the stdio server in `cli/mcp.ts`, over the same
+// Same four tools as the stdio server in `cli/mcp.ts`, over the same
 // implementation (`walkthroughs-api.ts`), except nothing has to be installed: no
 // clone, no bun, no repo. That matters because the person who fixes a walkthrough is
 // usually not the person who deployed Handback.
@@ -12,7 +12,7 @@
 // when the response closes. Sessions would pin a client to one process, and
 // this runs behind a load balancer as a single ECS service that gets replaced
 // on every deploy — a session id would be a promise we can't keep. The cost is
-// re-registering three tools per request, which is object allocation.
+// re-registering four tools per request, which is object allocation.
 //
 // Auth is the same `hb_` bearer token as /api/ingest, read off the standard
 // Authorization header, so a token reaches its owner's personal space and every
@@ -28,6 +28,7 @@ import {
   authenticateToken,
   getWalkthroughDetail,
   listWalkthroughs,
+  postWalkthroughResult,
   setWalkthroughStatus,
   type TokenAuth,
 } from './walkthroughs-api'
@@ -137,6 +138,40 @@ function buildServer(auth: TokenAuth): McpServer {
       const moved = await setWalkthroughStatus(auth, walkthroughId, status)
       if (!moved) return toolError(notFound(walkthroughId))
       return text(`Walkthrough ${moved.slug} (${walkthroughId}) is now ${status}.`)
+    }
+  )
+
+  registerTool(
+    mcp,
+    'post_result',
+    {
+      title: 'Post your result',
+      description:
+        'When you have addressed a walkthrough, post what you did so the human can sign off: a one-paragraph summary, and optionally the PR url, the files you touched, and a longer markdown body. This is what the reviewer reads before approving — write it for them. Posting also moves an open walkthrough to in_review.' +
+        scope,
+      inputSchema: {
+        walkthroughId: z.string(),
+        summary: z.string().min(1).max(2000).describe('What you did, in a sentence or two'),
+        prUrl: z.string().url().max(500).optional().describe('Link to the PR or commit, if any'),
+        filesTouched: z.array(z.string().max(300)).max(100).optional(),
+        body: z
+          .string()
+          .max(20_000)
+          .optional()
+          .describe('Optional longer markdown: what changed, how to verify, anything left open'),
+      },
+    },
+    async ({ walkthroughId, summary, prUrl, filesTouched, body }) => {
+      const posted = await postWalkthroughResult(auth, walkthroughId, {
+        summary,
+        prUrl,
+        filesTouched,
+        body,
+      })
+      if (!posted) return toolError(notFound(walkthroughId))
+      return text(
+        `Result posted on ${posted.slug} (${walkthroughId}) — the reviewer will see it on the walkthrough page.`
+      )
     }
   )
 

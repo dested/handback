@@ -2,6 +2,28 @@
 
 > ADR-lite: what was decided, why, what was rejected. Append-only.
 
+## 2026-08-13 — The return path is one thread table, and posting a result moves status
+**Why:** the loop's missing half was "agent fixed it → human signs off on *what*". One
+`WalkthroughNote` table with `role: 'agent' | 'reviewer'` carries both the agent's result
+(structured: summary + optional prUrl/filesTouched + markdown body — owner picked
+structured-plus-body over either extreme) and the reviewer's send-back note, so the brief renders
+one chronological thread and neither side can miss the other. `post_result` auto-flips
+open → in_review (a posted result IS the fix going up) and `sendBack` forces open — both through
+`expiryFor`, keeping the retention invariant. `authorName` is denormalized: threads must outlive
+token revocation and account deletion.
+**Rejected:** two tables (results vs notes — one thread, one query, one brief section); freeform
+markdown only (no reliable PR link to render or later sync); auto-resolve on approve-less flows
+(sign-off stays human); notifying via Slack (owner picked email-only for B1).
+
+## 2026-08-13 — Agent trace is fire-and-forget and token-surfaces-only
+**Why:** "pulled by your agent 12m ago" is a trust line, not an audit log. It logs only
+token-authed get/status/result (the web viewer and /admin's debug brief are humans looking, not
+agent activity — debug passes `{trace: false}`), dedupes 'pulled' per token per 10 min, and never
+awaits: a trace failure or slow insert must not cost an agent call. Retention = cascade with the
+walkthrough; no separate sweep.
+**Rejected:** logging list calls (pure noise); a real audit table with IPs/user-agents (different
+feature, different bar).
+
 ## 2026-08-13 — The editor timeline DOES have a selection now (reverses 2026-08-01 / 08-12)
 **Why:** owner verdict, verbatim: "the scrobbler fucking sucks. no one is going to know to hold
 shit. just make drag select and then remove, give it undo redo." The ⇧-drag carve + "cut from

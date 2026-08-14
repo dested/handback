@@ -32,6 +32,9 @@ model User {
   // hand-granted feature entitlements ("team").
   isAdmin       Boolean  @default(false) @map("is_admin")
   features      String[] @default([])
+  // Mute for the "teammate added a walkthrough" email. One-click unsubscribe
+  // (the email footer) flips it off; the /team personal card flips it back.
+  notifyUploads Boolean  @default(true) @map("notify_uploads")
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @default(now()) @map("updated_at")
 
@@ -218,10 +221,53 @@ model Walkthrough {
   renderedAt   DateTime? @map("rendered_at")
   rawsPurgedAt DateTime? @map("raws_purged_at")
 
-  takes Take[]
-  files WalkthroughFile[]
+  takes  Take[]
+  files  WalkthroughFile[]
+  notes  WalkthroughNote[]
+  access WalkthroughAccess[]
 
   @@map("walkthrough")
+}
+
+// The review exchange on a walkthrough, one chronological thread: an agent's
+// posted result (`role: 'agent'` — summary + optional PR link / files touched /
+// markdown body) and the reviewer's send-back notes (`role: 'reviewer'` —
+// summary IS the note). The agent brief renders the whole thread, so an agent
+// re-pulling a sent-back walkthrough reads the reviewer's note in place.
+// `authorName` is denormalized on purpose: tokens get revoked and accounts get
+// deleted, but the thread should still read.
+model WalkthroughNote {
+  id            String      @id @default(uuid())
+  walkthroughId String      @map("walkthrough_id")
+  walkthrough   Walkthrough @relation(fields: [walkthroughId], references: [id], onDelete: Cascade)
+  role          String // 'agent' | 'reviewer'
+  summary       String
+  prUrl         String?     @map("pr_url")
+  filesTouched  String[]    @map("files_touched")
+  bodyMd        String?     @map("body_md")
+  authorName    String      @map("author_name")
+  createdAt     DateTime    @default(now()) @map("created_at")
+
+  @@index([walkthroughId, createdAt])
+  @@map("walkthrough_note")
+}
+
+// The agent activity trace: what a token did to a walkthrough, so the viewer
+// can say "pulled by <token> 12m ago". Written fire-and-forget from the
+// token-authed surfaces only (never the web viewer's own reads); `pulled` rows
+// are deduped within a window so a chatty agent doesn't flood it. Cascades with
+// the walkthrough, which is also its retention story.
+model WalkthroughAccess {
+  id            String      @id @default(uuid())
+  walkthroughId String      @map("walkthrough_id")
+  walkthrough   Walkthrough @relation(fields: [walkthroughId], references: [id], onDelete: Cascade)
+  tokenName     String      @map("token_name")
+  action        String // 'pulled' | 'status' | 'result'
+  detail        String? // the status value for 'status'; null otherwise
+  createdAt     DateTime    @default(now()) @map("created_at")
+
+  @@index([walkthroughId, createdAt])
+  @@map("walkthrough_access")
 }
 
 model Take {

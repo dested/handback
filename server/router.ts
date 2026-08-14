@@ -894,6 +894,9 @@ const walkthroughsRouter = router({
           files: { where: { status: 'uploaded' }, orderBy: { path: 'asc' } },
           project: { select: { id: true, name: true, slug: true } },
           uploadedBy: { select: { name: true } },
+          notes: { orderBy: { createdAt: 'asc' } },
+          // The trace is a courtesy line, not a log viewer — the newest few.
+          access: { orderBy: { createdAt: 'desc' }, take: 5 },
         },
       })
       if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
@@ -946,6 +949,25 @@ const walkthroughsRouter = router({
           frameCount: t.frameCount,
           transcriber: t.transcriber,
           videoPath: t.videoPath,
+        })),
+        // The review thread (agent results + reviewer send-backs), oldest first
+        // — what the "agent's answer" panel renders and sign-off acts on.
+        notes: g.notes.map((n) => ({
+          id: n.id,
+          role: n.role,
+          summary: n.summary,
+          prUrl: n.prUrl,
+          filesTouched: n.filesTouched,
+          bodyMd: n.bodyMd,
+          authorName: n.authorName,
+          createdAt: n.createdAt.toISOString(),
+        })),
+        // Newest-first agent activity ("pulled by <token> 12m ago").
+        activity: g.access.map((a) => ({
+          tokenName: a.tokenName,
+          action: a.action,
+          detail: a.detail,
+          createdAt: a.createdAt.toISOString(),
         })),
         // Presigned per file so the viewer never round-trips per frame; signing
         // is local HMAC work, cheap even at a few hundred files.
@@ -1001,6 +1023,37 @@ const walkthroughsRouter = router({
           // it. Same call as the shared MCP path (setWalkthroughStatus).
           expiresAt: expiryFor(input.status),
         },
+      })
+      return { ok: true }
+    }),
+
+  /**
+   * The reviewer's half of the return path: reject the agent's answer with a
+   * note. The note lands in the review thread (so the agent reads it in the
+   * brief when it re-pulls) and the walkthrough goes back to `open` — through
+   * the same expiryFor write every status change takes.
+   */
+  sendBack: protectedProcedure
+    .input(z.object({ walkthroughId: z.string(), note: z.string().trim().min(1).max(4000) }))
+    .mutation(async ({ ctx, input }) => {
+      const g = await prisma.walkthrough.findUnique({
+        where: { id: input.walkthroughId },
+        select: { teamId: true, userId: true },
+      })
+      if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
+      await requireSpaceAccess(ctx.session.user.id, g)
+      await prisma.walkthroughNote.create({
+        data: {
+          walkthroughId: input.walkthroughId,
+          role: 'reviewer',
+          summary: input.note,
+          filesTouched: [],
+          authorName: ctx.session.user.name,
+        },
+      })
+      await prisma.walkthrough.update({
+        where: { id: input.walkthroughId },
+        data: { status: 'open', resolvedAt: null, expiresAt: expiryFor('open') },
       })
       return { ok: true }
     }),
@@ -1825,8 +1878,15 @@ const adminRouter = router({
       // The agent's view, through the agent's own pipeline — reportMd included,
       // so it can't be fetched a second, subtly different way.
       const detail = await getWalkthroughDetail(
-        { userId: ctx.session.user.id, tokenId: 'admin-ui', isAdmin: true, emailVerified: true },
-        g.id
+        {
+          userId: ctx.session.user.id,
+          tokenId: 'admin-ui',
+          tokenName: 'admin-ui',
+          isAdmin: true,
+          emailVerified: true,
+        },
+        g.id,
+        { trace: false }
       )
       const brief = detail ? formatWalkthrough(detail) : null
       const frameFiles = g.files.filter(
@@ -2231,9 +2291,34 @@ const recorderRouter = router({
   }),
 })
 
+/**
+ * Per-account switches. One so far: the "teammate added a walkthrough" email —
+ * flipped off by the one-click unsubscribe link in the mail itself, back on
+ * from the /team page.
+ */
+const prefsRouter = router({
+  get: protectedProcedure.query(async ({ ctx }) => {
+    const user = await prisma.user.findUnique({
+      where: { id: ctx.session.user.id },
+      select: { notifyUploads: true },
+    })
+    return { notifyUploads: user?.notifyUploads ?? true }
+  }),
+  setNotifyUploads: protectedProcedure
+    .input(z.object({ enabled: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      await prisma.user.update({
+        where: { id: ctx.session.user.id },
+        data: { notifyUploads: input.enabled },
+      })
+      return { ok: true }
+    }),
+})
+
 export const appRouter = router({
   me: protectedProcedure.query(({ ctx }) => ctx.session.user),
   recorder: recorderRouter,
+  prefs: prefsRouter,
   teams: teamsRouter,
   invites: invitesRouter,
   tokens: tokensRouter,

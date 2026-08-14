@@ -8,10 +8,11 @@
 // contributors working against a local server and for anyone who'd rather their
 // agent talk to a process they can read.
 //
-// Three tools over the token-authed read API in server/ingest.ts: list every
+// Four tools over the token-authed API in server/ingest.ts: list every
 // walkthrough the token reaches (its owner's personal space plus every team
 // they're in), pull one walkthrough's full brief (report.md + presigned URLs for
-// video/keyframes/transcript), and move a walkthrough through review.
+// video/keyframes/transcript), move a walkthrough through review, and post the
+// result a human signs off on.
 //
 // stdout is the JSON-RPC channel — nothing but the protocol may be written to
 // it. Diagnostics go to stderr.
@@ -146,6 +147,36 @@ registerTool(
     )
     if ('error' in result) return result.error
     return text(`Walkthrough ${walkthroughId} is now ${result.data.status}.`)
+  }
+)
+
+registerTool(
+  'post_result',
+  {
+    title: 'Post your result',
+    description:
+      'When you have addressed a walkthrough, post what you did so the human can sign off: a one-paragraph summary, and optionally the PR url, the files you touched, and a longer markdown body. This is what the reviewer reads before approving — write it for them. Posting also moves an open walkthrough to in_review.',
+    inputSchema: {
+      walkthroughId: z.string(),
+      summary: z.string().min(1).max(2000).describe('What you did, in a sentence or two'),
+      prUrl: z.string().url().max(500).optional().describe('Link to the PR or commit, if any'),
+      filesTouched: z.array(z.string().max(300)).max(100).optional(),
+      body: z
+        .string()
+        .max(20_000)
+        .optional()
+        .describe('Optional longer markdown: what changed, how to verify, anything left open'),
+    },
+  },
+  async ({ walkthroughId, summary, prUrl, filesTouched, body }) => {
+    const result = await api<{ ok: boolean }>(
+      `/walkthroughs/${encodeURIComponent(walkthroughId)}/result`,
+      { method: 'POST', body: { summary, prUrl, filesTouched, body } }
+    )
+    if ('error' in result) return result.error
+    return text(
+      `Result posted on ${walkthroughId} — the reviewer will see it on the walkthrough page.`
+    )
   }
 )
 

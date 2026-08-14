@@ -114,10 +114,13 @@ server/
   ingest.ts             Token-authed REST (Bearer hb_…): two-phase upload, size caps + per-org
                         quota, /transcribe and /polish; read side delegates to walkthroughs-api.
                         Every route registered under /walkthroughs* AND legacy /gripes* aliases
-  walkthroughs-api.ts   THE agent-facing surface: token auth + list/get/setStatus. Shared by
-                        ingest.ts AND both MCP servers so they can't drift. A token reaches its
+  walkthroughs-api.ts   THE agent-facing surface: token auth + list/get/setStatus/postResult
+                        (the review thread) + the WalkthroughAccess trace. Shared by ingest.ts
+                        AND both MCP servers so they can't drift. A token reaches its
                         owner's personal space + every team they're in; a platform admin's token
                         reaches everything. Items carry `space` (team name or "Personal")
+  notify.ts             the doorbell: emails a team (minus uploader; verified + unmuted only)
+                        when a walkthrough finalizes, + the HMAC unsubscribe-link signing
   mcp.ts                Hosted MCP at /mcp — StreamableHTTP, stateless, hb_ bearer auth
   mcp-format.ts         Pure formatter for a walkthrough brief; shared with cli/mcp.ts
   storage.ts            S3: presignPut/Get, getObjectText, deletePrefix, deleteKeys, key layout,
@@ -229,8 +232,9 @@ src/
                         (one player + transcript/console rail + timeline + frames + report) ·
                         timeline (THE scrubber: source-global axis, cut tags are the only cut
                         toggle, one-gesture drag, empty→one muted line) · use-segment-player
-                        (multi-take playback, rAF playhead) · frames-grid (numbered contact
-                        sheet) · transcript-panel (borderless, live active line) · events-panel
+                        (multi-take playback, rAF playhead) · agent-answer (the review thread +
+                        Approve/Send back sign-off + agent-activity line) · frames-grid (numbered
+                        contact sheet) · transcript-panel (borderless, live active line) · events-panel
                         (mono, red/violet ticks) · section-head · report-panel · status-control ·
                         share-control (url·copy·revoke pill) · final-cut · skeleton · types ·
                         format · use-copy. take-section/filmstrip/walkthrough-controls DELETED
@@ -334,6 +338,7 @@ extension/              Handback Recorder — the Chrome MV3 extension (own npm 
 | `/dashboard` | redirect → /app (legacy) | `routes.tsx` |
 | `/healthz` | DB probe | `server.ts` |
 | `/api/auth/*` · `/api/trpc/*` | better-auth · tRPC | `server.ts` |
+| `/api/notifications/unsubscribe` | One-click mute for upload emails (HMAC-signed link, no session) | `server.ts` · `server/notify.ts` |
 | `/api/ingest/*` | Token-authed REST (below) | `server/ingest.ts` |
 | `/mcp` | **Hosted MCP** (POST only, `hb_` bearer). What agents connect to | `server/mcp.ts` |
 | `/download/recorder` | The extension zip — **session-gated**, 302s to a presigned S3 GET | `server.ts` |
@@ -348,6 +353,7 @@ extension/              Handback Recorder — the Chrome MV3 extension (own npm 
 | `GET /walkthroughs` | List for agents (MCP `list_walkthroughs`): everything the token reaches, `?team=personal\|<id>` filters. Platform-wide when the owner is a platform admin |
 | `GET /walkthroughs/:id` | Detail + `reportMd` text + presigned GET for every file (MCP `get_walkthrough`) |
 | `POST /walkthroughs/:id/status` | open / in_review / resolved (MCP `set_walkthrough_status`) |
+| `POST /walkthroughs/:id/result` | The agent's answer (MCP `post_result`): summary + optional prUrl/filesTouched/body → review-thread note; auto-flips open → in_review. No `/gripes` alias (nothing old posts it) |
 
 All five walkthrough routes also answer under the legacy `/gripes*` spellings — same handlers,
 same rate-limit keys — because shipped recorders ≤1.2.x still post them. Don't remove the aliases
@@ -372,8 +378,12 @@ uniqueness per space is **code-enforced** (findFirst + suffix loop; no DB unique
 partial-index a nullable pair). Walkthrough keeps slug/status/finalizedAt/errorCount/droppedCount
 semantics ← Take (rec-NN) + WalkthroughFile (path unique per walkthrough; S3 key =
 `orgs/<spaceId>/gripes/<walkthroughId>/<path>` where spaceId = teamId ?? userId — both segments
-frozen) · ApiToken (**user-scoped**, no team column; sha256 hash only; `hb_` prefix; lastUsedAt
-stamped on ingest auth).
+frozen) · **WalkthroughNote** (the review thread: role 'agent' — post_result's summary/prUrl/
+filesTouched/bodyMd — or 'reviewer' — the send-back note; authorName denormalized so revoked
+tokens/deleted users still read) · **WalkthroughAccess** (the agent trace: tokenName + action
+pulled/status/result, 'pulled' deduped per 10 min) · ApiToken (**user-scoped**, no team column;
+sha256 hash only; `hb_` prefix; lastUsedAt stamped on ingest auth) · User.notifyUploads (the
+upload-email mute).
 
 ## Storage (Cloudflare R2 since 2026-08-13; S3 before that)
 
@@ -850,6 +860,24 @@ reaches the container on a plain push.
   deliberately untouched, the recorder needs them), HSTS only when serving https. There is NO CSP
   yet (inline Vite scripts) — adding one is its own task, don't bolt it onto this middleware
   casually.
+- **The review thread is the return path, and status rides it** (2026-08-13): `post_result`
+  (4th MCP tool, REST `/walkthroughs/:id/result`) writes a `WalkthroughNote` role 'agent' and
+  auto-flips an **open** walkthrough to in_review; `walkthroughs.sendBack` writes role 'reviewer'
+  and forces status back to open. BOTH go through `expiryFor` like every status write. The brief
+  renders the thread (`--- review thread ---` in mcp-format.ts) so a re-pulling agent reads the
+  send-back note — don't add a result/send-back write that skips the note table, or the two sides
+  stop seeing each other. The viewer's AgentAnswer panel (Approve & resolve / Send back) is the
+  sign-off surface; approve is just setStatus resolved.
+- **The agent trace logs token surfaces only.** `traceAccess` (walkthroughs-api.ts) fires on
+  token get/status/result — never on web-viewer reads, and /admin's debug brief passes
+  `{trace: false}` so an admin looking isn't "agent activity". 'pulled' dedupes per token per
+  10 min. Fire-and-forget by design: a trace failure must never slow or fail an agent call.
+- **Upload email fires on finalize's null→set transition only, team spaces only.**
+  `notifyUpload` (server/notify.ts, called from ingest FINALIZE): recipients = team members
+  minus the uploader, `emailVerified` AND `notifyUploads` true. A finalize retry or slug
+  re-push must not re-mail — the guard is the pre-update `finalizedAt`. The unsubscribe link is
+  sessionless (HMAC of userId, BETTER_AUTH_SECRET-keyed, timing-safe compare); re-enable is the
+  checkbox on /team (prefs router). Personal-space uploads never notify (always self-uploads).
 - **final.mp4 downloads through a second presign.** `presignGet(key, { downloadAs })` signs a
   `ResponseContentDisposition` — the `download` attribute is ignored cross-origin, so the
   Download button needs the URL itself to say attachment. `get`/`shared` return it as
@@ -969,6 +997,13 @@ reaches the container on a plain push.
   budgets + first-walkthrough magic + `pro` feature, 10-token cap, `cloud` block in /context,
   share-token log redaction, trustedOrigins + cookie pinning. Live-verified locally (403 gate,
   magic, 900s free block). Turnstile deferred (no keys).
+- **Done (2026-08-13)** — **Wave 1 of the picked backlog** (`plans/2026-08-13-loop-and-team-wave.md`):
+  the return path + the doorbell. `post_result` MCP tool → WalkthroughNote review thread →
+  viewer AgentAnswer panel (Approve & resolve / Send back with note → reopens + note joins the
+  brief), WalkthroughAccess agent trace ("pulled by <token> 12m ago"), team upload emails
+  (User.notifyUploads + HMAC unsubscribe + /team toggle). Typecheck + build green. **Schema is
+  pushed NOWHERE** — `.env` points at prod (the standing hazard), so local dev/`handback_test`
+  need `db push` by hand and prod gets it via predeploy on the next main push. No live run yet.
 - **Next** — **deploy, then re-test the loop**: `/mcp` and `/connect` only exist locally until the
   next push to `main`, so the command `/connect` prints for handback.dev 404s until then. Sal's
   Drydock/DNS checklist in the rename plan (zone, project, S3 via

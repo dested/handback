@@ -166,6 +166,10 @@ export function TeamPage() {
         />
       ))}
 
+      {/* The doorbell's mute. Only worth showing to someone a team can email —
+          personal-space uploads never notify anyone. */}
+      {teams.length > 0 && <NotifyToggle />}
+
       <p className="text-muted-foreground text-sm">
         Your personal space needs no roster — walkthroughs you upload without a team are yours
         alone.
@@ -178,6 +182,48 @@ export function TeamPage() {
         />
       )}
     </div>
+  )
+}
+
+/**
+ * The one account-level switch on this page: the "teammate added a walkthrough"
+ * email. The unsubscribe link in the mail itself flips it off; this is where it
+ * comes back on. Optimistic — the checkbox moves on click and snaps back if the
+ * write fails.
+ */
+function NotifyToggle() {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const prefs = useQuery(trpc.prefs.get.queryOptions())
+  const setNotify = useMutation(
+    trpc.prefs.setNotifyUploads.mutationOptions({
+      onSettled: () => queryClient.invalidateQueries({ queryKey: trpc.prefs.get.queryKey() }),
+    })
+  )
+  const enabled = setNotify.isPending
+    ? (setNotify.variables?.enabled ?? true)
+    : (prefs.data?.notifyUploads ?? true)
+
+  return (
+    <section className="space-y-3">
+      <SectionHead>notifications</SectionHead>
+      <label className="flex max-w-xl items-start gap-2.5 text-sm">
+        <input
+          type="checkbox"
+          checked={enabled}
+          disabled={prefs.isPending}
+          onChange={(e) => setNotify.mutate({ enabled: e.currentTarget.checked })}
+          className="accent-cobalt mt-0.5"
+        />
+        <span>
+          Email me when a teammate adds a walkthrough
+          <span className="text-muted-foreground block text-xs leading-relaxed">
+            One mail per upload, to your teams only — never for your own uploads. Every mail
+            carries a one-click stop link.
+          </span>
+        </span>
+      </label>
+    </section>
   )
 }
 

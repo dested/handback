@@ -30,6 +30,9 @@ export type WalkthroughStatus = (typeof WALKTHROUGH_STATUSES)[number]
 export type TokenAuth = {
   userId: string
   tokenId: string
+  // Denormalized into WalkthroughNote/WalkthroughAccess rows at write time —
+  // the thread and the trace must survive the token's revocation.
+  tokenName: string
   isAdmin: boolean
   // Carried so ingest's write/cloud gates don't run an extra query per request.
   emailVerified: boolean
@@ -78,9 +81,46 @@ export async function authenticateToken(header: string | undefined): Promise<Tok
   return {
     userId: token.userId,
     tokenId: token.id,
+    tokenName: token.name,
     isAdmin: isPlatformAdmin(token.user),
     emailVerified: token.user.emailVerified,
   }
+}
+
+// ── the activity trace ───────────────────────────────────────────────────────
+
+/** A second 'pulled' by the same token inside this window is the same visit. */
+const PULL_DEDUP_MS = 10 * 60 * 1000
+
+/**
+ * Record what a token did to a walkthrough, fire-and-forget — the trace is a
+ * courtesy to the human viewer ("pulled by your agent 12m ago"), never worth a
+ * failed or slower agent call. Only token surfaces log; the web viewer's own
+ * reads are not agent activity.
+ */
+function traceAccess(
+  auth: TokenAuth,
+  walkthroughId: string,
+  action: 'pulled' | 'status' | 'result',
+  detail?: string
+): void {
+  void (async () => {
+    if (action === 'pulled') {
+      const recent = await prisma.walkthroughAccess.findFirst({
+        where: {
+          walkthroughId,
+          tokenName: auth.tokenName,
+          action: 'pulled',
+          createdAt: { gt: new Date(Date.now() - PULL_DEDUP_MS) },
+        },
+        select: { id: true },
+      })
+      if (recent) return
+    }
+    await prisma.walkthroughAccess.create({
+      data: { walkthroughId, tokenName: auth.tokenName, action, detail: detail ?? null },
+    })
+  })().catch(() => {})
 }
 
 export type WalkthroughListItem = {
@@ -166,6 +206,17 @@ export async function listWalkthroughs(
 
 export type WalkthroughFileRef = { path: string; size: number; contentType: string; url: string }
 
+/** One entry of the review thread, as an agent (or the brief formatter) sees it. */
+export type WalkthroughNoteRef = {
+  role: string
+  summary: string
+  prUrl: string | null
+  filesTouched: string[]
+  bodyMd: string | null
+  authorName: string
+  createdAt: string
+}
+
 export type WalkthroughDetail = {
   id: string
   slug: string
@@ -188,6 +239,8 @@ export type WalkthroughDetail = {
   }>
   reportMd: string | null
   files: WalkthroughFileRef[]
+  // The review thread, oldest first: agent results and reviewer send-backs.
+  notes: WalkthroughNoteRef[]
 }
 
 /**
@@ -199,7 +252,10 @@ export type WalkthroughDetail = {
  */
 export async function getWalkthroughDetail(
   auth: TokenAuth,
-  walkthroughId: string
+  walkthroughId: string,
+  // /admin's debug page renders the brief through this same function under a
+  // synthetic auth — a human looking at a debug view is not agent activity.
+  opts: { trace?: boolean } = {}
 ): Promise<WalkthroughDetail | null> {
   const walkthrough = await prisma.walkthrough.findUnique({
     where: { id: walkthroughId },
@@ -208,9 +264,11 @@ export async function getWalkthroughDetail(
       user: { select: { name: true } },
       takes: { orderBy: { index: 'asc' } },
       files: { where: { status: 'uploaded' }, orderBy: { path: 'asc' } },
+      notes: { orderBy: { createdAt: 'asc' } },
     },
   })
   if (!walkthrough || !(await inScope(auth, walkthrough)) || !walkthrough.finalizedAt) return null
+  if (opts.trace !== false) traceAccess(auth, walkthrough.id, 'pulled')
 
   const space = spaceId({ teamId: walkthrough.teamId, userId: walkthrough.userId })
 
@@ -254,6 +312,15 @@ export async function getWalkthroughDetail(
         url: await presignGet(walkthroughKey(space, walkthrough.id, f.path)),
       }))
     ),
+    notes: walkthrough.notes.map((n) => ({
+      role: n.role,
+      summary: n.summary,
+      prUrl: n.prUrl,
+      filesTouched: n.filesTouched,
+      bodyMd: n.bodyMd,
+      authorName: n.authorName,
+      createdAt: n.createdAt.toISOString(),
+    })),
   }
 }
 
@@ -284,5 +351,54 @@ export async function setWalkthroughStatus(
     },
   })
   log.info(`[walkthroughs] ${walkthrough.slug} (${walkthrough.id}) → ${status}`)
+  traceAccess(auth, walkthrough.id, 'status', status)
+  return { slug: walkthrough.slug }
+}
+
+export type PostResultInput = {
+  summary: string
+  prUrl?: string
+  filesTouched?: string[]
+  body?: string
+}
+
+/**
+ * The return path: an agent posts what it did — a summary, optionally the PR
+ * link, the files it touched, and a markdown body — and the walkthrough carries
+ * the answer for a human to sign off on. Posting a result on an `open`
+ * walkthrough flips it to `in_review` (a posted result IS the fix going up);
+ * any other status is left alone. Returns the slug, or null out of scope.
+ */
+export async function postWalkthroughResult(
+  auth: TokenAuth,
+  walkthroughId: string,
+  input: PostResultInput
+): Promise<{ slug: string } | null> {
+  const walkthrough = await prisma.walkthrough.findUnique({
+    where: { id: walkthroughId },
+    select: { id: true, slug: true, status: true, teamId: true, userId: true },
+  })
+  if (!walkthrough || !(await inScope(auth, walkthrough))) return null
+  await prisma.walkthroughNote.create({
+    data: {
+      walkthroughId: walkthrough.id,
+      role: 'agent',
+      summary: input.summary,
+      prUrl: input.prUrl ?? null,
+      filesTouched: input.filesTouched ?? [],
+      bodyMd: input.body ?? null,
+      authorName: auth.tokenName,
+    },
+  })
+  if (walkthrough.status === 'open') {
+    // Same shape as setWalkthroughStatus — expiryFor must see every status
+    // write (retention rule), and in_review clears any scheduled expiry.
+    await prisma.walkthrough.update({
+      where: { id: walkthrough.id },
+      data: { status: 'in_review', resolvedAt: null, expiresAt: expiryFor('in_review') },
+    })
+  }
+  log.info(`[walkthroughs] ${walkthrough.slug} (${walkthrough.id}) ← result from ${auth.tokenName}`)
+  traceAccess(auth, walkthrough.id, 'result')
   return { slug: walkthrough.slug }
 }

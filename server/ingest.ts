@@ -32,12 +32,14 @@ import {
   authenticateToken,
   getWalkthroughDetail,
   listWalkthroughs,
+  postWalkthroughResult,
   setWalkthroughStatus,
   type WalkthroughStatus,
   type TokenAuth,
 } from './walkthroughs-api'
 import { memberTeamIds, spaceId } from './access'
 import { log } from './logger'
+import { notifyUpload } from './notify'
 import { polishConfigured, polishTranscript } from './polish'
 import { prisma } from './prisma'
 import { rateLimit } from './ratelimit'
@@ -430,7 +432,35 @@ ingestRouter.post(FINALIZE, finalizeLimit, async (req, res) => {
     data: { finalizedAt: new Date() },
   })
   log.info(`[ingest] finalized walkthrough ${walkthrough.slug} (${walkthrough.id})`)
+  // Only on the null→set transition: a client retrying finalize must not
+  // re-mail the team. Fire-and-forget — email is never worth a slower upload.
+  if (!walkthrough.finalizedAt) void notifyUpload(walkthrough.id)
   res.json({ ok: true, walkthroughId: walkthrough.id })
+})
+
+// POST /api/ingest/walkthroughs/:id/result — the agent's answer (MCP
+// `post_result` reaches this through cli/mcp.ts; the hosted server calls the
+// shared function directly). No /gripes alias: no shipped client posts it.
+const postResultSchema = z.object({
+  summary: z.string().min(1).max(2000),
+  prUrl: z.string().url().max(500).optional(),
+  filesTouched: z.array(z.string().max(300)).max(100).optional(),
+  body: z.string().max(20_000).optional(),
+})
+
+ingestRouter.post('/walkthroughs/:id/result', statusLimit, async (req, res) => {
+  const auth = getAuth(req)
+  const parsed = postResultSchema.safeParse(req.body)
+  if (!parsed.success) {
+    fail(res, 400, parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '))
+    return
+  }
+  const posted = await postWalkthroughResult(auth, pathId(req), parsed.data)
+  if (!posted) {
+    fail(res, 404, 'Unknown walkthrough')
+    return
+  }
+  res.json({ ok: true })
 })
 
 // The read side is three thin wrappers over `walkthroughs-api.ts` — the hosted MCP
