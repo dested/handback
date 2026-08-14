@@ -121,6 +121,11 @@ server/
                         reaches everything. Items carry `space` (team name or "Personal")
   notify.ts             the doorbell: emails a team (minus uploader; verified + unmuted only)
                         when a walkthrough finalizes, + the HMAC unsubscribe-link signing
+                        (per NotifyKind 'uploads' | 'digest')
+  search.ts             full-text: fills Walkthrough.searchText at finalize (report.md /
+                        transcript.json), query-time to_tsvector search (no GIN index yet)
+  digest.ts             the Monday digest: hourly sweep, fires in ONE UTC window (Mon 15:00),
+                        digestSentAt stamped BEFORE send (idempotency)
   mcp.ts                Hosted MCP at /mcp — StreamableHTTP, stateless, hb_ bearer auth
   mcp-format.ts         Pure formatter for a walkthrough brief; shared with cli/mcp.ts
   storage.ts            S3: presignPut/Get, getObjectText, deletePrefix, deleteKeys, key layout,
@@ -382,8 +387,10 @@ frozen) · **WalkthroughNote** (the review thread: role 'agent' — post_result'
 filesTouched/bodyMd — or 'reviewer' — the send-back note; authorName denormalized so revoked
 tokens/deleted users still read) · **WalkthroughAccess** (the agent trace: tokenName + action
 pulled/status/result, 'pulled' deduped per 10 min) · ApiToken (**user-scoped**, no team column;
-sha256 hash only; `hb_` prefix; lastUsedAt stamped on ingest auth) · User.notifyUploads (the
-upload-email mute).
+sha256 hash only; `hb_` prefix; lastUsedAt stamped on ingest auth) · **WalkthroughComment**
+(margin notes, optional `atMs` on the output clock; rides into the brief; own-delete only) ·
+User.notifyUploads / notifyDigest (email mutes) + digestSentAt · Walkthrough.searchText (the
+FTS corpus, filled at finalize).
 
 ## Storage (Cloudflare R2 since 2026-08-13; S3 before that)
 
@@ -872,6 +879,23 @@ reaches the container on a plain push.
   token get/status/result — never on web-viewer reads, and /admin's debug brief passes
   `{trace: false}` so an admin looking isn't "agent activity". 'pulled' dedupes per token per
   10 min. Fire-and-forget by design: a trace failure must never slow or fail an agent call.
+- **Comments are part of the brief, and their clock is the output clock.** `WalkthroughComment.atMs`
+  is the walkthrough-wide playback clock (same axis as transcript/frames in the viewer), rendered
+  in the brief as `[m:ss] name: text` — an agent reads a comment as an instruction keyed into the
+  transcript. Delete is own-comments-only (`deleteMany` where userId = me). The panel lives in
+  AgentView only; a human-kind final-cut page has no comments surface (deliberate, v1).
+- **Search is a corpus column + query-time tsvector, and there is NO index yet.**
+  `Walkthrough.searchText` (≤50 KB, URLs stripped) fills fire-and-forget at ingest finalize and
+  `finalizeEdit` — never at read time. `searchWalkthroughIds` runs `websearch_to_tsquery` over
+  title+corpus with a seq scan; at hundreds of rows that's fine. When it stops being fine, the
+  fix is a raw-SQL `CREATE INDEX ... USING gin (to_tsvector(...))` migration — predeploy
+  `db push` can't create it, plan it as its own step. /app unions server ids with its client-side
+  title matching (300 ms debounce); walkthroughs uploaded before this feature match on title only
+  until re-finalized.
+- **The digest stamps BEFORE it sends.** `server/digest.ts` fires only in Mon 15:00–15:59 UTC,
+  guards on `digestSentAt < now-6d`, and writes the stamp before `sendEmail` — a crash costs one
+  digest; the other order can spam hourly. No walkthroughs at all → stamp, no mail. Unsubscribe
+  links are per-kind now (`?kind=uploads|digest`, HMAC covers the kind).
 - **Upload email fires on finalize's null→set transition only, team spaces only.**
   `notifyUpload` (server/notify.ts, called from ingest FINALIZE): recipients = team members
   minus the uploader, `emailVerified` AND `notifyUploads` true. A finalize retry or slug
@@ -997,6 +1021,10 @@ reaches the container on a plain push.
   budgets + first-walkthrough magic + `pro` feature, 10-token cap, `cloud` block in /context,
   share-token log redaction, trustedOrigins + cookie pinning. Live-verified locally (403 gate,
   magic, 900s free block). Turnstile deferred (no keys).
+- **Done (2026-08-13, later)** — **Wave 2**: timestamped comments (WalkthroughComment → viewer
+  panel in AgentView + `--- comments ---` in the brief), full-text search (searchText corpus at
+  finalize + `walkthroughs.search` + /app deep-search union), Monday digest (server/digest.ts +
+  notifyDigest mute + per-kind unsubscribe). Typecheck green; same schema-push caveat as Wave 1.
 - **Done (2026-08-13)** — **Wave 1 of the picked backlog** (`plans/2026-08-13-loop-and-team-wave.md`):
   the return path + the doorbell. `post_result` MCP tool → WalkthroughNote review thread →
   viewer AgentAnswer panel (Approve & resolve / Send back with note → reopens + note joins the

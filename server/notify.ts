@@ -14,23 +14,31 @@ import { env } from './env'
 import { log } from './logger'
 import { prisma } from './prisma'
 
+/** Which recurring email a mute link speaks for. */
+export type NotifyKind = 'uploads' | 'digest'
+
+export const NOTIFY_KINDS: readonly NotifyKind[] = ['uploads', 'digest']
+
 /**
- * The unsubscribe link's whole credential: an HMAC of the user id, keyed off
- * BETTER_AUTH_SECRET. Not guessable, not a session, survives sign-out — exactly
- * what a link in an email needs.
+ * The unsubscribe link's whole credential: an HMAC of the user id + the email
+ * kind, keyed off BETTER_AUTH_SECRET. Not guessable, not a session, survives
+ * sign-out, and a leaked digest link can't mute upload mail — exactly what a
+ * link in an email needs.
  */
-export function unsubscribeSig(userId: string): string {
-  return createHmac('sha256', env.BETTER_AUTH_SECRET).update(`notify:${userId}`).digest('hex')
+export function unsubscribeSig(userId: string, kind: NotifyKind): string {
+  return createHmac('sha256', env.BETTER_AUTH_SECRET)
+    .update(`notify:${userId}:${kind}`)
+    .digest('hex')
 }
 
-export function verifyUnsubscribeSig(userId: string, sig: string): boolean {
-  const expected = Buffer.from(unsubscribeSig(userId))
+export function verifyUnsubscribeSig(userId: string, kind: NotifyKind, sig: string): boolean {
+  const expected = Buffer.from(unsubscribeSig(userId, kind))
   const given = Buffer.from(sig)
   return expected.length === given.length && timingSafeEqual(expected, given)
 }
 
-function unsubscribeUrl(userId: string): string {
-  return `${env.BETTER_AUTH_URL}/api/notifications/unsubscribe?u=${encodeURIComponent(userId)}&sig=${unsubscribeSig(userId)}`
+export function unsubscribeUrl(userId: string, kind: NotifyKind): string {
+  return `${env.BETTER_AUTH_URL}/api/notifications/unsubscribe?u=${encodeURIComponent(userId)}&kind=${kind}&sig=${unsubscribeSig(userId, kind)}`
 }
 
 /** Never throws — an unsendable email is a support problem, not a 500. */
@@ -75,7 +83,7 @@ export async function notifyUpload(walkthroughId: string): Promise<void> {
         kind: walkthrough.kind,
         durationMs: walkthrough.durationMs,
         url: `${env.BETTER_AUTH_URL}/walkthroughs/${walkthrough.id}`,
-        unsubscribeUrl: unsubscribeUrl(userId),
+        unsubscribeUrl: unsubscribeUrl(userId, 'uploads'),
       })
 
     // Sequential on purpose: seat limits keep teams small, and Resend's rate

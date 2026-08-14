@@ -2,6 +2,19 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-08-13 — Wave 2: timestamped comments, full-text search, Monday digest
+Asked: continue the picked backlog (all of B) — B2 comments, B3 search, B4 digest.
+Done: `WalkthroughComment` (optional atMs on the output clock; CommentsPanel in AgentView —
+pin-to-playhead chip, time chips seek, own-delete; `--- comments ---` in the agent brief);
+`Walkthrough.searchText` corpus filled at finalize/finalizeEdit (`server/search.ts`) +
+`walkthroughs.search` (query-time websearch_to_tsquery, no GIN yet) unioned into /app's search
+box (300ms debounce); `server/digest.ts` Monday 15:00-UTC weekly email (open/in-review/aging/
+resolved stats, top-5 oldest, stamp-before-send) + `notifyDigest` mute, per-kind HMAC
+unsubscribe, prefs.set + second /team checkbox. Typecheck green; schema still pushed nowhere.
+Touched: prisma/schema.prisma, server/{walkthroughs-api,mcp-format,router,ingest,notify,email,
+search(new),digest(new)}.ts, server.ts, src/components/viewer/{comments-panel(new),agent-view}.tsx,
+src/app/{app,team}.tsx
+
 ## 2026-08-13 — Wave 1: agent result post-back, send-back, activity trace, upload emails
 Asked: from the feature brainstorm, build A1 (post_result), A2 (send-back), A5 (agent trace), B1
 (email-only upload notify) — per plans/2026-08-13-loop-and-team-wave.md (waves 2–3 pending).

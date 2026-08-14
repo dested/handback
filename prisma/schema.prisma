@@ -32,11 +32,15 @@ model User {
   // hand-granted feature entitlements ("team").
   isAdmin       Boolean  @default(false) @map("is_admin")
   features      String[] @default([])
-  // Mute for the "teammate added a walkthrough" email. One-click unsubscribe
-  // (the email footer) flips it off; the /team personal card flips it back.
-  notifyUploads Boolean  @default(true) @map("notify_uploads")
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @default(now()) @map("updated_at")
+  // Mail mutes + bookkeeping. One-click unsubscribe (the email footers) flips
+  // them off; the /team personal card flips them back. `digestSentAt` is when
+  // the last weekly digest went out (null = never), the guard that keeps the
+  // hourly sweep from double-sending inside one Monday window.
+  notifyUploads Boolean   @default(true) @map("notify_uploads")
+  notifyDigest  Boolean   @default(true) @map("notify_digest")
+  digestSentAt  DateTime? @map("digest_sent_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @default(now()) @map("updated_at")
 
   sessions     Session[]
   accounts     Account[]
@@ -46,8 +50,9 @@ model User {
   // The personal space: rows owned by this account rather than a team.
   walkthroughs Walkthrough[]  @relation("personal")
   projects     Project[]      @relation("personalProjects")
-  ownedTeams   Team[]         @relation("teamOwner")
+  ownedTeams   Team[]               @relation("teamOwner")
   monthlyUsage MonthlyUsage[]
+  comments     WalkthroughComment[]
 
   @@map("user")
 }
@@ -220,13 +225,37 @@ model Walkthrough {
   expiresAt    DateTime? @map("expires_at")
   renderedAt   DateTime? @map("rendered_at")
   rawsPurgedAt DateTime? @map("raws_purged_at")
+  // Full-text corpus, filled at finalize (server/search.ts): report.md for
+  // agent kind, the transcript for human kind. Searched with a query-time
+  // to_tsvector — no GIN index yet, deliberate at current row counts.
+  searchText   String?   @map("search_text")
 
-  takes  Take[]
-  files  WalkthroughFile[]
-  notes  WalkthroughNote[]
-  access WalkthroughAccess[]
+  takes    Take[]
+  files    WalkthroughFile[]
+  notes    WalkthroughNote[]
+  access   WalkthroughAccess[]
+  comments WalkthroughComment[]
 
   @@map("walkthrough")
+}
+
+// A reviewer's margin note, optionally pinned to a moment of the recording
+// (`atMs` on the walkthrough-wide output clock). Comments ride into the agent
+// brief, so a comment is also an instruction. `authorName` denormalized like
+// the review thread; `userId` survives only to enforce "delete your own".
+model WalkthroughComment {
+  id            String      @id @default(uuid())
+  walkthroughId String      @map("walkthrough_id")
+  walkthrough   Walkthrough @relation(fields: [walkthroughId], references: [id], onDelete: Cascade)
+  userId        String?     @map("user_id")
+  user          User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+  authorName    String      @map("author_name")
+  atMs          Int?        @map("at_ms")
+  text          String
+  createdAt     DateTime    @default(now()) @map("created_at")
+
+  @@index([walkthroughId, createdAt])
+  @@map("walkthrough_comment")
 }
 
 // The review exchange on a walkthrough, one chronological thread: an agent's

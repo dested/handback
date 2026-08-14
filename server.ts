@@ -5,6 +5,7 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { auth } from './server/auth'
+import { startDigestSweep } from './server/digest'
 import { env } from './server/env'
 import { ingestRouter } from './server/ingest'
 import { formatError, log, requestLogger, startupBanner } from './server/logger'
@@ -99,25 +100,32 @@ async function createServer() {
     res.redirect(302, await presignGet(release.key))
   })
 
-  // One-click unsubscribe from the "teammate added a walkthrough" emails. The
-  // signed link in the mail's footer is the whole credential (HMAC of the user
-  // id) — it has to work without a session, from any mail client. Re-enable
-  // lives on /team.
+  // One-click unsubscribe for the recurring emails (upload notify + weekly
+  // digest). The signed link in the mail's footer is the whole credential
+  // (HMAC of user id + kind) — it has to work without a session, from any mail
+  // client. Re-enable lives on /team.
   app.get('/api/notifications/unsubscribe', async (req, res) => {
-    const { verifyUnsubscribeSig } = await import('./server/notify')
+    const { NOTIFY_KINDS, verifyUnsubscribeSig } = await import('./server/notify')
     const userId = typeof req.query.u === 'string' ? req.query.u : ''
     const sig = typeof req.query.sig === 'string' ? req.query.sig : ''
-    if (!userId || !sig || !verifyUnsubscribeSig(userId, sig)) {
+    const kindParam = typeof req.query.kind === 'string' ? req.query.kind : ''
+    const kind = NOTIFY_KINDS.find((k) => k === kindParam)
+    if (!userId || !sig || !kind || !verifyUnsubscribeSig(userId, kind, sig)) {
       res.status(400).type('txt').end('Bad unsubscribe link')
       return
     }
     await prisma.user
-      .update({ where: { id: userId }, data: { notifyUploads: false } })
+      .update({
+        where: { id: userId },
+        data: kind === 'uploads' ? { notifyUploads: false } : { notifyDigest: false },
+      })
       .catch(() => {})
+    const what =
+      kind === 'uploads' ? 'emails when a teammate adds a walkthrough' : 'weekly digest emails'
     res
       .type('html')
       .end(
-        `<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1"><body style="margin:0;padding:48px 16px;background:#fbfaf7;font-family:'Helvetica Neue',Arial,sans-serif;color:#25272e"><div style="max-width:480px;margin:0 auto"><div style="font-size:18px;font-weight:600">Handback</div><div style="height:1px;background:#e6e3dc;margin:16px 0 24px"></div><p style="font-size:15px;line-height:1.6">Done — no more emails when a teammate adds a walkthrough.</p><p style="font-size:13px;color:#6b6f7a;line-height:1.6">Changed your mind? Turn them back on from your <a href="/team" style="color:#2f56d8">Team page</a>.</p></div>`
+        `<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1"><body style="margin:0;padding:48px 16px;background:#fbfaf7;font-family:'Helvetica Neue',Arial,sans-serif;color:#25272e"><div style="max-width:480px;margin:0 auto"><div style="font-size:18px;font-weight:600">Handback</div><div style="height:1px;background:#e6e3dc;margin:16px 0 24px"></div><p style="font-size:15px;line-height:1.6">Done — no more ${what}.</p><p style="font-size:13px;color:#6b6f7a;line-height:1.6">Changed your mind? Turn them back on from your <a href="/team" style="color:#2f56d8">Team page</a>.</p></div>`
       )
   })
 
@@ -251,6 +259,8 @@ async function createServer() {
     // Hourly retention sweep (+ one run 30s after boot). One ECS task, same
     // single-process assumption as the in-memory rate limiter.
     startRetentionSweep()
+    // Hourly check for the Monday digest window (server/digest.ts).
+    startDigestSweep()
   })
 }
 

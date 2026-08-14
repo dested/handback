@@ -40,6 +40,7 @@ import {
 import { memberTeamIds, spaceId } from './access'
 import { log } from './logger'
 import { notifyUpload } from './notify'
+import { indexWalkthrough } from './search'
 import { polishConfigured, polishTranscript } from './polish'
 import { prisma } from './prisma'
 import { rateLimit } from './ratelimit'
@@ -435,6 +436,9 @@ ingestRouter.post(FINALIZE, finalizeLimit, async (req, res) => {
   // Only on the null→set transition: a client retrying finalize must not
   // re-mail the team. Fire-and-forget — email is never worth a slower upload.
   if (!walkthrough.finalizedAt) void notifyUpload(walkthrough.id)
+  // Fill the search corpus from the uploaded report/transcript. Every finalize
+  // (re-push included) — the files may have changed.
+  void indexWalkthrough(walkthrough.id)
   res.json({ ok: true, walkthroughId: walkthrough.id })
 })
 

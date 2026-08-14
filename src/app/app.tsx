@@ -144,10 +144,35 @@ export function InboxPage() {
   const projects = useMemo(() => projectsQuery.data ?? [], [projectsQuery.data])
   const memberships = teamsQuery.data ?? []
 
+  // The deep half of search: title/slug/origin match instantly client-side;
+  // what was SAID (transcript, report) matches server-side against the corpus
+  // filled at finalize. Debounced — the server call is per pause, not per key.
+  const [debouncedQ, setDebouncedQ] = useState('')
+  useEffect(() => {
+    const q = filters.q.trim()
+    if (q.length < 2) {
+      setDebouncedQ('')
+      return
+    }
+    const timer = setTimeout(() => setDebouncedQ(q), 300)
+    return () => clearTimeout(timer)
+  }, [filters.q])
+  const deepSearch = useQuery({
+    ...trpc.walkthroughs.search.queryOptions({ q: debouncedQ }),
+    enabled: debouncedQ.length >= 2,
+  })
+  const deepIds = useMemo(
+    () => new Set(debouncedQ.length >= 2 ? (deepSearch.data?.ids ?? []) : []),
+    [debouncedQ, deepSearch.data]
+  )
+
   // Facet counts are computed the same honest way the rail did it: each group
   // counts the cards that survive *every other* filter, so a count is a promise
   // about what picking it shows.
-  const searched = useMemo(() => cards.filter((c) => matchesQuery(c, filters.q)), [cards, filters.q])
+  const searched = useMemo(
+    () => cards.filter((c) => matchesQuery(c, filters.q) || deepIds.has(c.id)),
+    [cards, filters.q, deepIds]
+  )
   const statusScope = useMemo(
     () =>
       searched.filter((c) => matchesSpace(c, filters.space) && matchesProject(c, filters.projectId)),
@@ -264,7 +289,7 @@ export function InboxPage() {
             type="search"
             value={filters.q}
             onChange={(event) => update({ q: event.target.value })}
-            placeholder="Search"
+            placeholder="Search titles & words spoken"
             aria-label="Search walkthroughs"
             className="h-9"
           />

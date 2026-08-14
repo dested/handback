@@ -186,23 +186,26 @@ export function TeamPage() {
 }
 
 /**
- * The one account-level switch on this page: the "teammate added a walkthrough"
- * email. The unsubscribe link in the mail itself flips it off; this is where it
- * comes back on. Optimistic — the checkbox moves on click and snaps back if the
- * write fails.
+ * The account-level email switches: the "teammate added a walkthrough" mail and
+ * the Monday digest. The unsubscribe link in each mail flips its switch off;
+ * this is where they come back on. Optimistic — a checkbox moves on click and
+ * snaps back if the write fails.
  */
 function NotifyToggle() {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const prefs = useQuery(trpc.prefs.get.queryOptions())
-  const setNotify = useMutation(
-    trpc.prefs.setNotifyUploads.mutationOptions({
+  const setPrefs = useMutation(
+    trpc.prefs.set.mutationOptions({
       onSettled: () => queryClient.invalidateQueries({ queryKey: trpc.prefs.get.queryKey() }),
     })
   )
-  const enabled = setNotify.isPending
-    ? (setNotify.variables?.enabled ?? true)
+  const uploads = setPrefs.isPending
+    ? (setPrefs.variables?.notifyUploads ?? prefs.data?.notifyUploads ?? true)
     : (prefs.data?.notifyUploads ?? true)
+  const digest = setPrefs.isPending
+    ? (setPrefs.variables?.notifyDigest ?? prefs.data?.notifyDigest ?? true)
+    : (prefs.data?.notifyDigest ?? true)
 
   return (
     <section className="space-y-3">
@@ -210,9 +213,9 @@ function NotifyToggle() {
       <label className="flex max-w-xl items-start gap-2.5 text-sm">
         <input
           type="checkbox"
-          checked={enabled}
+          checked={uploads}
           disabled={prefs.isPending}
-          onChange={(e) => setNotify.mutate({ enabled: e.currentTarget.checked })}
+          onChange={(e) => setPrefs.mutate({ notifyUploads: e.currentTarget.checked })}
           className="accent-cobalt mt-0.5"
         />
         <span>
@@ -220,6 +223,22 @@ function NotifyToggle() {
           <span className="text-muted-foreground block text-xs leading-relaxed">
             One mail per upload, to your teams only — never for your own uploads. Every mail
             carries a one-click stop link.
+          </span>
+        </span>
+      </label>
+      <label className="flex max-w-xl items-start gap-2.5 text-sm">
+        <input
+          type="checkbox"
+          checked={digest}
+          disabled={prefs.isPending}
+          onChange={(e) => setPrefs.mutate({ notifyDigest: e.currentTarget.checked })}
+          className="accent-cobalt mt-0.5"
+        />
+        <span>
+          Send me the Monday digest
+          <span className="text-muted-foreground block text-xs leading-relaxed">
+            One mail a week: what's open across your spaces, what's aging, what got resolved.
+            Skipped entirely when there's nothing to say.
           </span>
         </span>
       </label>

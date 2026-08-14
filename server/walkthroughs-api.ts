@@ -217,6 +217,14 @@ export type WalkthroughNoteRef = {
   createdAt: string
 }
 
+/** A reviewer's margin note; `atMs` pins it to the recording's output clock. */
+export type WalkthroughCommentRef = {
+  authorName: string
+  atMs: number | null
+  text: string
+  createdAt: string
+}
+
 export type WalkthroughDetail = {
   id: string
   slug: string
@@ -241,6 +249,8 @@ export type WalkthroughDetail = {
   files: WalkthroughFileRef[]
   // The review thread, oldest first: agent results and reviewer send-backs.
   notes: WalkthroughNoteRef[]
+  // Margin notes from humans, oldest first — part of the brief.
+  comments: WalkthroughCommentRef[]
 }
 
 /**
@@ -265,6 +275,7 @@ export async function getWalkthroughDetail(
       takes: { orderBy: { index: 'asc' } },
       files: { where: { status: 'uploaded' }, orderBy: { path: 'asc' } },
       notes: { orderBy: { createdAt: 'asc' } },
+      comments: { orderBy: { createdAt: 'asc' } },
     },
   })
   if (!walkthrough || !(await inScope(auth, walkthrough)) || !walkthrough.finalizedAt) return null
@@ -320,6 +331,12 @@ export async function getWalkthroughDetail(
       bodyMd: n.bodyMd,
       authorName: n.authorName,
       createdAt: n.createdAt.toISOString(),
+    })),
+    comments: walkthrough.comments.map((c) => ({
+      authorName: c.authorName,
+      atMs: c.atMs,
+      text: c.text,
+      createdAt: c.createdAt.toISOString(),
     })),
   }
 }

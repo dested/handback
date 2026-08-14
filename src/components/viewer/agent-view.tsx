@@ -7,6 +7,7 @@ import { useCallback, useMemo, useRef, useState } from 'react'
 import { useQueries } from '@tanstack/react-query'
 import { Button } from '~/components/ui/button'
 import type { EditSegment } from '~/lib/edit/edl'
+import { CommentsPanel } from './comments-panel'
 import { EventsPanel } from './events-panel'
 import { mmss } from './format'
 import { FramesGrid, type GridFrame } from './frames-grid'
@@ -257,6 +258,16 @@ export function AgentView({
           </button>
         </div>
       )}
+
+      <section className="rule space-y-3 pt-8">
+        <SectionHead>comments</SectionHead>
+        <CommentsPanel
+          walkthroughId={walkthrough.id}
+          currentMs={player.outputMs}
+          canComment={walkthrough.viewerIsMember}
+          onSeek={(ms) => seekAndReveal(ms)}
+        />
+      </section>
 
       <section className="rule space-y-3 pt-8">
         <SectionHead>frames</SectionHead>

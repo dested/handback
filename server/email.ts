@@ -164,6 +164,52 @@ export function walkthroughUploadedEmail(opts: {
   }
 }
 
+export function digestEmail(opts: {
+  stats: {
+    open: number
+    inReview: number
+    resolvedThisWeek: number
+    oldestOpenDays: number | null
+    topOpen: Array<{ title: string; ageDays: number; url: string }>
+  }
+  appUrl: string
+  unsubscribeUrl: string
+}): Omit<Message, 'to'> {
+  const { stats, appUrl, unsubscribeUrl } = opts
+  const parts = [
+    `${stats.open} open`,
+    stats.inReview > 0 ? `${stats.inReview} in review` : null,
+    stats.resolvedThisWeek > 0 ? `${stats.resolvedThisWeek} resolved this week` : null,
+  ].filter((p): p is string => p !== null)
+  const headline = parts.join(' · ')
+  const aging =
+    stats.oldestOpenDays !== null && stats.oldestOpenDays >= 3
+      ? `The oldest open walkthrough has been waiting ${stats.oldestOpenDays} days.`
+      : null
+
+  const textList = stats.topOpen
+    .map((w) => `- ${w.title} (${w.ageDays}d)\n  ${w.url}`)
+    .join('\n')
+  const htmlList = stats.topOpen
+    .map(
+      (w) =>
+        `<tr><td style="padding:6px 0;font-size:14px;line-height:1.5"><a href="${w.url}" style="color:${INK};text-decoration:none">${esc(w.title)}</a></td><td style="padding:6px 0 6px 12px;font-family:monospace;font-size:12px;color:${MUTED};white-space:nowrap;text-align:right">${w.ageDays}d</td></tr>`
+    )
+    .join('')
+
+  return {
+    subject: `Your Handback week: ${headline}`,
+    text: `Across your spaces: ${headline}.${aging ? `\n${aging}` : ''}\n\n${stats.topOpen.length > 0 ? `Still open:\n${textList}\n\n` : ''}Review them: ${appUrl}\n\nToo much mail? Stop the digest: ${unsubscribeUrl}`,
+    html: shell(
+      `<p style="font-size:15px;line-height:1.6;margin:0 0 6px">Across your spaces: <strong>${esc(headline)}</strong>.</p>
+    ${aging ? `<p style="font-size:14px;color:${MUTED};line-height:1.6;margin:0 0 16px">${esc(aging)}</p>` : ''}
+    ${stats.topOpen.length > 0 ? `<table style="width:100%;border-collapse:collapse;margin:8px 0 20px">${htmlList}</table>` : ''}
+    ${button(appUrl, 'Open Handback')}`,
+      `Too much mail? <a href="${unsubscribeUrl}" style="color:${MUTED}">Stop the weekly digest</a> — one click, no sign-in.`
+    ),
+  }
+}
+
 export function inviteEmail(opts: {
   team: string
   inviter: string

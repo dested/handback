@@ -26,6 +26,7 @@ import { prisma } from './prisma'
 import { checkLimit } from './ratelimit'
 import { latestRecorderRelease } from './releases'
 import { expiryFor } from './retention'
+import { indexWalkthrough, searchWalkthroughIds } from './search'
 import {
   copyObject,
   deletePrefix,
@@ -884,6 +885,20 @@ const walkthroughsRouter = router({
     )
   }),
 
+  /**
+   * Full-text ids for the /app search box: which walkthroughs in my reach say
+   * this, in the title, the report or the transcript. The client already holds
+   * every inbox row, so ids are the whole answer — it unions them with its own
+   * title matches. Corpus filled at finalize (server/search.ts).
+   */
+  search: protectedProcedure
+    .input(z.object({ q: z.string().trim().min(2).max(200) }))
+    .query(async ({ ctx, input }) => {
+      const me = ctx.session.user.id
+      const ids = await searchWalkthroughIds(me, await memberTeamIds(me), input.q)
+      return { ids }
+    }),
+
   get: protectedProcedure
     .input(z.object({ walkthroughId: z.string() }))
     .query(async ({ ctx, input }) => {
@@ -1054,6 +1069,72 @@ const walkthroughsRouter = router({
       await prisma.walkthrough.update({
         where: { id: input.walkthroughId },
         data: { status: 'open', resolvedAt: null, expiresAt: expiryFor('open') },
+      })
+      return { ok: true }
+    }),
+
+  /**
+   * Margin notes. Separate from `get` so posting one refetches a few rows, not
+   * a few hundred re-presigned file URLs. `mine` is computed server-side —
+   * it's the delete permission, and the client shouldn't have to know why.
+   */
+  comments: protectedProcedure
+    .input(z.object({ walkthroughId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      const g = await prisma.walkthrough.findUnique({
+        where: { id: input.walkthroughId },
+        select: { teamId: true, userId: true },
+      })
+      if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
+      await requireViewAccess(ctx.session.user.id, g)
+      const rows = await prisma.walkthroughComment.findMany({
+        where: { walkthroughId: input.walkthroughId },
+        orderBy: { createdAt: 'asc' },
+      })
+      return rows.map((c) => ({
+        id: c.id,
+        authorName: c.authorName,
+        atMs: c.atMs,
+        text: c.text,
+        createdAt: c.createdAt.toISOString(),
+        mine: c.userId === ctx.session.user.id,
+      }))
+    }),
+
+  addComment: protectedProcedure
+    .input(
+      z.object({
+        walkthroughId: z.string(),
+        text: z.string().trim().min(1).max(2000),
+        // The walkthrough-wide output clock, same axis as transcript/frames.
+        atMs: z.number().int().min(0).nullable(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const g = await prisma.walkthrough.findUnique({
+        where: { id: input.walkthroughId },
+        select: { teamId: true, userId: true },
+      })
+      if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
+      await requireSpaceAccess(ctx.session.user.id, g)
+      await prisma.walkthroughComment.create({
+        data: {
+          walkthroughId: input.walkthroughId,
+          userId: ctx.session.user.id,
+          authorName: ctx.session.user.name,
+          atMs: input.atMs,
+          text: input.text,
+        },
+      })
+      return { ok: true }
+    }),
+
+  /** Own comments only — `updateMany`'s where does the authorization. */
+  deleteComment: protectedProcedure
+    .input(z.object({ commentId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      await prisma.walkthroughComment.deleteMany({
+        where: { id: input.commentId, userId: ctx.session.user.id },
       })
       return { ok: true }
     }),
@@ -1363,6 +1444,8 @@ const walkthroughsRouter = router({
         data: { durationMs: input.durationMs, bytes, renderedAt: new Date() },
       })
       log.info(`[edit] attached render to walkthrough ${g.id} (${input.paths.join(', ')})`)
+      // The render brought a transcript.json — refresh the search corpus.
+      void indexWalkthrough(g.id)
       // BigInt doesn't survive JSON; the viewer reads a Number like everywhere else.
       return { ok: true, durationMs: input.durationMs, bytes: Number(bytes) }
     }),
@@ -2292,24 +2375,30 @@ const recorderRouter = router({
 })
 
 /**
- * Per-account switches. One so far: the "teammate added a walkthrough" email —
- * flipped off by the one-click unsubscribe link in the mail itself, back on
- * from the /team page.
+ * Per-account switches — the two emails: "teammate added a walkthrough" and
+ * the weekly digest. Each is flipped off by the one-click unsubscribe link in
+ * the mail itself, back on from the /team page.
  */
 const prefsRouter = router({
   get: protectedProcedure.query(async ({ ctx }) => {
     const user = await prisma.user.findUnique({
       where: { id: ctx.session.user.id },
-      select: { notifyUploads: true },
+      select: { notifyUploads: true, notifyDigest: true },
     })
-    return { notifyUploads: user?.notifyUploads ?? true }
+    return {
+      notifyUploads: user?.notifyUploads ?? true,
+      notifyDigest: user?.notifyDigest ?? true,
+    }
   }),
-  setNotifyUploads: protectedProcedure
-    .input(z.object({ enabled: z.boolean() }))
+  set: protectedProcedure
+    .input(z.object({ notifyUploads: z.boolean().optional(), notifyDigest: z.boolean().optional() }))
     .mutation(async ({ ctx, input }) => {
       await prisma.user.update({
         where: { id: ctx.session.user.id },
-        data: { notifyUploads: input.enabled },
+        data: {
+          ...(input.notifyUploads === undefined ? {} : { notifyUploads: input.notifyUploads }),
+          ...(input.notifyDigest === undefined ? {} : { notifyDigest: input.notifyDigest }),
+        },
       })
       return { ok: true }
     }),

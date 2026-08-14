@@ -17,8 +17,18 @@ export type FormattableWalkthrough = {
     authorName: string
     createdAt: string
   }>
+  comments?: Array<{
+    authorName: string
+    atMs: number | null
+    text: string
+    createdAt: string
+  }>
   [key: string]: unknown
 }
+
+/** m:ss on the walkthrough-wide clock — how the transcript and frames talk. */
+const mmss = (ms: number) =>
+  `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`
 
 // A walkthrough can carry thousands of keyframes; dumping every URL would bury the
 // report. The agent gets a workable sample and the endpoint to page the rest.
@@ -56,7 +66,7 @@ function formatNote(n: NonNullable<FormattableWalkthrough['notes']>[number]): st
 /** The metadata JSON, then report.md, the review thread when one exists, then
  *  one `path — url` line per file. */
 export function formatWalkthrough(walkthrough: FormattableWalkthrough): string {
-  const { reportMd, files, notes, ...meta } = walkthrough
+  const { reportMd, files, notes, comments, ...meta } = walkthrough
   const maxFrames = briefFrameLimit(meta.durationMs)
 
   let framesShown = 0
@@ -82,6 +92,18 @@ export function formatWalkthrough(walkthrough: FormattableWalkthrough): string {
     JSON.stringify(meta, null, 2),
     '--- report.md ---',
     reportMd ?? '(no report.md was uploaded with this walkthrough)',
+    // A comment is an instruction: "[2:31] Sal — this dropdown too". The
+    // timestamp keys into the transcript/frames, which share this clock.
+    ...(comments && comments.length > 0
+      ? [
+          '--- comments ---',
+          comments
+            .map(
+              (c) => `${c.atMs === null ? '' : `[${mmss(c.atMs)}] `}${c.authorName}: ${c.text}`
+            )
+            .join('\n'),
+        ]
+      : []),
     // Chronological, so "what happened since the recording" reads top to
     // bottom: result, send-back, result again. Absent entirely when empty.
     ...(notes && notes.length > 0 ? ['--- review thread ---', notes.map(formatNote).join('\n\n')] : []),

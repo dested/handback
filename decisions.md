@@ -2,6 +2,19 @@
 
 > ADR-lite: what was decided, why, what was rejected. Append-only.
 
+## 2026-08-13 — Full-text search is a plain corpus column + query-time tsvector, unindexed
+**Why:** the searchable text (report.md / transcript) lives in S3, not Postgres, so *something*
+must be copied into the DB — a plain `searchText` column filled once at finalize is the whole
+migration story `db push` can handle. The query runs `websearch_to_tsquery` against
+`to_tsvector(title || searchText)` computed at query time: at the current row counts (hundreds)
+a seq scan is microseconds, and skipping the index means no raw-SQL migration step today. The
+/app client already holds all ≤200 inbox rows, so the server answers with bare ids and the
+client unions them with its own title matching.
+**Rejected:** a generated tsvector column + GIN index now (needs a hand-run SQL migration —
+predeploy `db push` can't express it; write it the day row counts hurt, the query doesn't
+change); Prisma's fullTextSearch preview flag (raw SQL is explicit and portable across Prisma
+majors); ILIKE substring match (no stemming, no phrase handling).
+
 ## 2026-08-13 — The return path is one thread table, and posting a result moves status
 **Why:** the loop's missing half was "agent fixed it → human signs off on *what*". One
 `WalkthroughNote` table with `role: 'agent' | 'reviewer'` carries both the agent's result
