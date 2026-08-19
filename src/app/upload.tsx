@@ -14,7 +14,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { CLIP_ACCEPT, ClipList, type Clip } from '~/components/phone/clip-list'
 import { DestinationControl, type Destination } from '~/components/phone/destination'
-import { StageList, isCommitted } from '~/components/phone/stages'
+import { KindControl } from '~/components/phone/kind'
+import { HUMAN_ROWS, StageList, isCommitted } from '~/components/phone/stages'
 import { Button, buttonVariants } from '~/components/ui/button'
 import { Input } from '~/components/ui/input'
 import { Label } from '~/components/ui/label'
@@ -53,6 +54,7 @@ export function UploadPage() {
   const [clips, setClips] = useState<Clip[]>([])
   const [clipError, setClipError] = useState<string | null>(null)
   const [dragging, setDragging] = useState(false)
+  const [kind, setKind] = useState<'agent' | 'human'>('agent')
   const [title, setTitle] = useState('')
   const [placeholder, setPlaceholder] = useState('Walkthrough')
 
@@ -202,6 +204,7 @@ export function UploadPage() {
             teamId: destination.teamId,
             projectId: destination.projectId,
             title: sendTitle,
+            kind,
             onProgress: (update) => {
               heardAt.current = Date.now()
               setProgress(update)
@@ -232,7 +235,7 @@ export function UploadPage() {
     } finally {
       abort.current = null
     }
-  }, [clips, destination, sendTitle, withToken])
+  }, [clips, destination, kind, sendTitle, withToken])
 
   // Nothing is stashed anywhere, so leaving mid-distill really does throw the
   // work away. The browser writes its own wording; all we can do is ask.
@@ -267,8 +270,8 @@ export function UploadPage() {
           Hand back a recording.
         </h1>
         <p className="text-muted-foreground text-base leading-relaxed">
-          Already have the clip? Drop it here and this page distils it into the same walkthrough the
-          recorder produces — keyframes, transcript, report — without leaving the browser.
+          Already have the clip? Drop it here — distilled into keyframes, transcript and report for
+          your agent, or shipped whole for a person to review — without leaving the browser.
         </p>
         <p className="text-muted-foreground text-xs">
           Where your recording goes →{' '}
@@ -315,6 +318,10 @@ export function UploadPage() {
             )}>
             drop a screen recording here — or <span className="text-primary ml-1">browse</span>
           </button>
+
+          {/* Who it's for decides everything downstream — distill or ship
+              whole, agent queue or watch page — so it sits above the rest. */}
+          <KindControl value={kind} onChange={setKind} />
 
           <DestinationControl
             ctx={ctx}
@@ -366,9 +373,10 @@ export function UploadPage() {
             </p>
             <p className="text-muted-foreground truncate font-mono text-sm">
               to {destinationName} · {sendTitle}
+              {kind === 'human' && ' · video for a person'}
             </p>
           </div>
-          <StageList progress={progress} />
+          <StageList progress={progress} rows={kind === 'human' ? HUMAN_ROWS : undefined} />
           <p className="text-muted-foreground font-mono text-xs">
             keep this tab open — the work happens here, not on the server
           </p>
@@ -389,7 +397,9 @@ export function UploadPage() {
             </div>
             <p className="text-sm font-medium">{sendTitle}</p>
             <p className="text-muted-foreground font-mono text-xs">
-              {result.frameCount} keyframes · {result.lineCount} lines · {mmss(result.durationMs)}
+              {kind === 'human'
+                ? `video for a person · ${result.lineCount} lines · ${mmss(result.durationMs)}`
+                : `${result.frameCount} keyframes · ${result.lineCount} lines · ${mmss(result.durationMs)}`}
             </p>
           </div>
 
@@ -399,7 +409,13 @@ export function UploadPage() {
             </p>
           )}
 
-          {result.frameCount === 0 && clips.some((clip) => clip.hasVideo) && (
+          {kind === 'human' && (
+            <p className="text-muted-foreground text-sm">
+              the clip shipped whole — open it to tighten the cut, then share the link
+            </p>
+          )}
+
+          {kind !== 'human' && result.frameCount === 0 && clips.some((clip) => clip.hasVideo) && (
             <p className="text-muted-foreground text-sm">
               shipped without keyframes — this browser couldn't decode the video, so the clip itself
               carries the picture

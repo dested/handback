@@ -2,6 +2,28 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-08-19 — Fix: human upload died client-side on "the report is missing"
+Asked: /upload for-a-person run failed with "the report is missing" despite 200s (those were
+transcribe/polish). Cause: `uploadWalkthrough`'s pre-flight guard in `src/lib/capture/upload.ts`
+required report.md unconditionally — the extension's mirror (`extension/src/lib/upload.ts`) got the
+`kind !== 'human'` exemption with 1.8.0, the web copy never did (mirror drift). This also silently
+broke BOTH of /record's human sends (`sendLiveWalkthrough` kind human + `sendHumanWalkthrough`)
+since 2026-08-12 — never live-run, so never seen. Guard now matches the extension verbatim.
+Typecheck green.
+
+## 2026-08-18 — /upload + /phone learn "who is it for" (agent vs person)
+Asked: let /upload set whether the video is for the agent or a human; same anywhere else it
+applies (extension and /record already had pickers; the viewer has `setKind`). Owner chose: /phone
+gets it too, **manual intake only** — the share path keeps auto-shipping 'agent' ("sharing was
+sending" stands). Done: `DistillOptions.kind` in `src/lib/capture/distill.ts` (human = skip
+keyframes/sheets/report.md, pass `kind` to declare — mirrors live-upload's human branch; MANIFEST
+and per-take transcript/recording.json unchanged, so the cloud editor reads it like an extension
+human handback), `HUMAN_ROWS` in `components/phone/stages.tsx`, shared `KindControl`
+(`components/phone/kind.tsx`, /record keeps its own 3-way), wired into `upload.tsx` + `phone.tsx`
+(kind-aware working/done copy), `PendingRun.kind` (older saved runs read as 'agent'). Also
+de-duplicated an uncommitted double Title block in upload.tsx (two `id="upload-title"`).
+Typecheck + build green; no live run.
+
 ## 2026-08-14 — Portless dev URL + extension → 1.9.0
 Asked: put the project on portless; bump the extension version to 1.9.
 Done (portless): `bun add -d portless` (0.15.5), `portless.json` = `{"name":"handback"}`, dev script

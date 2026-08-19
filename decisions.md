@@ -2,6 +2,18 @@
 
 > ADR-lite: what was decided, why, what was rejected. Append-only.
 
+## 2026-08-18 — The kind choice reaches /upload and /phone, but never the share path
+**Why:** every capture surface should say who a video is for (the extension and /record already
+could; /upload and /phone could not). The choice rides the existing pipeline: `DistillOptions.kind`
+makes `distillAndUpload` skip keyframes/sheets/report.md and declare `kind: 'human'` — the same
+contract as live-upload's human branch, so the viewer's cloud editor reads a human clip-upload
+exactly like an extension human handback. On /phone the picker appears on **manual intake only**:
+a share-sheet arrival still auto-ships as 'agent', because pausing it to ask would reverse the
+2026-08-02 "sharing was the send" decision. `PendingRun` gained `kind` (missing = 'agent', so old
+saved runs resume unchanged). **Rejected:** asking on the share path (reopens auto-start);
+reusing /record's inline 3-way radiogroup (it carries 'voice' and hero styling — /upload and
+/phone share the new 2-way `KindControl` instead).
+
 ## 2026-08-14 — The extension panel's review screen is a parts list, not a timeline
 **Why:** owner directive — a walkthrough is now presented as a collection of **parts** the person
 plays, reads, fixes, deletes and adds to (how they choose to cut it up), not one continuous axis to

@@ -23,6 +23,8 @@ export interface PendingRun {
   /** null = the token owner's personal space. */
   teamId: string | null
   projectId: string | null
+  /** Who the walkthrough is for. Older saved runs carry none and read as 'agent'. */
+  kind: 'agent' | 'human'
   savedAt: number
 }
 
@@ -86,6 +88,7 @@ function toPendingRun(value: unknown): PendingRun | null {
     title: 'title' in value && typeof value.title === 'string' ? value.title : '',
     teamId,
     projectId,
+    kind: 'kind' in value && value.kind === 'human' ? 'human' : 'agent',
     savedAt: 'savedAt' in value && typeof value.savedAt === 'number' ? value.savedAt : 0,
   }
 }

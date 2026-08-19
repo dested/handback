@@ -246,7 +246,11 @@ export async function uploadWalkthrough(
   const token = opts.token.trim()
   if (!token) throw new Error('sign in on this phone first')
   if (!recordings.length) throw new Error('nothing recorded yet')
-  if (!files.some((f) => f.path === 'report.md')) throw new Error('the report is missing')
+  // A human handback carries no report.md by design — there is no agent on the
+  // other end of it, and the brief would be written for nobody.
+  if (opts.kind !== 'human' && !files.some((f) => f.path === 'report.md')) {
+    throw new Error('the report is missing')
+  }
 
   const oversized = files.find((f) => f.blob.size > MAX_FILE_BYTES)
   if (oversized) throw new Error('that clip is over the 2 GB limit — trim it and try again')

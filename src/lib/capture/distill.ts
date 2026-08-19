@@ -43,6 +43,14 @@ export interface DistillOptions {
   teamId: string | null
   projectId: string | null
   title: string
+  /**
+   * 'human' = the video is the deliverable: no keyframes, no contact sheets and
+   * no report.md (there is no agent to brief — the walkthrough is hidden from
+   * agent lists), but the transcript work and the rest of the file set are
+   * unchanged, so the viewer's cloud editor reads a human upload exactly like
+   * an extension one. Same contract as live-upload.ts's human branch.
+   */
+  kind?: 'agent' | 'human'
   onProgress: (p: StageProgress) => void
   signal?: AbortSignal
 }
@@ -172,7 +180,9 @@ export async function distillAndUpload(
     try {
       let frames: RecordingFrame[] = []
       let frameBlobs = new Map<number, Blob>()
-      if (probe.hasVideo) {
+      // A human handback distils nothing — the clip ships whole and stills
+      // would only be storage. The stage never runs, so its rows never light.
+      if (probe.hasVideo && opts.kind !== 'human') {
         const total = mmss(probe.durationMs)
         report('frames', i, 0, `0:00 of ${total}`)
         const extracted = await extractFrames(file, probe.durationMs, {
@@ -256,9 +266,12 @@ export async function distillAndUpload(
 
   stop()
   // The summaries describe the whole set, so they go last — written from the
-  // takes as shipped, not as recorded.
-  opts.onProgress({ stage: 'build', pct: -1 })
-  files.push(text('report.md', buildReport(session, takes)))
+  // takes as shipped, not as recorded. A human handback gets no report.md: the
+  // brief is authored for an agent, and this walkthrough never reaches one.
+  if (opts.kind !== 'human') {
+    opts.onProgress({ stage: 'build', pct: -1 })
+    files.push(text('report.md', buildReport(session, takes)))
+  }
   files.push(text('MANIFEST.txt', buildManifestTxt(session, takes)))
 
   stop()
@@ -266,6 +279,7 @@ export async function distillAndUpload(
     token: opts.token,
     teamId: opts.teamId,
     projectId: opts.projectId,
+    ...(opts.kind ? { kind: opts.kind } : {}),
     signal: opts.signal,
     onProgress: (p) => {
       if (p.phase === 'upload') {

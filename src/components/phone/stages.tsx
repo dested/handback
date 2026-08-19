@@ -46,6 +46,15 @@ export const HUMAN_RECORD_ROWS: StageRow[] = RECORD_ROWS.filter(
 )
 
 /**
+ * The same human handback starting from a picked clip (/upload, /phone): the
+ * clip still has to be read, so the probe row stays; keyframes and the report
+ * go for the same reason they do on /record's human path.
+ */
+export const HUMAN_ROWS: StageRow[] = ROWS.filter(
+  (row) => !row.stages.includes('frames') && !row.stages.includes('build')
+)
+
+/**
  * A voice note's rows: no picture, so no keyframes — but unlike the human path
  * the report still gets built (the transcript IS the walkthrough, and the
  * report is how an agent reads it).

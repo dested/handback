@@ -239,8 +239,10 @@ src/
     ui/                 button, card, input, label, sidebar (shadcn new-york style, no asChild;
                         sidebar is hand-rolled — no radix — collapse persisted, mobile overlay)
     phone/              guide, clip-list (+AddClips/voice note), destination (one grouped
-                        control), stages (distill progress rows; VOICE_RECORD_ROWS feeds
-                        /record's voice mode) — /phone's pieces
+                        control), kind (KindControl — the 2-way agent/person picker shared by
+                        /upload + /phone manual intake; /record keeps its own 3-way), stages
+                        (distill progress rows; VOICE_RECORD_ROWS feeds /record's voice mode,
+                        HUMAN_ROWS the clip-based human path) — /phone's pieces
     landing/            hero, how-it-works, distill, walkthrough-manifest, agent-view, pricing,
                         final-cta · demo-shot.tsx (a keyframe as SVG) + demo-data.ts (the one
                         demo walkthrough) + mock.tsx (Pane/ContactSheet/Filmstrip/PlayerStrip/
@@ -289,7 +291,9 @@ src/
                         (see decisions.md 2026-08-02): frames (dedup+budget), grids, audio→WAV,
                         transcribe/polish clients, report/MANIFEST/recording.json builders,
                         two-phase upload (XHR PUTs — byte progress + 3-try retry), distill.ts
-                        orchestrator, pending.ts (the crash-survivable run: IDB 'handback-phone').
+                        orchestrator (`kind: 'human'` skips keyframes/sheets/report.md — the
+                        live-upload human contract), pending.ts (the crash-survivable run:
+                        IDB 'handback-phone'; PendingRun.kind, absent = 'agent').
                         Public surface: types/probe/context/distill/pending. Mirror any extension
                         pipeline change here. **Its generic half is extracted to
                         github.com/dested/video-to-prompt (G:\code\video-to-prompt) and will
@@ -354,14 +358,14 @@ extension/              Handback Recorder — the Chrome MV3 extension (own npm 
 | `/forgot-password` · `/reset-password` | Password recovery (better-auth emails the link) | `src/app/{forgot,reset}-password.tsx` |
 | `/privacy` · `/terms` | Legal pages (linked from the marketing footer) | `src/app/{privacy,terms}.tsx` |
 | `/app` | **Walkthroughs** — ALL spaces as a card GRID (not a list), light filter toolbar (search · status segments w/ mono counts · Space/Project popover selects, shown only when >1 space / any projects) over one `walkthroughs.inbox` query, client-side filtered. Cards carry a keyframe thumbnail (agent kind) or a paper title-card; rename lives in a per-card ⋯ menu via `walkthroughs.rename` | `src/app/app.tsx` + `src/components/inbox/card.tsx` |
-| `/upload` | Desktop intake: drop a clip → distill → upload (reuses capture lib + phone components) | `src/app/upload.tsx` |
+| `/upload` | Desktop intake: drop a clip → **for an agent** (distill) or **for a person** (ships whole, `kind: 'human'`, edit in the viewer) → upload (reuses capture lib + phone components) | `src/app/upload.tsx` |
 | `/walkthroughs/:walkthroughId` | The viewer (`/gripes/:id` 302s here) | `src/app/walkthrough.tsx` |
 | `/projects` · `/team` | Projects (ALL spaces, grouped; create w/ space select) · "Teams" — every team (roster/invites/seats per team, New team lives HERE) | `src/app/{projects,team}.tsx` |
 | `/connect` | Connect a coding agent — one button mints a token and fills in `claude mcp add`; tokens/disconnect are reference below | `src/app/connect.tsx` |
 | `/record` | **Record with no extension** — live `getDisplayMedia` capture in the page. Kind picker: **for an agent** (distill pipeline), **for a person** (pristine 30 fps capture → transcript-first editor → mediabunny MP4 render → share link), or **just talk** (mic-only voice note, in-memory, through the phone distill pipeline). Multi-take, crash-recoverable, optional always-on-top Document PiP HUD | `src/app/record.tsx` |
 | `/w/:shareToken` | **Public watch page** for a shared walkthrough — no session, the token IS the credential; plays `final.mp4` + transcript (falls back to takes) | `src/app/watch.tsx` |
 | `/recorder` | Install + one-click-link the extension (detects install, mints token, handshake). Nav label is **"Extension"**; the nav's "Record" is `/record` | `src/app/recorder.tsx` |
-| `/phone` | Phone guide + share-target intake — OS-recorded clips distilled in-browser and uploaded | `src/app/phone.tsx` |
+| `/phone` | Phone guide + share-target intake — OS-recorded clips distilled in-browser and uploaded. Manual intake carries the agent/person kind choice; a share always ships 'agent' (decisions.md 2026-08-18) | `src/app/phone.tsx` |
 | `POST /share-target` | PWA share sheet target — SW intercepts + stashes; Express fallback 303s to /phone | `public/sw.js` · `server.ts` |
 | `/admin` (+ `/users[/:id]`, `/teams[/:id]`, `/walkthroughs`, `/usage`, `/costs`) | Platform-admin console — sidebar shell, overview stats, users + drill-down, teams + seat editor, platform feed, per-space usage, cost estimator (live anchors from `admin.costStats` + client-side scenario sliders → per-user cost + tier margins) | `src/app/admin/*` |
 | `/dashboard` | redirect → /app (legacy) | `routes.tsx` |

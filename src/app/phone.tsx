@@ -21,7 +21,8 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { AddClips, ClipList, type Clip } from '~/components/phone/clip-list'
 import { DestinationControl, type Destination } from '~/components/phone/destination'
 import { PhoneGuide, type Platform } from '~/components/phone/guide'
-import { StageList, isCommitted } from '~/components/phone/stages'
+import { KindControl } from '~/components/phone/kind'
+import { HUMAN_ROWS, StageList, isCommitted } from '~/components/phone/stages'
 import { Button, buttonVariants } from '~/components/ui/button'
 import { Input } from '~/components/ui/input'
 import { Label } from '~/components/ui/label'
@@ -86,6 +87,9 @@ export function PhonePage() {
   const [clips, setClips] = useState<Clip[]>([])
   const [clipError, setClipError] = useState<string | null>(null)
   const [shareMissed, setShareMissed] = useState(false)
+  // The share path never sees the picker and always ships 'agent' — sharing was
+  // the send, and pausing it to ask would undo that. Manual intake chooses.
+  const [kind, setKind] = useState<'agent' | 'human'>('agent')
   const [title, setTitle] = useState('')
   const [placeholder, setPlaceholder] = useState('Walkthrough')
 
@@ -170,6 +174,7 @@ export function PhonePage() {
     setClipError(null)
     setShareMissed(false)
     setResumable(false)
+    setKind('agent')
     setTitle('')
     setProgress(null)
     setResult(null)
@@ -187,6 +192,7 @@ export function PhonePage() {
     })
     setClipError(null)
     setResumable(false)
+    setKind('agent')
     setTitle('')
     void clearPendingRun()
     void clearSharedMedia()
@@ -237,6 +243,7 @@ export function PhonePage() {
         if (!live || !run) return
         addFiles(run.files)
         setTitle(run.title)
+        setKind(run.kind)
         // A recovered run remembers where it was going; the active space must
         // not quietly redirect it somewhere else.
         chosen.current = true
@@ -335,6 +342,7 @@ export function PhonePage() {
       title,
       teamId: destination.teamId,
       projectId: destination.projectId,
+      kind,
       savedAt: Date.now(),
     })
     try {
@@ -350,6 +358,7 @@ export function PhonePage() {
             teamId: destination.teamId,
             projectId: destination.projectId,
             title: sendTitle,
+            kind,
             onProgress: (update) => {
               heardAt.current = Date.now()
               setProgress(update)
@@ -385,7 +394,7 @@ export function PhonePage() {
     } finally {
       abort.current = null
     }
-  }, [clips, destination, title, sendTitle, withToken])
+  }, [clips, destination, kind, title, sendTitle, withToken])
 
   // Everything below keeps a run alive on a device that would rather it didn't.
 
@@ -399,9 +408,10 @@ export function PhonePage() {
       title,
       teamId: destination.teamId,
       projectId: destination.projectId,
+      kind,
       savedAt: Date.now(),
     })
-  }, [phase, clips, title, destination])
+  }, [phase, clips, title, destination, kind])
 
   // The auto-start. Arming happens in the share pickup; firing waits here until
   // the clips it added are in state and done probing, because send() reads them
@@ -545,6 +555,11 @@ export function PhonePage() {
             </div>
           )}
 
+          {/* Who it's for decides everything downstream — distill or ship
+              whole, agent queue or watch page — so it sits above the rest.
+              Only manual intake sees it: a share already went as 'agent'. */}
+          <KindControl value={kind} onChange={setKind} />
+
           <DestinationControl
             ctx={ctx}
             ctxFailed={ctxFailed}
@@ -598,9 +613,10 @@ export function PhonePage() {
                 person sees where it is going — and Cancel is how they change it. */}
             <p className="text-muted-foreground truncate font-mono text-sm">
               to {destinationName} · {sendTitle}
+              {kind === 'human' && ' · video for a person'}
             </p>
           </div>
-          <StageList progress={progress} />
+          <StageList progress={progress} rows={kind === 'human' ? HUMAN_ROWS : undefined} />
           <p className="text-muted-foreground font-mono text-xs">
             keep this screen open — the phone pauses the work if you leave
           </p>
@@ -621,7 +637,9 @@ export function PhonePage() {
             </div>
             <p className="text-sm font-medium">{title.trim() || placeholder}</p>
             <p className="text-muted-foreground font-mono text-xs">
-              {result.frameCount} keyframes · {result.lineCount} lines · {mmss(result.durationMs)}
+              {kind === 'human'
+                ? `video for a person · ${result.lineCount} lines · ${mmss(result.durationMs)}`
+                : `${result.frameCount} keyframes · ${result.lineCount} lines · ${mmss(result.durationMs)}`}
             </p>
           </div>
 
@@ -631,7 +649,13 @@ export function PhonePage() {
             </p>
           )}
 
-          {result.frameCount === 0 && clips.some((clip) => clip.hasVideo) && (
+          {kind === 'human' && (
+            <p className="text-muted-foreground text-sm">
+              the clip shipped whole — open it to tighten the cut, then share the link
+            </p>
+          )}
+
+          {kind !== 'human' && result.frameCount === 0 && clips.some((clip) => clip.hasVideo) && (
             <p className="text-muted-foreground text-sm">
               shipped without keyframes — this phone couldn't decode the video, so the clip itself
               carries the picture

@@ -28,3 +28,4 @@ playwright-report
 
 # Release artifact — rebuilt per release, attached to the GitHub release, never committed
 extension/handback-recorder.zip
+.sliderule/
