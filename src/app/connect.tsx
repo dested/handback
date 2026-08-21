@@ -17,6 +17,7 @@ import { Check, Copy, Terminal } from 'lucide-react'
 import { Button } from '~/components/ui/button'
 import { Input } from '~/components/ui/input'
 import { Step, autoTokenName } from '~/components/setup-step'
+import { TokenLimitNotice, TokenManager, isTokenLimitError } from '~/components/token-manager'
 import { useCopy } from '~/components/viewer/use-copy'
 import { useTRPC } from '~/lib/trpc'
 import { cn } from '~/lib/utils'
@@ -254,7 +255,12 @@ function CommandGate({
         Mints an API token for your account — it reaches your personal space and every team you're
         in.
       </p>
-      {create.isError && <p className="text-destructive text-sm">{create.error.message}</p>}
+      {create.isError &&
+        (isTokenLimitError(create.error) ? (
+          <TokenLimitNotice />
+        ) : (
+          <p className="text-destructive text-sm">{create.error.message}</p>
+        ))}
       <CommandBlock command={command} inert />
     </div>
   )
@@ -340,96 +346,6 @@ function TokenAftercare({ minted }: { minted: Minted }) {
       )}
       {rename.isError && <p className="text-destructive text-sm">{rename.error.message}</p>}
     </div>
-  )
-}
-
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-
-// Formatted from UTC parts on purpose: locale formatting differs between the
-// SSR runtime and the browser, which would break hydration.
-function fmtDate(value: string | null) {
-  if (!value) return 'never'
-  const d = new Date(value)
-  return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`
-}
-
-/**
- * Reference, not a step: the list you come back to when you want to cut one off.
- * There is deliberately no "create" form here — the button at the top of the
- * page is the one way to mint, so there's never a question about which control
- * to use.
- */
-function TokenManager() {
-  const trpc = useTRPC()
-  const queryClient = useQueryClient()
-
-  const tokensQuery = useQuery(trpc.tokens.list.queryOptions())
-  const invalidate = () => {
-    void queryClient.invalidateQueries({ queryKey: trpc.tokens.list.queryKey() })
-    void queryClient.invalidateQueries({ queryKey: trpc.tokens.connection.queryKey() })
-  }
-  const revoke = useMutation(trpc.tokens.revoke.mutationOptions({ onSuccess: invalidate }))
-
-  return (
-    <section className="border-border border-t pt-6">
-      <h2 className="font-display text-xl font-semibold">Your API tokens</h2>
-      <p className="text-muted-foreground mt-2 max-w-2xl text-sm leading-relaxed">
-        These authenticate the recorder, the CLI, and the MCP server. They're yours alone. A token
-        reads your personal space and every team you belong to; revoking one disconnects whatever
-        holds it. Old ones keep working until you revoke them — a new one never displaces them.
-      </p>
-
-      <div className="mt-5 space-y-3">
-        {tokensQuery.isPending && <p className="text-muted-foreground text-sm">Loading…</p>}
-        {tokensQuery.isError && (
-          <p className="text-destructive text-sm">{tokensQuery.error.message}</p>
-        )}
-        {tokensQuery.data?.length === 0 && (
-          <p className="text-muted-foreground text-sm">No tokens yet.</p>
-        )}
-        {tokensQuery.data && tokensQuery.data.length > 0 && (
-          <>
-            <div className="border-border text-muted-foreground flex items-center gap-4 border-b pb-2 text-xs font-medium tracking-wide uppercase">
-              <span className="min-w-0 flex-1">Name</span>
-              <span className="w-20 shrink-0">Token</span>
-              <span className="w-28 shrink-0">Created</span>
-              <span className="w-28 shrink-0">Last used</span>
-              <span className="w-20 shrink-0" />
-            </div>
-            <div className="divide-border divide-y">
-              {tokensQuery.data.map((t) => (
-                <div key={t.id} className="flex items-center gap-4 py-3">
-                  <p className="min-w-0 flex-1 truncate text-sm font-medium">{t.name}</p>
-                  <span className="w-20 shrink-0 font-mono text-xs">…{t.lastFour}</span>
-                  <span className="text-muted-foreground w-28 shrink-0 font-mono text-xs">
-                    {fmtDate(t.createdAt)}
-                  </span>
-                  <span className="text-muted-foreground w-28 shrink-0 font-mono text-xs">
-                    {fmtDate(t.lastUsedAt)}
-                  </span>
-                  <div className="w-20 shrink-0">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                      disabled={revoke.isPending}
-                      onClick={() => {
-                        if (!window.confirm(`Revoke "${t.name}"? Anything using it stops working.`))
-                          return
-                        revoke.mutate({ tokenId: t.id })
-                      }}>
-                      Revoke
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-        {revoke.isError && <p className="text-destructive text-sm">{revoke.error.message}</p>}
-      </div>
-    </section>
   )
 }
 

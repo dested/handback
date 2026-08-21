@@ -13,9 +13,19 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Check, Copy } from 'lucide-react'
 import { Step, autoTokenName } from '~/components/setup-step'
+import { TokenLimitNotice, isTokenLimitError } from '~/components/token-manager'
 import { Button } from '~/components/ui/button'
 import { useCopy } from '~/components/viewer/use-copy'
 import { useTRPC } from '~/lib/trpc'
+
+/**
+ * The id of the token THIS browser last minted for the extension. Kept so a
+ * re-link revokes its own predecessor instead of piling a new token on top of
+ * it — one browser, one live Recorder key — which is what keeps a re-linker from
+ * silently minting into MAX_ACTIVE_TOKENS. Per-browser, so it only ever revokes
+ * a token this machine created, never another device's.
+ */
+const RECORDER_TOKEN_ID_KEY = 'handback.recorder.tokenId'
 
 /**
  * The extension answers from one of two IDs depending on how it got installed,
@@ -363,9 +373,14 @@ function LinkStep({
   const [phase, setPhase] = useState<Phase>('idle')
   const [minted, setMinted] = useState<string | null>(null)
 
+  const revoke = useMutation(trpc.tokens.revoke.mutationOptions())
+
   const create = useMutation(
     trpc.tokens.create.mutationOptions({
       onSuccess: async (result) => {
+        // Remember which token this browser now owns, so the next re-link revokes
+        // this one rather than stacking on top of it.
+        localStorage.setItem(RECORDER_TOKEN_ID_KEY, result.id)
         setMinted(result.token)
         // extensionId is set whenever presence is (same ping), and the button is
         // disabled until presence arrives — but fall back to the first known ID
@@ -377,10 +392,23 @@ function LinkStep({
     })
   )
 
-  const link = useCallback(() => {
+  const link = useCallback(async () => {
     setPhase('linking')
+    // Re-linking replaces this browser's Recorder token instead of adding to it:
+    // revoke the one we minted last (best-effort — already-gone is fine) BEFORE
+    // minting, so a re-link frees its own slot and never trips the cap on itself.
+    const prior = localStorage.getItem(RECORDER_TOKEN_ID_KEY)
+    if (prior) {
+      localStorage.removeItem(RECORDER_TOKEN_ID_KEY)
+      try {
+        await revoke.mutateAsync({ tokenId: prior })
+      } catch {
+        // Already revoked, or offline — the mint is what matters; a stale row
+        // ages out on its own.
+      }
+    }
     create.mutate({ name: autoTokenName('Recorder', navigator.userAgent, new Date()) })
-  }, [create])
+  }, [create, revoke])
 
   const detectedHere = isLinked(presence, origin)
   // Linked, but at a different Handback entirely. Violet, not amber — ui.md
@@ -429,7 +457,7 @@ function LinkStep({
           type="button"
           variant={linkedHere ? 'outline' : 'default'}
           disabled={presence === null || busy}
-          onClick={link}>
+          onClick={() => void link()}>
           {busy ? 'Linking…' : linkedHere ? 'Re-link' : 'Link the recorder'}
         </Button>
         {presence === null && (
@@ -464,7 +492,12 @@ function LinkStep({
         </div>
       )}
 
-      {create.isError && <p className="text-destructive text-sm">{create.error.message}</p>}
+      {create.isError &&
+        (isTokenLimitError(create.error) ? (
+          <TokenLimitNotice />
+        ) : (
+          <p className="text-destructive text-sm">{create.error.message}</p>
+        ))}
     </div>
   )
 }

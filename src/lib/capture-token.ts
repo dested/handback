@@ -16,8 +16,39 @@ import { useTRPC } from '~/lib/trpc'
  * Raw tokens are shown once and only their hash is stored, so nobody — not even
  * the server — can answer "do you already have one?"; the pages therefore never
  * ask, they just mint (cliffnotes: the phrasing that got /connect rewritten).
+ *
+ * We keep the token's **id** alongside the raw value so a re-mint can revoke the
+ * dead one it replaces — otherwise every expired/revoked token this browser ever
+ * held would sit on the account counting against MAX_ACTIVE_TOKENS, and a busy
+ * device would eventually mint itself into the cap it can't see.
  */
 const TOKEN_KEY = 'handback.phone.token'
+
+/** What this browser holds: the raw token plus the row id, when we know it. */
+type StoredToken = { token: string; id: string | null }
+
+function readStored(): StoredToken | null {
+  const raw = localStorage.getItem(TOKEN_KEY)
+  if (!raw) return null
+  // Legacy format was the bare token string (no id to revoke by); the current
+  // format is JSON. A bare `hb_` value predates id-tracking.
+  if (raw.startsWith('hb_')) return { token: raw, id: null }
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (
+      parsed !== null &&
+      typeof parsed === 'object' &&
+      'token' in parsed &&
+      typeof (parsed as { token: unknown }).token === 'string'
+    ) {
+      const p = parsed as { token: string; id?: unknown }
+      return { token: p.token, id: typeof p.id === 'string' ? p.id : null }
+    }
+  } catch {
+    // Not our shape — treat as absent and let a fresh mint overwrite it.
+  }
+  return null
+}
 
 /** Runs `work` with a live token, minting or re-minting as needed. */
 export type WithToken = <T>(work: (token: string) => Promise<T>) => Promise<T>
@@ -29,19 +60,23 @@ export type WithToken = <T>(work: (token: string) => Promise<T>) => Promise<T>
 export function useCaptureToken(kind: string): WithToken {
   const trpc = useTRPC()
   const createToken = useMutation(trpc.tokens.create.mutationOptions())
+  const revokeToken = useMutation(trpc.tokens.revoke.mutationOptions())
 
-  // Held in a ref so the returned helper is stable enough to sit in effect deps
+  // Held in refs so the returned helper is stable enough to sit in effect deps
   // without re-running them on every render of a fairly busy page.
   const mint = useRef(createToken.mutateAsync)
+  const revoke = useRef(revokeToken.mutateAsync)
   useEffect(() => {
     mint.current = createToken.mutateAsync
+    revoke.current = revokeToken.mutateAsync
   })
 
   const mintToken = useCallback(async (): Promise<string> => {
     const created = await mint.current({
       name: autoTokenName(kind, navigator.userAgent, new Date()),
     })
-    localStorage.setItem(TOKEN_KEY, created.token)
+    const next: StoredToken = { token: created.token, id: created.id }
+    localStorage.setItem(TOKEN_KEY, JSON.stringify(next))
     return created.token
   }, [kind])
 
@@ -53,13 +88,23 @@ export function useCaptureToken(kind: string): WithToken {
    */
   return useCallback(
     async <T>(work: (token: string) => Promise<T>): Promise<T> => {
-      const stored = localStorage.getItem(TOKEN_KEY)
-      const token = stored ?? (await mintToken())
+      const stored = readStored()
+      const token = stored?.token ?? (await mintToken())
       try {
         return await work(token)
       } catch (error) {
         if (!(error instanceof AuthError)) throw error
+        // This browser's token is dead. Drop it, best-effort revoke the row so
+        // it stops counting against the cap, then mint a replacement and retry.
         localStorage.removeItem(TOKEN_KEY)
+        if (stored?.id) {
+          try {
+            await revoke.current({ tokenId: stored.id })
+          } catch {
+            // Already revoked, or the network's still down — the mint below is
+            // what matters, and a stale row ages out on its own.
+          }
+        }
         return work(await mintToken())
       }
     },

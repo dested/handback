@@ -228,6 +228,12 @@ src/
     setup-step.tsx      the numbered editorial Step shared by /connect and /recorder, plus
                         `autoTokenName(kind, ua, now)` — the name both pages mint under so
                         neither has to ask for one
+    token-manager.tsx   THE token-management surface, shared by every mint page: TokenList
+                        (list + per-row revoke), TokenManager (the /connect reference section),
+                        TokenLimitNotice (the inline "revoke one to continue" panel) and
+                        `isTokenLimitError(err|string)`. The cap error ("Too many active tokens")
+                        renders TokenLimitNotice inline on /connect·/recorder·/phone·/record·/upload
+                        so a stuck user can revoke where they are, not on a buried settings page
     legal.tsx           LegalPage/Section/Terms/Notice — shared chrome for /privacy + /terms
     inbox/              card.tsx — THE /app walkthrough card (WalkthroughCard + InboxCard type):
                         keyframe thumbnail for agent-kind-with-frames, a paper title-card set in
@@ -305,7 +311,12 @@ src/
                         take-set → file-set → upload tail. live.ts imports the dedup constants and
                         `cellDiff` from frames.ts — one copy on this side of the repo
     capture-token.ts    useCaptureToken(kind) — the mint/re-mint-on-401 hb_ token helper shared by
-                        /phone, /upload and /record (was copy-pasted in each)
+                        /phone, /upload and /record (was copy-pasted in each). Stores `{token,id}`
+                        in localStorage `handback.phone.token` (back-compat: an old bare `hb_`
+                        value has no id) and best-effort REVOKES the dead token on a 401 re-mint —
+                        so a browser replaces its key rather than piling revoked rows against
+                        MAX_ACTIVE_TOKENS. Same replace-on-relink invariant on /recorder
+                        (localStorage `handback.recorder.tokenId`, revoked before each re-link).
     edit/               THE human-handback edit engine (web-only, NOT part of the mirrored
                         distill pipeline): edl.ts (EditState = takeOrder + cuts; derived
                         EditSegment[] is order-capable — full reorder is legal downstream even

@@ -29,6 +29,7 @@ import { Button, buttonVariants } from '~/components/ui/button'
 import { Input } from '~/components/ui/input'
 import { Label } from '~/components/ui/label'
 import { useCopy } from '~/components/viewer/use-copy'
+import { TokenLimitNotice, isTokenLimitError } from '~/components/token-manager'
 import { useCaptureToken } from '~/lib/capture-token'
 import { fetchContext, type ServerContext } from '~/lib/capture/context'
 import { distillAndUpload } from '~/lib/capture/distill'
@@ -1331,7 +1332,11 @@ export function RecordPage() {
           <p className="text-muted-foreground font-mono text-xs tracking-widest uppercase">
             Didn't make it
           </p>
-          <p className="text-sm leading-relaxed">{failure}</p>
+          {isTokenLimitError(failure) ? (
+            <TokenLimitNotice />
+          ) : (
+            <p className="text-sm leading-relaxed">{failure}</p>
+          )}
           <p className="text-muted-foreground text-sm">
             {kind === 'voice'
               ? 'The note is still in this tab — nothing was lost.'

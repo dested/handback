@@ -2,6 +2,23 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-08-20 — Fix: users mint themselves into the token cap with no way out
+Asked: a user can't manage their own tokens anymore — link too many and it says "delete one" but
+they can't. Cause: every mint surface auto-mints and never cleans up (`/recorder` re-link mints
+fresh + leaves the old live; `/phone`·`/record`·`/upload` re-mint on 401 via `capture-token.ts`
+without revoking the dead one), so `MAX_ACTIVE_TOKENS=10` gets hit — and the cap error
+("Too many active tokens — revoke one first") landed on surfaces with NO revoke control; the only
+revoke list lived buried at the bottom of `/connect` (framed "connect your coding agent"). Fix
+(root-cause, owner-chosen): (1) new shared `src/components/token-manager.tsx` — `TokenList` +
+`TokenManager` (extracted from connect.tsx) + `TokenLimitNotice` (the inline revoke panel) +
+`isTokenLimitError(err|string)`. (2) Cap error now renders `TokenLimitNotice` inline on ALL five
+mint surfaces (/connect, /recorder, /phone, /record, /upload) — revoke right where you're stuck.
+(3) Replace-on-relink so normal use never hits the cap: `/recorder` stores its last-minted token id
+(`handback.recorder.tokenId`) and revokes it before re-minting; `capture-token.ts` now stores
+`{token,id}` (back-comptible with the old bare-`hb_` value) and best-effort revokes the dead token
+on 401 re-mint. Per-browser id tracking, so it only ever revokes a token THIS machine minted, never
+another device's. Typecheck + prod build green. No server changes (revoke/create/limits untouched).
+
 ## 2026-08-19 — Fix: human upload died client-side on "the report is missing"
 Asked: /upload for-a-person run failed with "the report is missing" despite 200s (those were
 transcribe/polish). Cause: `uploadWalkthrough`'s pre-flight guard in `src/lib/capture/upload.ts`
