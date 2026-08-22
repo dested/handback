@@ -2,6 +2,17 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-08-22 — Extension: quiet save-to-disk for recordings (the not-DevTools exit)
+Asked: after a person "lost" a walkthrough (video alive in IDB but unreachable without a DevTools
+incantation), add a recover control — explicitly quiet, "just possible", not a big scary button.
+Done: new `extension/src/sidepanel/save.ts` — read-only helper that saves a take's raw webm to
+Downloads via anchor download (prefers the assembled `<id>:video` blob, falls back to reading
+`<id>:chunk:1..N` in order without touching them; filenames `slug[-part-N].webm`). Two muted
+surfaces: a lowercase "save" text button in each part's head row (Parts.tsx, next to ×, toasts
+via onSay) and a `↓` cell on Home's "On this machine" rows (shown only when the session has
+takes; saves every part). Both styled after part-kill/lrow-open — muted ink, no new permission,
+nothing deleted or written. Extension typecheck + build green, root typecheck green.
+
 ## 2026-08-20 — Fix: users mint themselves into the token cap with no way out
 Asked: a user can't manage their own tokens anymore — link too many and it says "delete one" but
 they can't. Cause: every mint surface auto-mints and never cleans up (`/recorder` re-link mints

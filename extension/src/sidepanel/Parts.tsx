@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { blobs } from '../lib/db';
 import { mmss, plural } from '../lib/format';
 import { send } from '../lib/messages';
+import { saveTake } from './save';
 import type { Recording, Session } from '../lib/types';
 import { sessionKind } from '../lib/types';
 
@@ -271,6 +272,11 @@ function PartCard({
     await send({ type: 'take:delete', id: rec.id });
   };
 
+  const savePart = async () => {
+    const ok = await saveTake(session, rec);
+    onSay(ok ? 'saved to your Downloads' : 'this part has no video to save');
+  };
+
   const frac = Math.min(1, Math.max(0, playhead / durMs));
   // The duration hack briefly reports a garbage currentTime; the display clamps it.
   const clockMs = Math.min(Math.max(playhead, 0), durMs);
@@ -302,6 +308,13 @@ function PartCard({
               part {n} · {mmss(durMs)}
             </span>
             <span className="part-sp" />
+            <button
+              className="part-save"
+              title={`Save part ${n}'s video to this computer`}
+              onClick={() => void savePart()}
+            >
+              save
+            </button>
             <button
               className="part-kill"
               disabled={busy}

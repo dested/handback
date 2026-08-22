@@ -552,6 +552,18 @@
   position: static;
   flex: none;
 }
+/* Save-to-disk: deliberately quiet — an exit, not a feature. */
+.lrow-save {
+  flex: none;
+  padding: 4px 6px;
+  background: none;
+  border: 0;
+  color: var(--muted);
+  font-size: var(--fs-1);
+}
+.lrow-save:hover {
+  color: var(--ink);
+}
 
 .home-foot {
   margin: 0;
@@ -1046,6 +1058,18 @@ button.ticker.warn:hover {
 }
 .part-sp {
   flex: 1;
+}
+.part-save {
+  flex: none;
+  padding: 2px 6px;
+  background: none;
+  border: 0;
+  color: var(--muted);
+  font-size: var(--fs-0);
+  line-height: 1;
+}
+.part-save:hover {
+  color: var(--ink);
 }
 /* Styled after `.kill`, but a cell in the row rather than an absolute corner. */
 .part-kill {

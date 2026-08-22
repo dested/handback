@@ -3,6 +3,7 @@ import type { ServerLink, Session, SessionKind, SessionSummary, Settings } from 
 import { spaceName, spaceProjects, type ServerContext } from '../lib/context';
 import { send } from '../lib/messages';
 import { ago, hostOf, mmss, plural } from '../lib/format';
+import { saveSession } from './save';
 import {
   fetchWalkthroughs,
   inboxUrl,
@@ -468,6 +469,15 @@ export function Home({
                     onClick={() => openTab(s.uploadedUrl ?? '')}
                   >
                     ↗
+                  </button>
+                )}
+                {(sum?.takes ?? 0) > 0 && (
+                  <button
+                    className="lrow-save"
+                    title="Save this walkthrough's video to this computer"
+                    onClick={() => void saveSession(s)}
+                  >
+                    ↓
                   </button>
                 )}
                 <button
