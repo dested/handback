@@ -33,6 +33,7 @@ import {
   getWalkthroughDetail,
   listWalkthroughs,
   postWalkthroughResult,
+  requestEvidenceUploads,
   setWalkthroughStatus,
   type WalkthroughStatus,
   type TokenAuth,
@@ -40,6 +41,7 @@ import {
 import { memberTeamIds, spaceId } from './access'
 import { log } from './logger'
 import { notifyUpload } from './notify'
+import { runRefine } from './refine'
 import { indexWalkthrough } from './search'
 import { polishConfigured, polishTranscript } from './polish'
 import { prisma } from './prisma'
@@ -107,6 +109,9 @@ const declareSchema = z.object({
    *  distill) and the walkthrough is hidden from agent lists. Absent = 'agent',
    *  which is every recorder that predates the split. */
   kind: z.enum(['agent', 'human']).default('agent'),
+  /** What the recording is FOR — drives the brief's framing and the refine
+   *  prompts. Absent = untagged; never guessed server-side. */
+  intent: z.enum(['bug', 'feature', 'idea']).optional(),
   /** @deprecated Recorder ≤1.1.0 called `errorCount` this. Read when it's the only one sent. */
   eventCount: z.number().int().min(0).optional(),
   takes: z.array(takeSchema).min(1).max(200),
@@ -361,6 +366,7 @@ ingestRouter.post(DECLARE, declareLimit, async (req, res) => {
       title: body.title,
       origin: body.origin ?? null,
       kind: body.kind,
+      intent: body.intent ?? null,
       recordedAt: new Date(body.recordedAt),
       uploadedById: auth.userId,
       durationMs: body.durationMs,
@@ -436,6 +442,9 @@ ingestRouter.post(FINALIZE, finalizeLimit, async (req, res) => {
   // Only on the null→set transition: a client retrying finalize must not
   // re-mail the team. Fire-and-forget — email is never worth a slower upload.
   if (!walkthrough.finalizedAt) void notifyUpload(walkthrough.id)
+  // Same null→set gate for the pro-gated refine pass: it runs once per upload,
+  // reads its own eligibility, and never throws.
+  if (!walkthrough.finalizedAt && walkthrough.kind === 'agent') void runRefine(walkthrough.id)
   // Fill the search corpus from the uploaded report/transcript. Every finalize
   // (re-push included) — the files may have changed.
   void indexWalkthrough(walkthrough.id)
@@ -465,6 +474,41 @@ ingestRouter.post('/walkthroughs/:id/result', statusLimit, async (req, res) => {
     return
   }
   res.json({ ok: true })
+})
+
+// POST /api/ingest/walkthroughs/:id/evidence — presigned PUTs for proof
+// screenshots an agent attaches to its result (the paths land on the note via
+// attach_evidence). Small images only, a handful per call.
+const evidenceSchema = z.object({
+  files: z
+    .array(
+      z.object({
+        name: z.string().regex(/^[a-z0-9._-]{1,80}$/i),
+        size: z
+          .number()
+          .int()
+          .min(1)
+          .max(5 * 1024 * 1024),
+        contentType: z.enum(['image/png', 'image/jpeg', 'image/webp']),
+      })
+    )
+    .min(1)
+    .max(4),
+})
+
+ingestRouter.post('/walkthroughs/:id/evidence', statusLimit, async (req, res) => {
+  const auth = getAuth(req)
+  const parsed = evidenceSchema.safeParse(req.body)
+  if (!parsed.success) {
+    fail(res, 400, parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '))
+    return
+  }
+  const result = await requestEvidenceUploads(auth, pathId(req), parsed.data.files)
+  if (!result) {
+    fail(res, 404, 'Unknown walkthrough')
+    return
+  }
+  res.json(result)
 })
 
 // The read side is three thin wrappers over `walkthroughs-api.ts` — the hosted MCP

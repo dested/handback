@@ -17,14 +17,16 @@
 // an upload always lands in a space the token's owner is actually in.
 
 import { createHash } from 'node:crypto'
+import { z } from 'zod'
 import { memberTeamIds, spaceId } from './access'
 import { isPlatformAdmin } from './features'
 import { log } from './logger'
+import { notifyQuestion, notifyResult } from './notify'
 import { prisma } from './prisma'
 import { expiryFor } from './retention'
-import { getObjectText, walkthroughKey, presignGet } from './storage'
+import { getObjectText, isSafePath, walkthroughKey, presignGet, presignPut } from './storage'
 
-export const WALKTHROUGH_STATUSES = ['open', 'in_review', 'resolved'] as const
+export const WALKTHROUGH_STATUSES = ['open', 'in_review', 'needs_info', 'resolved'] as const
 export type WalkthroughStatus = (typeof WALKTHROUGH_STATUSES)[number]
 
 export type TokenAuth = {
@@ -129,6 +131,9 @@ export type WalkthroughListItem = {
   title: string
   origin: string | null
   status: string
+  // 'bug' | 'feature' | 'idea' | null — lets an agent triaging the queue see
+  // what each walkthrough is FOR before it pulls the full brief.
+  intent: string | null
   recordedAt: string
   durationMs: number
   frameCount: number
@@ -194,6 +199,7 @@ export async function listWalkthroughs(
     title: g.title,
     origin: g.origin,
     status: g.status,
+    intent: g.intent,
     recordedAt: g.recordedAt.toISOString(),
     durationMs: g.durationMs,
     frameCount: g.frameCount,
@@ -209,9 +215,15 @@ export type WalkthroughFileRef = { path: string; size: number; contentType: stri
 /** One entry of the review thread, as an agent (or the brief formatter) sees it. */
 export type WalkthroughNoteRef = {
   role: string
+  // 'result' | 'question' | 'answer' — with `role`, tells an agent result from
+  // a reviewer send-back from an agent question from the reviewer's reply.
+  kind: string
   summary: string
   prUrl: string | null
   filesTouched: string[]
+  // Walkthrough-relative paths of proof screenshots on this entry; the presigned
+  // urls for them live in the `files` list (they're WalkthroughFile rows).
+  evidencePaths: string[]
   bodyMd: string | null
   authorName: string
   createdAt: string
@@ -245,6 +257,18 @@ export type WalkthroughDetail = {
     frameCount: number
     videoPath: string | null
   }>
+  // What the recording is FOR — drives the brief's intent framing.
+  intent: string | null
+  // The Refine pass's outputs, when it ran (server/refine.ts). `summaryMd` is the
+  // complete ledger of everything raised; `curation` is the reviewer-curated
+  // keyframe set plus the spans cut from the walkthrough.
+  summaryMd: string | null
+  // Standing project context, prepended to every brief in this project.
+  projectInstructions: string | null
+  curation: {
+    frames: Array<{ path: string; caption: string; atMs: number | null }>
+    excluded: Array<{ startMs: number; endMs: number; reason: string }>
+  } | null
   reportMd: string | null
   files: WalkthroughFileRef[]
   // The review thread, oldest first: agent results and reviewer send-backs.
@@ -252,6 +276,17 @@ export type WalkthroughDetail = {
   // Margin notes from humans, oldest first — part of the brief.
   comments: WalkthroughCommentRef[]
 }
+
+/** Parses `Walkthrough.curationJson` — never throws; a malformed blob (or the
+ *  null of an un-refined walkthrough) degrades to no curation. */
+const curationSchema = z.object({
+  frames: z
+    .array(z.object({ path: z.string(), caption: z.string(), atMs: z.number().nullable() }))
+    .default([]),
+  excluded: z
+    .array(z.object({ startMs: z.number(), endMs: z.number(), reason: z.string() }))
+    .default([]),
+})
 
 /**
  * One walkthrough, everything an agent needs in a single round trip: metadata, the
@@ -272,6 +307,7 @@ export async function getWalkthroughDetail(
     include: {
       team: { select: { name: true } },
       user: { select: { name: true } },
+      project: { select: { instructions: true } },
       takes: { orderBy: { index: 'asc' } },
       files: { where: { status: 'uploaded' }, orderBy: { path: 'asc' } },
       notes: { orderBy: { createdAt: 'asc' } },
@@ -286,9 +322,11 @@ export async function getWalkthroughDetail(
   // report.md is the whole point of the pull, but a walkthrough is still usable
   // without it (bad upload, hand-declared walkthrough) — degrade to null. A
   // split-out task carries no files at all: its brief IS the report, and it
-  // points the agent at the parent for the recording itself.
+  // points the agent at the parent for the recording itself. Refine's rewrite
+  // (`refinedBriefMd`) is preferred over the raw report when it ran.
   const reportMd =
     walkthrough.briefMd ??
+    walkthrough.refinedBriefMd ??
     (await getObjectText(walkthroughKey(space, walkthrough.id, 'report.md')).catch(
       (err: unknown) => {
         log.warn(
@@ -297,6 +335,9 @@ export async function getWalkthroughDetail(
         return null
       }
     ))
+
+  const curationParsed = curationSchema.safeParse(walkthrough.curationJson)
+  const curation = curationParsed.success ? curationParsed.data : null
 
   return {
     id: walkthrough.id,
@@ -318,6 +359,10 @@ export async function getWalkthroughDetail(
       frameCount: t.frameCount,
       videoPath: t.videoPath,
     })),
+    intent: walkthrough.intent,
+    summaryMd: walkthrough.summaryMd,
+    projectInstructions: walkthrough.project?.instructions ?? null,
+    curation,
     reportMd,
     files: await Promise.all(
       walkthrough.files.map(async (f) => ({
@@ -329,9 +374,11 @@ export async function getWalkthroughDetail(
     ),
     notes: walkthrough.notes.map((n) => ({
       role: n.role,
+      kind: n.kind,
       summary: n.summary,
       prUrl: n.prUrl,
       filesTouched: n.filesTouched,
+      evidencePaths: n.evidencePaths,
       bodyMd: n.bodyMd,
       authorName: n.authorName,
       createdAt: n.createdAt.toISOString(),
@@ -381,6 +428,9 @@ export type PostResultInput = {
   prUrl?: string
   filesTouched?: string[]
   body?: string
+  // Walkthrough-relative paths returned by requestEvidenceUploads and since
+  // PUT — the proof screenshots to hang off this result.
+  evidence?: string[]
 }
 
 /**
@@ -400,13 +450,39 @@ export async function postWalkthroughResult(
     select: { id: true, slug: true, status: true, teamId: true, userId: true },
   })
   if (!walkthrough || !(await inScope(auth, walkthrough))) return null
+
+  // Evidence: only paths under evidence/ can be flipped live — anything else is
+  // silently dropped rather than failing the (more important) result post. The
+  // uploaded rows move pending → uploaded and their bytes join the walkthrough's
+  // total, mirroring finalize's accounting.
+  const evidencePaths = (input.evidence ?? []).filter((p) => p.startsWith('evidence/'))
+  if (evidencePaths.length > 0) {
+    const flipped = await prisma.walkthroughFile.findMany({
+      where: { walkthroughId: walkthrough.id, path: { in: evidencePaths }, status: 'pending' },
+      select: { size: true },
+    })
+    if (flipped.length > 0) {
+      const addedBytes = BigInt(flipped.reduce((sum, f) => sum + f.size, 0))
+      await prisma.walkthroughFile.updateMany({
+        where: { walkthroughId: walkthrough.id, path: { in: evidencePaths }, status: 'pending' },
+        data: { status: 'uploaded' },
+      })
+      await prisma.walkthrough.update({
+        where: { id: walkthrough.id },
+        data: { bytes: { increment: addedBytes } },
+      })
+    }
+  }
+
   await prisma.walkthroughNote.create({
     data: {
       walkthroughId: walkthrough.id,
       role: 'agent',
+      kind: 'result',
       summary: input.summary,
       prUrl: input.prUrl ?? null,
       filesTouched: input.filesTouched ?? [],
+      evidencePaths,
       bodyMd: input.body ?? null,
       authorName: auth.tokenName,
     },
@@ -421,5 +497,97 @@ export async function postWalkthroughResult(
   }
   log.info(`[walkthroughs] ${walkthrough.slug} (${walkthrough.id}) ← result from ${auth.tokenName}`)
   traceAccess(auth, walkthrough.id, 'result')
+  void notifyResult(walkthrough.id, input.summary).catch(() => {})
   return { slug: walkthrough.slug }
+}
+
+/**
+ * An agent stuck on an ambiguous walkthrough asks a human instead of guessing.
+ * Posts a `kind:'question'` note, moves the walkthrough to needs_info (unless it
+ * is already resolved — a resolved walkthrough stays resolved), and mails the
+ * uploader. The answer comes back as a reviewer note the agent reads on its next
+ * pull. Returns the slug, or null out of scope.
+ */
+export async function askReviewerQuestion(
+  auth: TokenAuth,
+  walkthroughId: string,
+  question: string
+): Promise<{ slug: string } | null> {
+  const walkthrough = await prisma.walkthrough.findUnique({
+    where: { id: walkthroughId },
+    select: { id: true, slug: true, status: true, teamId: true, userId: true },
+  })
+  if (!walkthrough || !(await inScope(auth, walkthrough))) return null
+  await prisma.walkthroughNote.create({
+    data: {
+      walkthroughId: walkthrough.id,
+      role: 'agent',
+      kind: 'question',
+      summary: question,
+      filesTouched: [],
+      authorName: auth.tokenName,
+    },
+  })
+  if (walkthrough.status !== 'resolved') {
+    // needs_info schedules no expiry (expiryFor returns null for it) — a
+    // walkthrough waiting on a human must not age out from under them.
+    await prisma.walkthrough.update({
+      where: { id: walkthrough.id },
+      data: { status: 'needs_info', resolvedAt: null, expiresAt: expiryFor('needs_info') },
+    })
+    traceAccess(auth, walkthrough.id, 'status', 'needs_info')
+  }
+  log.info(
+    `[walkthroughs] ${walkthrough.slug} (${walkthrough.id}) ← question from ${auth.tokenName}`
+  )
+  void notifyQuestion(walkthrough.id).catch(() => {})
+  return { slug: walkthrough.slug }
+}
+
+/**
+ * Hand an agent presigned PUT urls for a few proof screenshots to attach to its
+ * result. The caller (MCP / REST) has already bounded count, size and content
+ * type; this re-guards cheaply and returns null on any violation rather than
+ * signing something the ingest rules wouldn't accept. Each file is upserted as a
+ * pending WalkthroughFile; post_result flips it to uploaded. Null when the
+ * walkthrough is out of scope or never finalized.
+ */
+export async function requestEvidenceUploads(
+  auth: TokenAuth,
+  walkthroughId: string,
+  files: Array<{ name: string; size: number; contentType: string }>
+): Promise<{ uploads: Array<{ path: string; url: string; contentType: string }> } | null> {
+  if (files.length === 0 || files.length > 4) return null
+  const walkthrough = await prisma.walkthrough.findUnique({
+    where: { id: walkthroughId },
+    select: { id: true, teamId: true, userId: true, finalizedAt: true },
+  })
+  if (!walkthrough || !(await inScope(auth, walkthrough)) || !walkthrough.finalizedAt) return null
+
+  const space = spaceId({ teamId: walkthrough.teamId, userId: walkthrough.userId })
+  const uploads: Array<{ path: string; url: string; contentType: string }> = []
+  for (const f of files) {
+    if (f.size < 1 || f.size > 5 * 1024 * 1024) return null
+    if (!/^image\/(png|jpeg|webp)$/.test(f.contentType)) return null
+    if (!/^[a-z0-9._-]{1,80}$/i.test(f.name)) return null
+    const path = `evidence/${Date.now()}-${f.name.toLowerCase()}`
+    if (!isSafePath(path)) return null
+    await prisma.walkthroughFile.upsert({
+      where: { walkthroughId_path: { walkthroughId: walkthrough.id, path } },
+      create: {
+        walkthroughId: walkthrough.id,
+        path,
+        size: f.size,
+        contentType: f.contentType,
+        status: 'pending',
+      },
+      update: { size: f.size, contentType: f.contentType, status: 'pending' },
+    })
+    uploads.push({
+      path,
+      url: await presignPut(walkthroughKey(space, walkthrough.id, path), f.contentType, f.size),
+      contentType: f.contentType,
+    })
+  }
+  return { uploads }
 }

@@ -14,6 +14,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { CLIP_ACCEPT, ClipList, type Clip } from '~/components/phone/clip-list'
 import { DestinationControl, type Destination } from '~/components/phone/destination'
+import { IntentControl, type Intent } from '~/components/phone/intent'
 import { KindControl } from '~/components/phone/kind'
 import { HUMAN_ROWS, StageList, isCommitted } from '~/components/phone/stages'
 import { Button, buttonVariants } from '~/components/ui/button'
@@ -56,6 +57,7 @@ export function UploadPage() {
   const [clipError, setClipError] = useState<string | null>(null)
   const [dragging, setDragging] = useState(false)
   const [kind, setKind] = useState<'agent' | 'human'>('agent')
+  const [intent, setIntent] = useState<Intent | null>(null)
   const [title, setTitle] = useState('')
   const [placeholder, setPlaceholder] = useState('Walkthrough')
 
@@ -206,6 +208,7 @@ export function UploadPage() {
             projectId: destination.projectId,
             title: sendTitle,
             kind,
+            ...(intent ? { intent } : {}),
             onProgress: (update) => {
               heardAt.current = Date.now()
               setProgress(update)
@@ -236,7 +239,7 @@ export function UploadPage() {
     } finally {
       abort.current = null
     }
-  }, [clips, destination, kind, sendTitle, withToken])
+  }, [clips, destination, kind, intent, sendTitle, withToken])
 
   // Nothing is stashed anywhere, so leaving mid-distill really does throw the
   // work away. The browser writes its own wording; all we can do is ask.
@@ -323,6 +326,10 @@ export function UploadPage() {
           {/* Who it's for decides everything downstream — distill or ship
               whole, agent queue or watch page — so it sits above the rest. */}
           <KindControl value={kind} onChange={setKind} />
+
+          {/* What it's about — only an agent handback is briefed; a human one
+              is watched, so the tag would mean nothing there. */}
+          {kind === 'agent' && <IntentControl value={intent} onChange={setIntent} />}
 
           <DestinationControl
             ctx={ctx}

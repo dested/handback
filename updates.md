@@ -2,6 +2,14 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-08-23 — Marketing plan refreshed against reality
+Asked: "let's start marketing this" — build the plan, find existing docs, ask questions.
+Done: audited plans/2026-08-12-marketing-plan.md against the 11 days since (store is PUBLIC,
+prod round trip proven, privacy/retention done; still missing: og:image, demo video, /docs,
+error tracking). Owner answered: parallel with mega-wave, both demo videos, X-only reach,
+store already public. Plan doc rewritten in place as the executable checklist.
+Touched: plans/2026-08-12-marketing-plan.md
+
 ## 2026-08-22 — Extension: quiet save-to-disk for recordings (the not-DevTools exit)
 Asked: after a person "lost" a walkthrough (video alive in IDB but unreachable without a DevTools
 incantation), add a recover control — explicitly quiet, "just possible", not a big scary button.

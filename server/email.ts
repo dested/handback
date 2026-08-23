@@ -164,6 +164,79 @@ export function walkthroughUploadedEmail(opts: {
   }
 }
 
+export function walkthroughResultEmail(opts: {
+  title: string
+  summary: string
+  url: string
+  unsubscribeUrl: string
+}): Omit<Message, 'to'> {
+  const { title, summary, url, unsubscribeUrl } = opts
+  return {
+    subject: `Your agent answered: ${title}`,
+    text: `Your agent posted a result on "${title}".\n\n${summary}\n\nReview and sign off:\n${url}\n\nToo much mail? Stop these: ${unsubscribeUrl}`,
+    html: shell(
+      `<p style="font-size:15px;line-height:1.6;margin:0 0 8px">
+      Your agent posted a result on <strong>${esc(title)}</strong>.
+    </p>
+    <p style="font-size:15px;line-height:1.6;margin:0 0 20px">${esc(summary)}</p>
+    ${button(url, 'Review & sign off')}
+    ${fallbackLine(url)}`,
+      `Too much mail? <a href="${unsubscribeUrl}" style="color:${MUTED}">Stop these result emails</a> — one click, no sign-in.`
+    ),
+  }
+}
+
+export function walkthroughQuestionEmail(opts: {
+  title: string
+  question: string
+  url: string
+  unsubscribeUrl: string
+}): Omit<Message, 'to'> {
+  const { title, question, url, unsubscribeUrl } = opts
+  return {
+    subject: `Your agent has a question about ${title}`,
+    text: `Your agent stopped to ask a question about "${title}".\n\n${question}\n\nAnswer it on the walkthrough page:\n${url}\n\nToo much mail? Stop these: ${unsubscribeUrl}`,
+    html: shell(
+      `<p style="font-size:15px;line-height:1.6;margin:0 0 8px">
+      Your agent stopped to ask a question about <strong>${esc(title)}</strong>.
+    </p>
+    <p style="font-size:15px;line-height:1.6;margin:0 0 20px">${esc(question)}</p>
+    ${button(url, 'Answer it')}
+    ${fallbackLine(url)}`,
+      `Too much mail? <a href="${unsubscribeUrl}" style="color:${MUTED}">Stop these result emails</a> — one click, no sign-in.`
+    ),
+  }
+}
+
+export function walkthroughHealthEmail(opts: {
+  title: string
+  notes: string[]
+  url: string
+  unsubscribeUrl: string
+}): Omit<Message, 'to'> {
+  const { title, notes, url, unsubscribeUrl } = opts
+  const textList = notes.map((n) => `- ${n}`).join('\n')
+  const htmlList = notes
+    .map(
+      (n) =>
+        `<li style="font-size:14px;line-height:1.6;margin:0 0 4px">${esc(n)}</li>`
+    )
+    .join('')
+  return {
+    subject: `Parts of "${title}" may not have recorded well`,
+    text: `Some parts of "${title}" may not have recorded well:\n\n${textList}\n\nCheck and re-record if needed:\n${url}\n\nToo much mail? Stop these: ${unsubscribeUrl}`,
+    html: shell(
+      `<p style="font-size:15px;line-height:1.6;margin:0 0 12px">
+      Some parts of <strong>${esc(title)}</strong> may not have recorded well:
+    </p>
+    <ul style="margin:0 0 20px;padding-left:20px;color:${INK}">${htmlList}</ul>
+    ${button(url, 'Check the recording')}
+    ${fallbackLine(url)}`,
+      `Too much mail? <a href="${unsubscribeUrl}" style="color:${MUTED}">Stop these result emails</a> — one click, no sign-in.`
+    ),
+  }
+}
+
 export function digestEmail(opts: {
   stats: {
     open: number

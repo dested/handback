@@ -51,6 +51,9 @@ export interface DistillOptions {
    * an extension one. Same contract as live-upload.ts's human branch.
    */
   kind?: 'agent' | 'human'
+  /** What the recording is about, for an agent handback — forwarded to the
+   *  declare so the brief can frame the work. Untagged when absent. */
+  intent?: 'bug' | 'feature' | 'idea'
   onProgress: (p: StageProgress) => void
   signal?: AbortSignal
 }
@@ -280,6 +283,7 @@ export async function distillAndUpload(
     teamId: opts.teamId,
     projectId: opts.projectId,
     ...(opts.kind ? { kind: opts.kind } : {}),
+    ...(opts.intent ? { intent: opts.intent } : {}),
     signal: opts.signal,
     onProgress: (p) => {
       if (p.phase === 'upload') {

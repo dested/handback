@@ -43,14 +43,27 @@ export async function indexWalkthrough(walkthroughId: string): Promise<void> {
   try {
     const walkthrough = await prisma.walkthrough.findUnique({
       where: { id: walkthroughId },
-      select: { id: true, kind: true, teamId: true, userId: true },
+      select: {
+        id: true,
+        kind: true,
+        teamId: true,
+        userId: true,
+        summaryMd: true,
+        refinedBriefMd: true,
+      },
     })
     if (!walkthrough) return
     const space = spaceId({ teamId: walkthrough.teamId, userId: walkthrough.userId })
     const path = walkthrough.kind === 'human' ? 'transcript.json' : 'report.md'
     const raw = await getObjectText(walkthroughKey(space, walkthrough.id, path)).catch(() => null)
-    if (raw === null) return
-    const corpus = (walkthrough.kind === 'human' ? transcriptToText(raw) : stripUrls(raw))
+    // The refine pass's summary + brief are searchable too — fold them in before
+    // the URL-strip and cap so a query hits refined text as well as the source.
+    const refined = [walkthrough.summaryMd, walkthrough.refinedBriefMd]
+      .filter((t): t is string => Boolean(t))
+      .join(' ')
+    const source = raw === null ? '' : walkthrough.kind === 'human' ? transcriptToText(raw) : raw
+    if (source === '' && refined === '') return
+    const corpus = stripUrls(`${source} ${refined}`)
       .replace(/\s+/g, ' ')
       .slice(0, MAX_CORPUS_CHARS)
       .trim()

@@ -92,5 +92,12 @@ curationJson = `{frames:[{path, caption, atMs|null}], excluded:[{startMs, endMs,
 ## Progress
 
 - [x] Plan written; .env flipped to local DB
-- [ ] Schema + storage helpers (Fable)
-- [ ] Wave A / B / C / D · gate · docs · commits
+- [x] Schema + storage helpers (Fable); both local DBs pushed; client generated
+- [x] Wave A done + committed (2fe46ef): sidebar shell · /usage · /upgrade ·
+      extension 1.9.0 intent chips (publish to bucket = Sal's step)
+- [ ] Wave B running: B1 refine.ts+ingest · B2 client intent · B3 api pack
+- [ ] Wave C: C1 router pack · C2 server/agent.ts · C3 viewer return-path client
+- [ ] Wave D: D1 assistant panel + refine surfaces · D2 e2e + gate + docs
+- [ ] Follow-ups found mid-build: REST `POST /walkthroughs/:id/question` (ingest)
+      so the stdio MCP has a wire path; mirror ask_reviewer/attach_evidence/
+      evidence-on-post_result into cli/mcp.ts (wave C/D)

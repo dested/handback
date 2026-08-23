@@ -51,6 +51,9 @@ export interface LiveDraft {
    *  whole session (takes must all be captured the same way), so it lives
    *  here and survives a reload with the rest of the draft. */
   kind: 'agent' | 'human'
+  /** What it's about, for an agent handback — survives a reload with the draft.
+   *  Absent on older drafts and on human ones; reads as null (untagged). */
+  intent?: 'bug' | 'feature' | 'idea' | null
 }
 
 let dbPromise: Promise<IDBDatabase> | null = null
@@ -167,13 +170,14 @@ export async function saveDraft(draft: LiveDraft): Promise<void> {
 /** What comes back out of storage is untrusted — an older shape reads as "nothing saved". */
 function toDraft(value: unknown): LiveDraft | null {
   if (typeof value !== 'object' || value === null) return null
-  const { sessionId, title, createdAt, teamId, projectId, kind } = value as {
+  const { sessionId, title, createdAt, teamId, projectId, kind, intent } = value as {
     sessionId?: unknown
     title?: unknown
     createdAt?: unknown
     teamId?: unknown
     projectId?: unknown
     kind?: unknown
+    intent?: unknown
   }
   if (typeof sessionId !== 'string' || typeof title !== 'string') return null
   return {
@@ -184,6 +188,7 @@ function toDraft(value: unknown): LiveDraft | null {
     projectId: typeof projectId === 'string' ? projectId : null,
     // Drafts from before the split are agent handbacks by definition.
     kind: kind === 'human' ? 'human' : 'agent',
+    intent: intent === 'bug' || intent === 'feature' || intent === 'idea' ? intent : null,
   }
 }
 

@@ -46,6 +46,9 @@ export interface UploadOptions {
   /** 'human' = the video is the deliverable (hidden from agent lists, viewer
    *  plays the render). Absent = 'agent', the default the server also assumes. */
   kind?: 'agent' | 'human'
+  /** What the recording is about, for an agent handback — the tag the brief
+   *  frames the work by. Absent = untagged; the server presumes nothing. */
+  intent?: 'bug' | 'feature' | 'idea'
   /** Overrides the declared walkthrough duration. The human path sends the
    *  edited render's length — the sum of raw takes would overstate what a
    *  viewer actually watches. Take rows keep their real (source) durations. */
@@ -138,6 +141,7 @@ function declaration(
     // Which space this lands in: absent = the token owner's personal one.
     ...(opts.teamId ? { teamId: opts.teamId } : {}),
     ...(opts.kind ? { kind: opts.kind } : {}),
+    ...(opts.intent ? { intent: opts.intent } : {}),
     // The first take's own clock, not when the phone opened the form.
     recordedAt: first ? first.startedAt : new Date(session.createdAt).toISOString(),
     durationMs: opts.durationMs ?? takes.reduce((sum, t) => sum + t.durationMs, 0),

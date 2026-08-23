@@ -25,6 +25,9 @@ export interface PendingRun {
   projectId: string | null
   /** Who the walkthrough is for. Older saved runs carry none and read as 'agent'. */
   kind: 'agent' | 'human'
+  /** What it's about, for an agent handback. Absent on older runs and on any
+   *  human one — reads as null (untagged). */
+  intent?: 'bug' | 'feature' | 'idea' | null
   savedAt: number
 }
 
@@ -89,6 +92,11 @@ function toPendingRun(value: unknown): PendingRun | null {
     teamId,
     projectId,
     kind: 'kind' in value && value.kind === 'human' ? 'human' : 'agent',
+    intent:
+      'intent' in value &&
+      (value.intent === 'bug' || value.intent === 'feature' || value.intent === 'idea')
+        ? value.intent
+        : null,
     savedAt: 'savedAt' in value && typeof value.savedAt === 'number' ? value.savedAt : 0,
   }
 }

@@ -20,6 +20,7 @@ import { useMutation } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { Editor } from '~/components/edit/editor'
 import { DestinationControl, type Destination } from '~/components/phone/destination'
+import { IntentControl, type Intent } from '~/components/phone/intent'
 import { RECORD_ROWS, StageList, VOICE_RECORD_ROWS, isCommitted } from '~/components/phone/stages'
 import { RecordingHud } from '~/components/record/hud'
 import { RecordingPanel } from '~/components/record/panel'
@@ -116,6 +117,7 @@ export function RecordPage() {
   // at all — the transcript is the walkthrough (kind 'agent' on the server).
   // Fixed once a take exists: the modes capture differently and can't mix.
   const [kind, setKind] = useState<'agent' | 'human' | 'voice'>('agent')
+  const [intent, setIntent] = useState<Intent | null>(null)
   const [title, setTitle] = useState('')
   const [placeholder, setPlaceholder] = useState('Walkthrough')
   const [progress, setProgress] = useState<StageProgress | null>(null)
@@ -204,6 +206,7 @@ export function RecordPage() {
           chosen.current = true
           setDestination({ teamId: draft.teamId, projectId: draft.projectId })
           setKind(draft.kind)
+          setIntent(draft.intent ?? null)
         }
         setTakes(laid)
         setRecovered(repaired.some((take) => take.interrupted))
@@ -269,8 +272,9 @@ export function RecordPage() {
       teamId: destination.teamId,
       projectId: destination.projectId,
       kind,
+      intent,
     }).catch(() => {})
-  }, [takes, title, destination, kind])
+  }, [takes, title, destination, kind, intent])
 
   const finishTake = useCallback(async () => {
     const active = recorder.current
@@ -409,6 +413,7 @@ export function RecordPage() {
             teamId: destination.teamId,
             projectId: destination.projectId,
             title: sendTitle,
+            ...(intent ? { intent } : {}),
             onProgress: (update) => {
               heardAt.current = Date.now()
               setProgress(update)
@@ -438,7 +443,7 @@ export function RecordPage() {
     } finally {
       abort.current = null
     }
-  }, [voiceBlob, voiceMs, destination, sendTitle, withToken])
+  }, [voiceBlob, voiceMs, destination, intent, sendTitle, withToken])
 
   // The clock on the voice card, ticking only while the mic is live.
   useEffect(() => {
@@ -536,6 +541,7 @@ export function RecordPage() {
           // for the wire type, which only knows the two screen kinds.
           kind: kind === 'human' ? 'human' : 'agent',
           title: sendTitle,
+          ...(intent ? { intent } : {}),
           onProgress: (update) => {
             heardAt.current = Date.now()
             setProgress(update)
@@ -569,7 +575,7 @@ export function RecordPage() {
     } finally {
       abort.current = null
     }
-  }, [takes, destination, kind, sendTitle, withToken])
+  }, [takes, destination, kind, intent, sendTitle, withToken])
 
   // ── the human-handback edit ─────────────────────────────────────────────
 
@@ -876,6 +882,14 @@ export function RecordPage() {
                   </button>
                 ))}
               </div>
+
+              {/* What it's about — agent and voice handbacks are both briefed
+                  for an agent, so both carry the tag; a human one is watched. */}
+              {kind !== 'human' && (
+                <div className="w-full max-w-xs">
+                  <IntentControl value={intent} onChange={setIntent} />
+                </div>
+              )}
 
               <p className="text-muted-foreground max-w-md text-sm leading-relaxed">
                 {kind === 'human'

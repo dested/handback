@@ -21,6 +21,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { AddClips, ClipList, type Clip } from '~/components/phone/clip-list'
 import { DestinationControl, type Destination } from '~/components/phone/destination'
 import { PhoneGuide, type Platform } from '~/components/phone/guide'
+import { IntentControl, type Intent } from '~/components/phone/intent'
 import { KindControl } from '~/components/phone/kind'
 import { HUMAN_ROWS, StageList, isCommitted } from '~/components/phone/stages'
 import { Button, buttonVariants } from '~/components/ui/button'
@@ -91,6 +92,7 @@ export function PhonePage() {
   // The share path never sees the picker and always ships 'agent' — sharing was
   // the send, and pausing it to ask would undo that. Manual intake chooses.
   const [kind, setKind] = useState<'agent' | 'human'>('agent')
+  const [intent, setIntent] = useState<Intent | null>(null)
   const [title, setTitle] = useState('')
   const [placeholder, setPlaceholder] = useState('Walkthrough')
 
@@ -176,6 +178,7 @@ export function PhonePage() {
     setShareMissed(false)
     setResumable(false)
     setKind('agent')
+    setIntent(null)
     setTitle('')
     setProgress(null)
     setResult(null)
@@ -194,6 +197,7 @@ export function PhonePage() {
     setClipError(null)
     setResumable(false)
     setKind('agent')
+    setIntent(null)
     setTitle('')
     void clearPendingRun()
     void clearSharedMedia()
@@ -245,6 +249,7 @@ export function PhonePage() {
         addFiles(run.files)
         setTitle(run.title)
         setKind(run.kind)
+        setIntent(run.intent ?? null)
         // A recovered run remembers where it was going; the active space must
         // not quietly redirect it somewhere else.
         chosen.current = true
@@ -344,6 +349,7 @@ export function PhonePage() {
       teamId: destination.teamId,
       projectId: destination.projectId,
       kind,
+      intent,
       savedAt: Date.now(),
     })
     try {
@@ -360,6 +366,7 @@ export function PhonePage() {
             projectId: destination.projectId,
             title: sendTitle,
             kind,
+            ...(intent ? { intent } : {}),
             onProgress: (update) => {
               heardAt.current = Date.now()
               setProgress(update)
@@ -395,7 +402,7 @@ export function PhonePage() {
     } finally {
       abort.current = null
     }
-  }, [clips, destination, kind, title, sendTitle, withToken])
+  }, [clips, destination, kind, intent, title, sendTitle, withToken])
 
   // Everything below keeps a run alive on a device that would rather it didn't.
 
@@ -410,9 +417,10 @@ export function PhonePage() {
       teamId: destination.teamId,
       projectId: destination.projectId,
       kind,
+      intent,
       savedAt: Date.now(),
     })
-  }, [phase, clips, title, destination, kind])
+  }, [phase, clips, title, destination, kind, intent])
 
   // The auto-start. Arming happens in the share pickup; firing waits here until
   // the clips it added are in state and done probing, because send() reads them
@@ -560,6 +568,10 @@ export function PhonePage() {
               whole, agent queue or watch page — so it sits above the rest.
               Only manual intake sees it: a share already went as 'agent'. */}
           <KindControl value={kind} onChange={setKind} />
+
+          {/* What it's about — only an agent handback is briefed; a human one
+              is watched, so the tag would mean nothing there. */}
+          {kind === 'agent' && <IntentControl value={intent} onChange={setIntent} />}
 
           <DestinationControl
             ctx={ctx}

@@ -114,14 +114,21 @@ async function createServer() {
       res.status(400).type('txt').end('Bad unsubscribe link')
       return
     }
+    const column =
+      kind === 'uploads'
+        ? { notifyUploads: false }
+        : kind === 'results'
+          ? { notifyResults: false }
+          : { notifyDigest: false }
     await prisma.user
-      .update({
-        where: { id: userId },
-        data: kind === 'uploads' ? { notifyUploads: false } : { notifyDigest: false },
-      })
+      .update({ where: { id: userId }, data: column })
       .catch(() => {})
     const what =
-      kind === 'uploads' ? 'emails when a teammate adds a walkthrough' : 'weekly digest emails'
+      kind === 'uploads'
+        ? 'emails when a teammate adds a walkthrough'
+        : kind === 'results'
+          ? 'emails when your agent answers or asks about a walkthrough'
+          : 'weekly digest emails'
     res
       .type('html')
       .end(
