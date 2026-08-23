@@ -1,3 +1,8 @@
 User-agent: *
 Allow: /
 Disallow: /api/
+Disallow: /admin
+Disallow: /app
+Disallow: /w/
+
+Sitemap: https://handback.dev/sitemap.xml

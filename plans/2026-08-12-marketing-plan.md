@@ -41,6 +41,21 @@ records + dev's agent fixes (the team sell) → agencies (client feedback → ag
 
 ## Channel reality (owner's answers, 2026-08-23)
 
+- **All posts from @dested, in HIS voice, drafted by Claude as part of finishing each ship.**
+  Profile read 2026-08-23: ~816 followers but engagement (33–170 likes) regularly beats follower
+  count; bio = "2 time exited founder, Fractional CTO" + pinned CNBC exit story — the credibility
+  IS the account. Tone to match (memory: sal-twitter-voice): dry practitioner one-liners, "New
+  rule:" takes, absurdist agent-life humor, zero hashtags/emoji/marketing-speak, typos left in.
+  Handback content must blend in — takes and jokes with the product woven in, demo clips framed
+  as "watch this", never "Announcement 🎉".
+- **No separate @handback account for now** — at 816 followers, splitting the audience kills both
+  halves, and a zero-follower brand account gets zero algorithmic distribution. Reserve the handle
+  (@handback / @handbackdev / @gethandback — whichever is free), park it with one pinned tweet
+  pointing at handback.dev + a follow of @dested, and revisit once there's revenue/team (its
+  eventual job: changelog + support, retweeting @dested — never the launch channel).
+- **The demo bug target is Handback itself** — record a bug about Handback, in Handback; Claude
+  Code pulls it over Handback's own MCP and fixes the Handback repo; sign-off on screen. The
+  recursion is the pitch in one clip, and it's the perfect HN-comment answer to "do you use it?".
 - **X with real reach — the primary channel.** Everything routes through it. Otherwise **cold**:
   no Discord/Reddit presence, no bench of 10 devs to DM. Consequences:
   - MCP directories weigh MORE (durable discovery that needs zero audience).
@@ -82,13 +97,17 @@ records + dev's agent fixes (the team sell) → agencies (client feedback → ag
 
 | # | Item | Who | Status |
 | --- | --- | --- | --- |
-| 1 | **OG image + `twitter:*` meta + canonical + sitemap** — og:title/description exist; **no og:image**, so every share on X/Slack/HN renders a bare text link. Hours of work; unblocks every other item's distribution. | Claude | open |
-| 2 | **Error tracking + post-deploy smoke check** (gate 4) | Claude | open |
-| 3 | **Homepage top-10 fixes** (ranked list below) | Claude | open |
-| 4 | **/docs — "how it works with Claude Code"** — launch commenters read docs before signing up | Claude | open |
-| 5 | **MCP directory pack**: listings drafted for the official MCP registry, mcp.so, PulseMCP, Glama, Smithery, awesome-mcp-servers PRs | Claude drafts, owner submits | open |
-| 6 | **The demo video, twice**: (a) the REAL loop — owner records a genuine bug on a real app, Claude Code pulls + fixes over MCP, sign-off on screen (~1–2h of owner time; Claude preps the target app, the bug, and the beat sheet); (b) the polished ~60s Remotion cut for homepage/PH | (a) owner + Claude prep · (b) Claude | open |
+| 1 | **OG image + `twitter:*` meta + canonical + sitemap** | Claude | **DONE 2026-08-23** — og.png (`bun run make:og`), full twitter/og meta, per-route canonical, sitemap.xml, robots hardening |
+| 2 | **Error tracking + post-deploy smoke check** (gate 4) | Claude | **DONE 2026-08-23** — server/alerts.ts (email alerts, dedup+caps) + client beacon + .github/workflows/smoke.yml (post-deploy + 30-min cron). Alerts email ADMIN_EMAILS; a red smoke run emails via GitHub |
+| 3 | **Homepage top-10 fixes** | Claude | **DONE 2026-08-23** — hero outcome rewrite, Claude Code named above the fold, loop strip 01–04, proof line pulled up, alpha line, nav anchors + Docs, /app onboarding sequence, README reconciled. Still open: demo video above the fold (waits on item 6b), named social proof (waits on real users) |
+| 4 | **/docs — "how it works with Claude Code"** | Claude | **DONE 2026-08-23** — /docs live: loop, hosted mcp add quickstart, six tools, teams, FAQ |
+| 5 | **MCP directory pack**: official registry, mcp.so, PulseMCP, Glama, Smithery, awesome-mcp-servers | Claude drafts, owner submits | drafted → `plans/2026-08-23-mcp-directory-pack.md`; **owner submits** |
+| 6 | **The demo video, twice**: (a) the REAL loop (owner narrates, ~1–2h; beat sheet ready in `plans/2026-08-23-demo-video.md`); (b) polished ~60s Remotion cut from (a)'s footage | (a) owner · (b) Claude | beat sheet + X drafts DONE; recording day = owner's call |
 | 7 | Rotate pasted keys + R2 token cleanup (gate 6) | owner | open |
+
+**Deploy note:** all of the above ships on the next push to `main` (Drydock auto-deploys). After
+it rolls: sanity-check https://handback.dev/og.png, paste handback.dev into an X draft to see the
+card, and confirm the `smoke` workflow went green in Actions.
 
 ## Phase 1 — soft launch (weeks 1–2): X + directories
 

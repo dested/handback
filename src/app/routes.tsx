@@ -16,6 +16,7 @@ import { AdminUsagePage } from './admin/usage'
 import { AdminCostsPage } from './admin/costs'
 import { InboxPage } from './app'
 import { ConnectPage } from './connect'
+import { DocsPage } from './docs'
 import { RouteErrorBoundary } from './error-boundary'
 import { WalkthroughPage } from './walkthrough'
 import { HomePage } from './home'
@@ -124,6 +125,7 @@ export const routes: RouteObject[] = [
       { path: 'reset-password', Component: ResetPasswordPage },
       { path: 'privacy', Component: PrivacyPage },
       { path: 'terms', Component: TermsPage },
+      { path: 'docs', Component: DocsPage },
       // Public watch page for a shared walkthrough — the token IS the
       // credential, so no loader guard; walkthroughs.shared resolves or 404s.
       { path: 'w/:shareToken', Component: WatchPage },

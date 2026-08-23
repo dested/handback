@@ -4,6 +4,7 @@ import express from 'express'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { clientErrorRouter, installProcessAlerts, reportError } from './server/alerts'
 import { auth } from './server/auth'
 import { startDigestSweep } from './server/digest'
 import { env } from './server/env'
@@ -29,6 +30,9 @@ const resolve = (p: string) => path.resolve(__dirname, p)
 const LOOKS_LIKE_FILE = /\.[a-zA-Z0-9]+$/
 
 async function createServer() {
+  // First thing: route uncaught exceptions / rejections into an alert email.
+  installProcessAlerts()
+
   const app = express()
   app.disable('x-powered-by')
 
@@ -75,6 +79,9 @@ async function createServer() {
   // Token-authed upload surface for the CLI / extension / MCP. Parses its own
   // JSON bodies; keep it after the auth mount, which needs the raw stream.
   app.use('/api/ingest', ingestRouter)
+
+  // Uncaught browser errors POST here so a broken client build alerts the owner.
+  app.use('/api/client-error', clientErrorRouter)
 
   // The recorder's zip, for as long as there is no Web Store listing. Signed-in
   // only: the build is not secret, but an unauthenticated URL is a public
@@ -166,6 +173,9 @@ async function createServer() {
         if (error.code === 'INTERNAL_SERVER_ERROR' && error.stack) {
           console.error(error.stack)
         }
+        if (error.code === 'INTERNAL_SERVER_ERROR') {
+          reportError('trpc', `${trpcPath ?? '<unknown>'}: ${error.message}`, error.stack)
+        }
       },
     })
   )
@@ -230,9 +240,18 @@ async function createServer() {
       const { html: appHtml, status, dehydratedState } = await render(req)
 
       const stateScript = `<script>window.__SSR_STATE__ = ${jsonForScript({ dehydratedState })}</script>`
+      // Per-route canonical for crawlers. Only clean paths get one — a path
+      // with encoded or odd characters shouldn't be declared canonical at all.
+      const canonical = /^[\w\-/]*$/.test(req.path)
+        ? `https://handback.dev${req.path === '/' ? '/' : req.path.replace(/\/+$/, '')}`
+        : null
       const html = template
         .replace('<!--app-state-->', stateScript)
         .replace('<!--app-html-->', appHtml)
+        .replace(
+          '</head>',
+          canonical ? `<link rel="canonical" href="${canonical}" /></head>` : '</head>'
+        )
 
       res.status(status).set({ 'Content-Type': 'text/html' }).end(html)
     } catch (e: unknown) {
@@ -249,6 +268,7 @@ async function createServer() {
       if (!isProd && vite) vite.ssrFixStacktrace(e as Error)
       log.error(`SSR render failed for ${req.method} ${req.originalUrl}`)
       console.error(formatError(e))
+      reportError('ssr', `${req.method} ${req.originalUrl}`, formatError(e))
       res
         .status(500)
         .type('txt')

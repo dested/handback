@@ -5,6 +5,7 @@
   "sideEffects": false,
   "scripts": {
     "init": "bun scripts/init.ts",
+    "make:og": "node scripts/make-og.mjs",
     "dev": "portless run bun --watch server.ts",
     "build": "bun run clean && bun run build:client && bun run build:server",
     "build:client": "vite build --outDir dist/client",

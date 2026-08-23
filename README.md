@@ -1,6 +1,6 @@
 # Handback
 
-**Your agents ship. You stay in the loop.**
+**Record a bug in your own words. Your agent fixes it. You sign off.**
 
 Handback is the cloud workspace for _walkthroughs_ — ninety-second narrated walkthroughs of something broken. You hit record in the browser extension, talk through the bug in the app where it happens, and the recorder captures the whole thing: screen video, keyframes, a transcript of what you said, the DOM events you triggered, and the console errors that fired while you were speaking. It bundles that into a folder with a `report.md` written for a coding agent rather than a human bug tracker.
 
@@ -37,24 +37,36 @@ Both flags fall back to `HANDBACK_SERVER` and `HANDBACK_TOKEN`, so in practice y
 
 ## Connecting your agent
 
-`cli/mcp.ts` is a stdio MCP server that exposes the workspace to a coding agent. Register it once with an absolute path:
+The hosted MCP server at `https://handback.dev/mcp` is the way in — nothing to clone, nothing to install. Add it once:
+
+```bash
+claude mcp add --transport http handback https://handback.dev/mcp \
+  --header "Authorization: Bearer hb_…"
+```
+
+The token comes from [https://handback.dev/connect](https://handback.dev/connect): one button mints an auto-named token and renders that exact command with the token filled in, Copy in place — nothing gets installed. The endpoint speaks StreamableHTTP and is stateless (a fresh server per request), so any MCP client that can carry a bearer header works.
+
+For local development against a server you're running yourself, `cli/mcp.ts` is the same tools over stdio. Register it with an absolute path:
 
 ```bash
 claude mcp add handback \
   --env HANDBACK_TOKEN=hb_… \
-  --env HANDBACK_SERVER=https://handback.dev \
+  --env HANDBACK_SERVER=https://handback.localhost \
   -- bun /abs/path/to/cli/mcp.ts
 ```
 
-`HANDBACK_SERVER` defaults to `https://handback.dev`; `HANDBACK_TOKEN` is required. Three tools:
+`HANDBACK_SERVER` defaults to `https://handback.dev`; `HANDBACK_TOKEN` is required. Either way, the same six tools:
 
-| tool                     | what it does                                                                                                                      |
+| tool                     | what it does                                                                                                                       |
 | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
-| `list_walkthroughs`      | The team's walkthroughs, newest first. Optional `status` filter.                                                                  |
-| `get_walkthrough`        | One walkthrough's full brief: metadata, the `report.md` authored for agents, and presigned URLs for video, keyframes, transcript. |
-| `set_walkthrough_status` | Move a walkthrough through review — `in_review` when a fix is up, `resolved` after human sign-off.                                |
+| `list_walkthroughs`      | Walkthroughs across your personal space and every team your token reaches, newest first; each carries its `space`. Optional `status` filter. |
+| `get_walkthrough`        | One walkthrough's full brief: metadata, the `report.md` authored for agents, and presigned URLs for every file (video, keyframes, transcript). |
+| `set_walkthrough_status` | Move a walkthrough through review — `in_review` when a fix is up, `resolved` after human sign-off.                                 |
+| `post_result`            | Post what you did for the reviewer to sign off on — a summary plus optional PR url, files touched, and a longer markdown body; also flips an open walkthrough to `in_review`. |
+| `ask_reviewer`           | Ask the human a clarifying question instead of guessing; the walkthrough moves to `needs_info`, the reviewer is emailed, and their answer lands in the review thread. |
+| `attach_evidence`        | Get presigned PUT urls for up to 4 proof screenshots (before/after, the fixed screen); upload each, then pass the returned paths as `post_result`'s `evidence`. |
 
-The token pins the org, so an agent only ever sees its own team's walkthroughs. File URLs are short-lived presigned GETs; the bucket blocks all public access.
+The token pins the caller, so an agent sees its owner's personal space and every team they belong to (a platform-admin token spans everything). File URLs are short-lived presigned GETs; the bucket blocks all public access.
 
 ## Architecture
 

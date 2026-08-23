@@ -146,6 +146,11 @@ server/
                         failure degrades to null like polish. childBriefMd() writes a child's
                         brief_md (steps, done-when, "Source: get_walkthrough(parent)")
   email.ts              Resend sender + reset/verify/invite templates; never throws
+  alerts.ts             self-hosted error alerting: reportError (dedup 1/sig/hr, 20/day cap →
+                        ADMIN_EMAILS via Resend), installProcessAlerts (uncaught/unhandled, no
+                        exit), clientErrorRouter (POST /api/client-error). Never throws, never
+                        alerts on itself. Smoke probe lives in .github/workflows/smoke.yml (OURS,
+                        not Drydock's — post-deploy + 30-min cron, red run = GitHub emails Sal)
   ratelimit.ts          in-memory fixed-window limiter (one ECS task, so one process sees all)
   prisma.ts / logger.ts PrismaClient singleton · ANSI request logger
 cli/
@@ -219,6 +224,7 @@ src/
                         retention as the storage lever, tier-margin table — pricing constants
                         live at the top of the file), shared.tsx. user.tsx also carries
                         delete account
+    docs.tsx            /docs — how it works with Claude Code (legal.tsx chrome; facts only)
     forgot-password.tsx /forgot-password — same answer whether or not the account exists
     reset-password.tsx  /reset-password?token=… — the link better-auth emails
     privacy.tsx         /privacy — what's collected, where it lives, subprocessors
@@ -330,7 +336,10 @@ src/
   styles/app.css        ALL design tokens (light only) + .rule/.stamp/.ink-underline utilities
 public/                 manifest.webmanifest (PWA: standalone, share_target, shortcut) · sw.js
                         (share-POST stash ONLY — caches nothing, keep it that way) · icons/
-                        (return-mark PWA icons, regenerate via `node cli/make-pwa-icons.mjs`)
+                        (return-mark PWA icons, regenerate via `node cli/make-pwa-icons.mjs`) ·
+                        og.png (the social card, 2400×1260 — regenerate via `bun run make:og`
+                        (scripts/make-og.mjs, Playwright); og:image:width/height in index.html
+                        must match dsf×viewport) · sitemap.xml · robots.txt (Sitemap: line)
 e2e/                    smoke.spec.ts + committed screenshots (landing, sign-up, app flow)
 index.html              SSR template; Google Fonts (Fraunces/Libre Franklin/IBM Plex Mono);
                         manifest + apple-touch-icon links
@@ -368,6 +377,8 @@ extension/              Handback Recorder — the Chrome MV3 extension (own npm 
 | `/join/:inviteId` | Invite accept | `src/app/join.tsx` |
 | `/forgot-password` · `/reset-password` | Password recovery (better-auth emails the link) | `src/app/{forgot,reset}-password.tsx` |
 | `/privacy` · `/terms` | Legal pages (linked from the marketing footer) | `src/app/{privacy,terms}.tsx` |
+| `/docs` | **How Handback works** — the loop, the hosted `claude mcp add` line, all six MCP tools, teams, FAQ. Public, legal-page chrome, linked from marketing nav + footer | `src/app/docs.tsx` |
+| `POST /api/client-error` | Browser error beacon (prod only) → alert email pipeline; per-IP rate-limited | `server/alerts.ts` |
 | `/app` | **Walkthroughs** — ALL spaces as a card GRID (not a list), light filter toolbar (search · status segments w/ mono counts · Space/Project popover selects, shown only when >1 space / any projects) over one `walkthroughs.inbox` query, client-side filtered. Cards carry a keyframe thumbnail (agent kind) or a paper title-card; rename lives in a per-card ⋯ menu via `walkthroughs.rename` | `src/app/app.tsx` + `src/components/inbox/card.tsx` |
 | `/upload` | Desktop intake: drop a clip → **for an agent** (distill) or **for a person** (ships whole, `kind: 'human'`, edit in the viewer) → upload (reuses capture lib + phone components) | `src/app/upload.tsx` |
 | `/walkthroughs/:walkthroughId` | The viewer (`/gripes/:id` 302s here) | `src/app/walkthrough.tsx` |
@@ -1095,6 +1106,17 @@ reaches the container on a plain push.
   SplitChildren + ⋯ "Split into tasks…"; and **voice-only capture** — /record's third kind
   "just talk" (mic-only, in-memory, rides the phone distill pipeline; VOICE_RECORD_ROWS).
   Typecheck + build green; same schema-push caveat as Waves 1–2, no live run.
+- **Done (2026-08-23) — the marketing-foundation wave** (`plans/2026-08-12-marketing-plan.md`
+  refreshed; built fable-opus, 5 Opus agents + Fable glue): **og.png + full social meta**
+  (twitter:card, og:image, per-route canonical injected in server.ts, sitemap.xml, robots.txt
+  hardening, `bun run make:og`), **hero rewritten to the outcome** ("Record a bug. Your coding
+  agent fixes it. You sign off.") + Claude-Code line + 01–04 loop strip + proof line + marketing
+  nav anchors (How it works · Pricing · Docs), **/docs** (the Claude Code quickstart + all six
+  MCP tools, legal chrome), **error alerting** (server/alerts.ts + client beacon; email via
+  Resend, dedup + caps) + **smoke.yml** (post-deploy + 30-min cron probes of
+  healthz//,/mcp), /app empty state now sequences record → connect → invite, README reconciled
+  to the hosted MCP command, MCP directory pack + demo beat sheet + X drafts in plans/.
+  Verified live on :3995 (canonical, /docs render, loop strip, 390px scrollWidth clean).
 - **Next** — **deploy, then re-test the loop**: `/mcp` and `/connect` only exist locally until the
   next push to `main`, so the command `/connect` prints for handback.dev 404s until then. Sal's
   Drydock/DNS checklist in the rename plan (zone, project, S3 via

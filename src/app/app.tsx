@@ -541,6 +541,24 @@ function FirstWalkthroughGuide() {
           Drop it in and we'll distil it into a walkthrough.
         </p>
       </div>
+      {/* The two steps after capture, so the empty state reads as a sequence
+          (record → connect → invite), not a dead end. */}
+      <div className="border-border mt-7 space-y-3 border-t pt-6 text-sm leading-relaxed">
+        <p>
+          Then{' '}
+          <Link to="/connect" className="text-primary underline underline-offset-4">
+            connect your agent
+          </Link>{' '}
+          — one pasted command, and it can pull whatever you record.
+        </p>
+        <p>
+          Working with others?{' '}
+          <Link to="/team" className="text-primary underline underline-offset-4">
+            Invite a reviewer
+          </Link>{' '}
+          — every walkthrough in a team space reaches the whole team.
+        </p>
+      </div>
     </div>
   )
 }

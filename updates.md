@@ -2,6 +2,30 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-08-23 — Marketing foundation wave ("just cook, go hard", fable-opus)
+Asked: execute the refreshed marketing plan's Phase 0 in parallel with the mega-wave.
+Done: og.png + full social/twitter meta + per-route canonical + sitemap/robots (`bun run
+make:og`); hero rewritten to the outcome + Claude Code line + 01–04 loop strip + proof line;
+marketing nav (How it works/Pricing/Docs) + footer Docs; /docs (Claude Code quickstart, six MCP
+tools, legal chrome); self-hosted error alerting (alerts.ts + client beacon → ADMIN_EMAILS) +
+smoke.yml (post-deploy + 30-min cron); /app empty state sequences record→connect→invite; README
+reconciled to hosted MCP; MCP directory pack + demo beat sheet + X drafts in plans/. Verified
+live: canonical, /docs render, loop strip, og.png visual. Typecheck+build green.
+Touched: index.html, public/{og.png,sitemap.xml,robots.txt}, scripts/make-og.mjs, hero.tsx,
+agent-view.tsx, layout.tsx, docs.tsx, routes.tsx, app.tsx, server.ts, server/{alerts,email}.ts,
+src/lib/client-errors.ts, src/index.tsx, .github/workflows/smoke.yml, README.md, plans/*, cliffnotes.md
+
+## 2026-08-23 — /docs — "How Handback works with Claude Code"
+Asked: build the public /docs page launch commenters read before signing up — the loop, MCP setup,
+the tool list, teams, privacy/retention/pricing.
+Done: new src/app/docs.tsx (DocsPage) reusing the LegalPage/Section/Terms/Notice chrome from
+legal.tsx — five sections (loop, connect, tools, teams, faq) with anchor ids, the real single-line
+`claude mcp add` command in a mono block, all six MCP tools verified against server/mcp.ts
+(list_walkthroughs, get_walkthrough, set_walkthrough_status, post_result, ask_reviewer,
+attach_evidence — note mcp.ts's header comment still says "four tools", stale). Route added.
+typecheck + build green.
+Touched: src/app/docs.tsx (new), src/app/routes.tsx
+
 ## 2026-08-23 — Marketing plan refreshed against reality
 Asked: "let's start marketing this" — build the plan, find existing docs, ask questions.
 Done: audited plans/2026-08-12-marketing-plan.md against the 11 days since (store is PUBLIC,

@@ -213,6 +213,17 @@ function MarketingHeader({ signedIn }: { signedIn: boolean }) {
         <Link to="/" aria-label="Handback home">
           <Wordmark />
         </Link>
+        <div className="hidden items-center gap-6 text-sm md:flex">
+          <Link to="/#how" className="text-muted-foreground hover:text-foreground">
+            How it works
+          </Link>
+          <Link to="/#pricing" className="text-muted-foreground hover:text-foreground">
+            Pricing
+          </Link>
+          <Link to="/docs" className="text-muted-foreground hover:text-foreground">
+            Docs
+          </Link>
+        </div>
         <div className="ml-auto flex items-center gap-5 text-sm">
           {signedIn ? (
             <Link
@@ -248,6 +259,9 @@ function MarketingFooter() {
       <div className="text-muted-foreground mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-6 py-8 text-sm">
         <Wordmark className="text-foreground" />
         <span>Every fix, handed back.</span>
+        <Link className="hover:text-foreground" to="/docs">
+          Docs
+        </Link>
         <Link className="hover:text-foreground" to="/privacy">
           Privacy
         </Link>

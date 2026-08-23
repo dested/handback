@@ -5,6 +5,7 @@ import { RouterProvider, createBrowserRouter } from 'react-router-dom'
 import App from './App'
 import { routes } from './app/routes'
 import { registerPwa } from './lib/pwa'
+import { installClientErrorReporter } from './lib/client-errors'
 import type { AppRouter } from '../server/router'
 
 declare global {
@@ -40,3 +41,4 @@ ReactDOM.hydrateRoot(
 )
 
 registerPwa()
+installClientErrorReporter()

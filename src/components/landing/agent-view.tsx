@@ -22,7 +22,7 @@ const TOOLS = [
 
 export function AgentView() {
   return (
-    <Section className="bg-card rule border-b py-20 md:py-28">
+    <Section id="agent" className="bg-card rule border-b py-20 md:py-28">
       <SectionLabel>The handoff</SectionLabel>
       <SectionHeading>What your agent actually gets.</SectionHeading>
       <p className="text-muted-foreground mt-6 max-w-2xl text-lg leading-relaxed">

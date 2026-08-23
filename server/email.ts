@@ -283,6 +283,25 @@ export function digestEmail(opts: {
   }
 }
 
+export function alertEmail(opts: {
+  source: string
+  message: string
+  detail?: string
+  count: number
+}): Omit<Message, 'to'> {
+  const { source, message, detail, count } = opts
+  const when = new Date().toISOString()
+  const lines = [message]
+  if (detail) lines.push('', detail)
+  lines.push('', `occurrences since last alert: ${count}`, when)
+  const text = lines.join('\n')
+  return {
+    subject: `[handback alert] ${source}: ${message.slice(0, 80)}`,
+    text,
+    html: `<pre style="margin:0;padding:16px;background:${PAPER};color:${INK};font-family:'SF Mono',Menlo,monospace;font-size:13px;line-height:1.5;white-space:pre-wrap;word-break:break-word">${esc(text)}</pre>`,
+  }
+}
+
 export function inviteEmail(opts: {
   team: string
   inviter: string
