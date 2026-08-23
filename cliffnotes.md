@@ -1,8 +1,16 @@
 # Handback — CliffNotes
 
 > Living map of the project. Read this before any coding session.
-> Last updated: 2026-08-13. Visual language → `ui.md` · why → `decisions.md` ·
+> Last updated: 2026-08-23. Visual language → `ui.md` · why → `decisions.md` ·
 > log → `updates.md`.
+>
+> **2026-08-23 mega-wave** (plans/2026-08-23-fable5-mega-wave.md): sidebar app
+> shell · `Walkthrough.intent` (bug|feature|idea, null default) · the **Refine
+> pass** (`server/refine.ts`) · the **walkthrough assistant** (`server/agent.ts`,
+> chat with real mutation tools) · **needs_info** status + `ask_reviewer` ·
+> evidence screenshots on `post_result` · notify-on-result/question/health ·
+> watch-page comments · /usage · /upgrade (pro is admin-granted) · extension
+> 1.9.0 intent chips (**publish pending — Sal**, zip step is Windows-only).
 >
 > **Naming:** the product noun is **walkthrough** (renamed from "gripe" 2026-08-01, owner's
 > directive on record). Older log entries below say "gripe" historically — same object. The word
@@ -115,8 +123,25 @@ server/
                         unmetered), checkAndReserveTranscribe/Polish (atomic upsert+increment),
                         cloudStatus for GET /context. Admins fully unmetered
   router.ts             THE tRPC API: teams (incl. get/transferOwnership), invites (seat-capped),
-                        tokens (user-scoped, no team input), projects, walkthroughs — space inputs
-                        are `teamId: string | null` (null = the caller's personal space)
+                        tokens (user-scoped, no team input), projects (incl. `instructions`),
+                        walkthroughs (incl. setIntent, answerQuestion/routeQuestion, refine, chat/
+                        chatHistory, sharedAddComment), usage.mine — space inputs are
+                        `teamId: string | null` (null = the caller's personal space). Pro gates
+                        throw FORBIDDEN with the LITERAL message 'Pro feature' (client contract)
+  refine.ts             THE Refine pass (pro-gated, fire-and-forget from finalize + manual
+                        walkthroughs.refine): deterministic capture-health checks → Haiku vision
+                        frame curation w/ captions (batches of 12, ≤84 sampled, ≤20 keepers) →
+                        Opus 5 synthesis (summaryMd ledger + refinedBriefMd + title when
+                        recorder-default-ish). NEVER throws; refineStatus running|done|failed;
+                        payer = uploader on auto-run, the CALLER on manual ({byUserId});
+                        meters one polish call. Original report.md in S3 is never rewritten
+  agent.ts              THE walkthrough assistant (walkthroughs.chat): Opus 5 tool loop (≤12
+                        iterations) over read_walkthrough / update_title / update_summary /
+                        update_brief / edit_transcript_lines (text only, timings frozen) /
+                        remove_span (strikes lines + deletes frames + records an excluded-span
+                        MARKER — video is never re-encoded) / set_curated_frames. Every mutation
+                        logged to walkthrough_revision; thread persisted in walkthrough_chat;
+                        never throws into the router
   ingest.ts             Token-authed REST (Bearer hb_…): two-phase upload, size caps + per-org
                         quota, /transcribe and /polish; read side delegates to walkthroughs-api.
                         Every route registered under /walkthroughs* AND legacy /gripes* aliases
@@ -390,6 +415,8 @@ extension/              Handback Recorder — the Chrome MV3 extension (own npm 
 | `/phone` | Phone guide + share-target intake — OS-recorded clips distilled in-browser and uploaded. Manual intake carries the agent/person kind choice; a share always ships 'agent' (decisions.md 2026-08-18) | `src/app/phone.tsx` |
 | `POST /share-target` | PWA share sheet target — SW intercepts + stashes; Express fallback 303s to /phone | `public/sw.js` · `server.ts` |
 | `/admin` (+ `/users[/:id]`, `/teams[/:id]`, `/walkthroughs`, `/usage`, `/costs`) | Platform-admin console — sidebar shell, overview stats, users + drill-down, teams + seat editor, platform feed, per-space usage, cost estimator (live anchors from `admin.costStats` + client-side scenario sliders → per-user cost + tier margins) | `src/app/admin/*` |
+| `/usage` | The account's own meters: storage per space vs 20 GB/500, cloud budgets, tokens n/10, expiring ≤7d — `usage.mine` | `src/app/usage.tsx` |
+| `/upgrade` | Pro pitch: refine · assistant · polish · budgets; invite-only during alpha (mailto sal@dested.com); pro accounts see the stamp | `src/app/upgrade.tsx` |
 | `/dashboard` | redirect → /app (legacy) | `routes.tsx` |
 | `/healthz` | DB probe | `server.ts` |
 | `/api/auth/*` · `/api/trpc/*` | better-auth · tRPC | `server.ts` |
@@ -408,7 +435,9 @@ extension/              Handback Recorder — the Chrome MV3 extension (own npm 
 | `GET /walkthroughs` | List for agents (MCP `list_walkthroughs`): everything the token reaches, `?team=personal\|<id>` filters. Platform-wide when the owner is a platform admin |
 | `GET /walkthroughs/:id` | Detail + `reportMd` text + presigned GET for every file (MCP `get_walkthrough`) |
 | `POST /walkthroughs/:id/status` | open / in_review / resolved (MCP `set_walkthrough_status`) |
-| `POST /walkthroughs/:id/result` | The agent's answer (MCP `post_result`): summary + optional prUrl/filesTouched/body → review-thread note; auto-flips open → in_review. No `/gripes` alias (nothing old posts it) |
+| `POST /walkthroughs/:id/result` | The agent's answer (MCP `post_result`): summary + optional prUrl/filesTouched/body **+ evidence[] (paths from /evidence — flips those rows uploaded, lands on the note)** → review-thread note; auto-flips open → in_review. No `/gripes` alias (nothing old posts it) |
+| `POST /walkthroughs/:id/question` | MCP `ask_reviewer`: agent asks instead of guessing → WalkthroughNote kind 'question', status → needs_info, uploader emailed. No `/gripes` alias |
+| `POST /walkthroughs/:id/evidence` | MCP `attach_evidence`: ≤4 proof screenshots (png/jpeg/webp ≤5 MB) → pending rows + presigned PUTs at `evidence/<ts>-<name>`; cite the paths in post_result |
 
 All five walkthrough routes also answer under the legacy `/gripes*` spellings — same handlers,
 same rate-limit keys — because shipped recorders ≤1.2.x still post them. Don't remove the aliases
@@ -442,7 +471,19 @@ sha256 hash only; `hb_` prefix; lastUsedAt stamped on ingest auth) · **Walkthro
 User.notifyUploads / notifyDigest (email mutes) + digestSentAt · Walkthrough.searchText (the
 FTS corpus, filled at finalize) · **Walkthrough.parentId / briefMd** (a split-out task: a
 metadata-only child row — no files, takes, or bytes; `briefMd` IS its report; self-relation
-"split" with `onDelete: SetNull` so children outlive a deleted parent as standalone tasks).
+"split" with `onDelete: SetNull` so children outlive a deleted parent as standalone tasks) ·
+**Walkthrough.intent** ('bug'|'feature'|'idea'|null — null presumes nothing; drives the brief's
+framing) · **the Refine columns** (`summaryMd` ledger, `refinedBriefMd` — the brief serves
+`briefMd ?? refinedBriefMd ?? S3 report.md` — `healthJson` [{severity,text,atMs}],
+`curationJson` {frames:[{path,caption,atMs}], excluded:[{startMs,endMs,reason}]},
+`refineStatus` running|done|failed, `refinedAt`) · **WalkthroughNote.kind**
+('result'|'question'|'answer'; default 'result' — a reviewer 'result' is a send-back) +
+**WalkthroughNote.evidencePaths** · **WalkthroughChat** (the assistant thread; userId is a
+plain column, no FK) · **WalkthroughRevision** (append-only mutation log of every assistant
+edit) · **Project.instructions** (standing agent context, prepended to every brief from that
+project) · **User.notifyResults** (+ unsubscribe kind 'results'). Statuses are now
+open | in_review | **needs_info** | resolved (needs_info = agent asked, answer flips back
+to open; expiry cleared like open).
 
 ## Storage (Cloudflare R2 since 2026-08-13; S3 before that)
 
@@ -972,6 +1013,40 @@ reaches the container on a plain push.
   (`hasVideo: false` skips frame extraction and the webm-duration hack); the audio-only path
   already existed for /phone voice notes. Don't add persistence and don't fork the pipeline.
 
+## Gotchas & hard rules (continued — 2026-08-23 mega-wave)
+
+- **'Pro feature' is a wire contract.** Every pro-gated procedure throws FORBIDDEN with that
+  LITERAL message; `src/lib/pro.ts` `isProError` string-matches it and the UI swaps the error
+  for `ProUpsell` → /upgrade. Change the string anywhere and every upsell becomes a raw error.
+- **Refine and the assistant never mutate the ground truth.** report.md in S3 is immutable;
+  refine writes columns, the assistant edits recording.json transcript TEXT only (timings
+  frozen — the polish contract), and `remove_span` deletes keyframes + records a marker but
+  NEVER re-encodes video (owner: "fuck ffmpeg"). The brief's removed-spans section tells
+  agents to ignore video inside those windows — that's the whole mechanism.
+- **runRefine's payer is the uploader on auto-run, the caller on manual.** `{byUserId}` exists
+  so a pro teammate can refine a non-pro teammate's upload; both paths meter one polish call
+  and bail silently when not pro / not configured / already running. It never throws — a
+  failure is `refineStatus 'failed'` and a log line.
+- **The assistant is authorized by the router, trusted by agent.ts.** walkthroughs.chat does
+  requireSpaceAccess + pro gate + polish metering; server/agent.ts assumes clean ids. Don't
+  call runWalkthroughChat from anywhere that hasn't done that dance.
+- **needs_info ripples through z.enums via WALKTHROUGH_STATUSES.** router.ts imports the
+  tuple; don't reintroduce an inline `z.enum(['open','in_review','resolved'])` or the new
+  status 400s at that surface. Status color: grey/muted — ui.md, never a new hue.
+- **Evidence paths are the third path allowlist.** `evidence/<ts>-<name>` via
+  requestEvidenceUploads only (name /^[a-z0-9._-]{1,80}$/i, image types, ≤5 MB, ≤4);
+  post_result flips only paths starting `evidence/`. Like EDIT_PATHS, never widen casually —
+  these strings become S3 keys.
+- **The app sidebar and the admin sidebar never nest.** layout.tsx renders AppShell for every
+  signed-in APP_PREFIXES path except /admin, which keeps its own shell; both share
+  `ui/sidebar` with different `storageKey`s ('handback.appSidebar' / 'handback.adminSidebar').
+- **Intent is web + extension, not the CLI.** cli/push.ts sends no intent (null = untagged is
+  correct); the extension (1.9.0) and the three web intakes send it. The video-to-prompt
+  library mirror does NOT carry the field yet — flagged, not forgotten.
+- **The e2e landing spec tracks committed reality.** The marketing wave's in-flight hero
+  rewrite breaks `landing page renders` until that session commits + re-baselines; the app
+  flow asserts the h1 'Walkthroughs' (was 'Inbox' — stale since 2026-08-12).
+
 ## Status
 
 - **Done (2026-07-29, day one)** — schema + S3 + two-phase ingest + push CLI (verified with a real
@@ -1117,6 +1192,18 @@ reaches the container on a plain push.
   healthz//,/mcp), /app empty state now sequences record → connect → invite, README reconciled
   to the hosted MCP command, MCP directory pack + demo beat sheet + X drafts in plans/.
   Verified live on :3995 (canonical, /docs render, loop strip, 390px scrollWidth clean).
+- **Done (2026-08-23)** — **the fable5 mega-wave** (`plans/2026-08-23-fable5-mega-wave.md`,
+  fable-opus, 11 Opus agents, 4 waves, commits 2fe46ef·5666608·64c107b·8bde623): sidebar app
+  shell (top tabs deleted), /usage + /upgrade (+ pro-gate contract), `Walkthrough.intent`
+  through web + extension 1.9.0 + declare, per-project agent instructions, the Refine pass
+  (vision curation + ledger + intent-aware brief + capture-health + auto-title), the
+  walkthrough assistant (Opus 5 chat, real mutation tools, revision log), needs_info +
+  ask_reviewer + inline/voice/routed answers, attach_evidence + evidence on post_result,
+  notify on result/question/health ('results' unsubscribe kind), watch-page comments,
+  /upload stay-put notice, stdio MCP mirror. **Live-verified end to end** on a synthetic
+  walkthrough (push → refine → MCP brief → question → answer → evidence → result; bx browser
+  passes on shell/usage/upgrade/viewer). Outstanding: extension publish (Sal, Windows zip),
+  prod deploy on next push, video-to-prompt intent mirror.
 - **Next** — **deploy, then re-test the loop**: `/mcp` and `/connect` only exist locally until the
   next push to `main`, so the command `/connect` prints for handback.dev 404s until then. Sal's
   Drydock/DNS checklist in the rename plan (zone, project, S3 via
@@ -1155,3 +1242,6 @@ reaches the container on a plain push.
 - `plans/2026-08-13-loop-and-team-wave.md` — **done** (code; live run pending). The picked
   backlog in three waves: the return path + doorbell (W1), comments/search/digest (W2), the
   split structuring pass + voice capture (W3).
+- `plans/2026-08-23-fable5-mega-wave.md` — **done**. The 4-wave fable-opus build: every
+  decision, contract and wave assignment for refine / the assistant / intent / needs_info /
+  evidence / sidebar / usage / upgrade. Live-verified; see the Status entry.

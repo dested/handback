@@ -1,7 +1,7 @@
 # Handback — UI
 
 > Visual-language source of truth. Follow exactly; deviations are bugs.
-> Last updated: 2026-08-14.
+> Last updated: 2026-08-23.
 
 ## The one law
 
@@ -32,8 +32,10 @@ and reports are the loud part.
 | `--destructive` | red | delete/danger only |
 | `--radius` | 0.375rem | tight, print-like corners |
 
-Status mapping is fixed: **open = cobalt, in_review = violet, resolved = green.**
-Never invent a fourth status color.
+Status mapping is fixed: **open = cobalt, in_review = violet, resolved = green,
+needs_info = grey (muted ink — `bg-muted-foreground` dot, muted word).** needs_info
+(2026-08-23) deliberately takes NO new hue: "waiting on you" is quiet, not an alarm.
+Never invent a fifth status color.
 
 ## Type
 
@@ -76,12 +78,26 @@ Loaded via Google Fonts in `index.html`. Do not add other font families.
 shadcn primitives live in `src/components/ui/` (button, card, input, label,
 sidebar — add more there as needed, new-york style, no `asChild`). The sidebar
 is shadcn's re-cut without radix: paper ground, hairline right rule, mono
-uppercase group labels, cobalt-wash active item; used by the /admin console
-(collapse persists, mobile is an overlay). No new sidebar variants — reuse it. Buttons: `default`
-variant is cobalt; use `outline` for secondary actions; destructive only for
-deletes. Page shells and nav come from `src/app/layout.tsx` — marketing chrome
-on public pages, app chrome (org switcher, Inbox/Projects/Team nav) when signed
-in.
+uppercase group labels, cobalt-wash active item; collapse persists (`storageKey`
+prop), mobile is an overlay. **It is THE app chrome since 2026-08-23** — the top
+tab nav is deleted. `layout.tsx`'s AppShell renders it on every signed-in page
+except /admin (which keeps its own sidebar shell; the two never nest): groups
+Review (Walkthroughs · Projects · Usage), Capture (Record · Upload · Phone ·
+Extension), Team (Teams · Connect); the footer carries Upgrade (non-pro only),
+Admin (admins), the account email + Sign out. No new sidebar variants — reuse
+it. Buttons: `default` variant is cobalt; `outline` for secondary actions;
+destructive only for deletes. Marketing chrome on public pages is unchanged.
+Pro-gated surfaces refuse with the exact string `Pro feature`; clients render
+`ProUpsell` (`src/components/pro-upsell.tsx`) linking /upgrade — never a raw
+error. The viewer's new panels: **RefinePanel** (summary ledger, health notes
+as 2px-left-tick mono lines — warn red, info grey — removed-span lines, and a
+quiet right-aligned run/re-run control) sits under the review thread;
+**AssistantPanel** (the chat: mono-headed turns, action chips as mono `·` lines,
+one input + cobalt Send) sits at the page's foot. An agent's question renders as
+a left-ruled card ("agent asked"), the inline answer form under it; evidence
+screenshots are h-20 bordered thumbnails. /upload's working screen carries a
+violet-left-ruled "stay on this page" notice — the beforeunload guard can't
+catch sidebar navigation, the sentence has to.
 
 ## Extension (`extension/`)
 
@@ -146,6 +162,12 @@ properties in `extension/src/sidepanel/styles.css` (no Tailwind there).
   `video isn't on this machine` — never a broken player. At the foot of the list, a
   full-width cobalt-*outline* ghost button (`● record another part`) is the only
   add/record control on the screen; empty, the list is one muted line.
+- **Intent chips** (1.9.0): one row directly above the destination row — muted
+  lowercase `this is` + three mono pill chips `bug / feature / idea`, hairline
+  off, cobalt border + cobalt-wash on. Clicking the active chip clears it.
+  Hidden on the empty review screen. The web intake pages share the same
+  three-chip control as `IntentControl` (`src/components/phone/intent.tsx`),
+  shown only for agent-kind sends.
 - **On-page dock** (`content/ui.ts`): white pill, hairline border, mono keycaps
   for its three keys — **draw `d`**, **clear `c`**, **stop `s`**; ink strokes
   draw in cobalt. Never dark, never orange.

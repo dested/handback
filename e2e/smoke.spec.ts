@@ -35,9 +35,10 @@ test('sign up → personal space → empty inbox → tokens + projects render', 
   await page.getByLabel('Password').fill(USER.password)
   await page.getByRole('button', { name: 'Create account' }).click()
 
-  // The inbox spans every space now — no switcher, just the page.
+  // The inbox spans every space now — no switcher, just the page. The h1 has
+  // read "Walkthroughs" since the 2026-08-12 redesign.
   await page.waitForURL('**/app')
-  await expect(page.getByRole('heading', { name: 'Inbox' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Walkthroughs' })).toBeVisible()
 
   // The empty inbox teaches the three ways in: recorder, phone, upload.
   await expect(page.getByText('Nothing handed back yet.', { exact: false })).toBeVisible()

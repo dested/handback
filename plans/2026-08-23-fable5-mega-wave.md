@@ -1,7 +1,7 @@
 # Fable-5 mega-wave: refine, walkthrough agent, intent, return path, sidebar
 
 - **Date:** 2026-08-23
-- **Status:** active
+- **Status:** done
 - **Type:** plan
 - **What:** One large fable-opus build — all decisions settled here; Opus agents implement per wave.
 

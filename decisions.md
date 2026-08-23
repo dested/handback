@@ -853,3 +853,40 @@ is later withdrawn — turning team off stops growth, it doesn't amputate.
 **Rejected:** an org-level flag (would need granting per workspace instead of per customer),
 gating reads for existing members (punishes people who did nothing), a better-auth admin plugin
 (two tRPC procedures and one boolean did the job).
+
+## 2026-08-23 — needs_info is a real fourth status, and it renders grey
+**Why:** an agent blocked on a question is a distinct queue state the inbox must sort by;
+a flag on `open` would hide it. Grey (muted ink) keeps the fixed three-color status law —
+the state reads "waiting on you", not a new alarm color.
+**Rejected:** `awaitingReply` boolean on open (invisible in filters), violet reuse
+(collides with in_review).
+
+## 2026-08-23 — Refine writes columns; the original report.md is immutable
+**Why:** the brief serves `briefMd ?? refinedBriefMd ?? S3 report.md` — the raw recorder
+output stays the ground truth forever, so refine (and the assistant) can never destroy
+what was recorded. Curated frames/excluded spans live in `curationJson`; health in
+`healthJson`.
+**Rejected:** rewriting report.md in S3 (irreversible), a separate refine table (nothing
+queries refine rows independently).
+
+## 2026-08-23 — The walkthrough assistant never touches video, ever
+**Owner's words:** "i dont care about recutting the video, fuck ffmpeg." `remove_span`
+strikes transcript lines, deletes the span's keyframes, and records a marker the brief
+renders as "removed from this walkthrough" — the webm/mp4 bytes are never re-encoded.
+Transcript timings are equally frozen (the polish contract). Every mutation is logged to
+`walkthrough_revision`.
+**Rejected:** server-side ffmpeg/mediabunny re-render (cost, complexity, a second render
+pipeline to keep honest).
+
+## 2026-08-23 — Pro is admin-granted; refusals say exactly 'Pro feature'
+**Why:** billing still doesn't exist (upgrade page is a mailto). Every pro-gated procedure
+throws FORBIDDEN with the literal message `Pro feature` and the client string-matches it
+(`isProError`) to swap errors for the upsell — one contract, no error-code plumbing.
+**Rejected:** Stripe now (no keys/products; the entitlement layer already fits it),
+structured error codes (tRPC data plumbing for one bit).
+
+## 2026-08-23 — Intent defaults to null, and the brief presumes nothing untagged
+**Why:** a wrong "this is a bug" framing on a feature request actively misleads the agent;
+absence of a tag must stay neutral. Values are bug | feature | idea, chosen by the human,
+never inferred server-side.
+**Rejected:** defaulting to bug, inferring intent in the refine pass.

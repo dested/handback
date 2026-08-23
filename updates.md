@@ -2,6 +2,18 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-08-23 — The fable5 mega-wave (fable-opus, 11 Opus agents, 4 waves)
+Asked: sidebar nav redesign, intent "prompt changers", the Refine pass, the walkthrough
+assistant, agent questions + evidence + notify-on-result, watch comments, /usage, /upgrade,
+extension intent picker, /upload stay-put warning.
+Done: all of it — per plans/2026-08-23-fable5-mega-wave.md. Commits 2fe46ef · 5666608 ·
+64c107b · 8bde623 (+docs). Live-verified end to end on a synthetic walkthrough: push →
+refine (Haiku vision + Opus 5 ledger/brief) → MCP brief → ask_reviewer → needs_info →
+inline answer → attach_evidence → post_result. e2e 3/4 (the red is the concurrent marketing
+wave's uncommitted hero). Extension 1.9.0 built, NOT published; schema pushed local+test,
+prod via predeploy on push.
+Touched: prisma/schema, server/{refine,agent,router,ingest,walkthroughs-api,mcp,mcp-format,notify,email,search,storage}.ts, cli/mcp.ts, src/app/{layout,routes,usage,upgrade,upload,phone,record,projects,app,watch,walkthrough}.tsx, viewer/*, inbox/card, ui/sidebar, lib/{pro,capture/*}, extension/*
+
 ## 2026-08-23 — Marketing foundation wave ("just cook, go hard", fable-opus)
 Asked: execute the refreshed marketing plan's Phase 0 in parallel with the mega-wave.
 Done: og.png + full social/twitter meta + per-route canonical + sitemap/robots (`bun run
