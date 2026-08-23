@@ -6,6 +6,7 @@ import type {
   RecordingFrame,
   ServerLink,
   Session,
+  SessionIntent,
   SessionKind,
   Settings,
 } from '../lib/types';
@@ -419,6 +420,19 @@ export function App() {
       })();
     },
     [state.activeSessionId, state.recordings.length, refresh],
+  );
+
+  /** The walkthrough's intent tag. Clicking the active chip clears it back to null. */
+  const setIntent = useCallback(
+    (next: SessionIntent) => {
+      if (!session) return;
+      const value = session.intent === next ? null : next;
+      void (async () => {
+        await send({ type: 'session:intent', sessionId: session.id, intent: value });
+        await refresh();
+      })();
+    },
+    [session, refresh],
   );
 
   useEffect(() => {
@@ -1288,9 +1302,26 @@ export function App() {
         </>
       )}
 
-      {!overlay && editing && (hasContent || !linked || hasStatus) && (
+      {!overlay && editing && (hasContent || !linked || hasStatus || recording) && (
         <footer className="foot">
           {statusRow}
+          {/* What this walkthrough is — one line above where it lands. Hidden on the
+              empty review screen; present once a part exists or one is recording. */}
+          {(recording || hasContent) && session && (
+            <div className="intent-row">
+              <span className="intent-label">this is</span>
+              {(['bug', 'feature', 'idea'] as const).map((it) => (
+                <button
+                  key={it}
+                  type="button"
+                  className={`intent-chip${session.intent === it ? ' on' : ''}`}
+                  onClick={() => setIntent(it)}
+                >
+                  {it}
+                </button>
+              ))}
+            </div>
+          )}
           {linked && hasContent && (
             <>
               {/* Where it lands — space and project as one control, read before

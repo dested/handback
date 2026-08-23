@@ -128,6 +128,8 @@ function declaration(
     // is the deliverable. The server defaults absent to 'agent'; sending it
     // always keeps the two clients (this and cli/push.ts) reading alike.
     kind,
+    // What the walkthrough is — omitted when the human never tagged it.
+    intent: session.intent ?? undefined,
     recordedAt: new Date(session.createdAt).toISOString(),
     durationMs: takes.reduce((sum, t) => sum + t.durationMs, 0),
     frameCount: takes.reduce((sum, t) => sum + t.frameCount, 0),

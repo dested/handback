@@ -315,6 +315,12 @@ chrome.runtime.onMessage.addListener((message: Request, _sender, sendResponse) =
         await broadcast();
         return { ok: true };
       }
+      case 'session:intent': {
+        const session = await getSession(message.sessionId);
+        if (session) await putSession({ ...session, intent: message.intent ?? undefined });
+        await broadcast();
+        return { ok: true };
+      }
       case 'session:project': {
         const session = await getSession(message.id);
         if (!session) return { ok: false };

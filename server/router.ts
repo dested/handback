@@ -19,7 +19,11 @@ import {
   SPACE_MAX_WALKTHROUGHS,
   SPACE_QUOTA_BYTES,
 } from './ingest'
-import { MAX_ACTIVE_TOKENS } from './limits'
+import {
+  FREE_CLOUD_TRANSCRIBE_SECONDS,
+  MAX_ACTIVE_TOKENS,
+  PRO_CLOUD_TRANSCRIBE_SECONDS,
+} from './limits'
 import { log } from './logger'
 import { briefFrameLimit, formatWalkthrough } from './mcp-format'
 import { prisma } from './prisma'
@@ -40,7 +44,7 @@ import {
   presignPut,
 } from './storage'
 import { childBriefMd, proposeStructure, structureConfigured } from './structure'
-import { checkAndReservePolish } from './usage'
+import { checkAndReservePolish, cloudStatus } from './usage'
 import { protectedProcedure, publicProcedure, router } from './trpc'
 import {
   getWalkthroughDetail,
@@ -191,7 +195,10 @@ const teamsRouter = router({
       where: { id: ctx.session.user.id },
       select: { email: true, isAdmin: true, features: true },
     })
-    return { canCreateTeams: u !== null && userHasFeature(u, 'team') }
+    return {
+      canCreateTeams: u !== null && userHasFeature(u, 'team'),
+      pro: u !== null && userHasFeature(u, 'pro'),
+    }
   }),
 
   /** Teams are the paid, explicit thing — personal costs nothing and just exists. */
@@ -2634,6 +2641,98 @@ const prefsRouter = router({
     }),
 })
 
+/**
+ * The account's own usage page (/usage): storage per space, the two cloud
+ * budgets, the live-token count, and anything auto-deleting soon. Read-only —
+ * it reserves nothing, it reports. Every number already lives in a helper
+ * (cloudStatus, the limits constants); this stitches them into one view.
+ */
+const usageRouter = router({
+  mine: protectedProcedure.query(async ({ ctx }) => {
+    const me = ctx.session.user.id
+    const u = await prisma.user.findUnique({
+      where: { id: me },
+      select: { email: true, isAdmin: true, features: true },
+    })
+    if (!u) throw new TRPCError({ code: 'NOT_FOUND' })
+    const tier: 'admin' | 'pro' | 'free' = isPlatformAdmin(u)
+      ? 'admin'
+      : userHasFeature(u, 'pro')
+        ? 'pro'
+        : 'free'
+
+    // Personal first, then each team by name — the same order the rest of the
+    // app lists spaces in (projects.all).
+    const teamIds = await memberTeamIds(me)
+    const teams = teamIds.length
+      ? await prisma.team.findMany({
+          where: { id: { in: teamIds } },
+          select: { id: true, name: true },
+          orderBy: { name: 'asc' },
+        })
+      : []
+    const spaces = await Promise.all(
+      [{ teamId: null as string | null, name: 'Personal' }, ...teams.map((t) => ({ teamId: t.id, name: t.name }))].map(
+        async (s) => {
+          const totals = await prisma.walkthrough.aggregate({
+            where: spaceWhere(toSpace(s.teamId, me)),
+            _sum: { bytes: true },
+            _count: true,
+          })
+          return {
+            teamId: s.teamId,
+            name: s.name,
+            bytes: Number(totals._sum.bytes ?? 0n),
+            walkthroughs: totals._count,
+            quotaBytes: SPACE_QUOTA_BYTES,
+            maxWalkthroughs: SPACE_MAX_WALKTHROUGHS,
+          }
+        }
+      )
+    )
+
+    const cloud = await cloudStatus(me)
+    // The ceiling behind `transcribeRemainingSeconds` — null wherever the
+    // remaining is null (unmetered: admin or first-walkthrough magic), so the
+    // page can render "N of M" only when both halves are real numbers.
+    const transcribeLimitSeconds =
+      tier === 'admin' || cloud.firstWalkthroughMagic
+        ? null
+        : tier === 'pro'
+          ? PRO_CLOUD_TRANSCRIBE_SECONDS
+          : FREE_CLOUD_TRANSCRIBE_SECONDS
+
+    const active = await prisma.apiToken.count({ where: { userId: me, revokedAt: null } })
+
+    const expiring = await prisma.walkthrough.findMany({
+      where: {
+        ...reachWhere(me, teamIds),
+        expiresAt: { not: null, lte: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) },
+      },
+      orderBy: { expiresAt: 'asc' },
+      take: 20,
+      select: { id: true, title: true, expiresAt: true },
+    })
+
+    return {
+      tier,
+      spaces,
+      cloud: {
+        transcribeRemainingSeconds: cloud.transcribeRemainingSeconds,
+        transcribeLimitSeconds,
+        polishAllowed: cloud.polishAllowed,
+        firstWalkthroughMagic: cloud.firstWalkthroughMagic,
+      },
+      tokens: { active, max: MAX_ACTIVE_TOKENS },
+      // `expiresAt` is non-null by the where filter; flatMap narrows the type
+      // honestly instead of asserting it.
+      expiring: expiring.flatMap((g) =>
+        g.expiresAt ? [{ id: g.id, title: g.title, expiresAt: g.expiresAt.toISOString() }] : []
+      ),
+    }
+  }),
+})
+
 export const appRouter = router({
   me: protectedProcedure.query(({ ctx }) => ctx.session.user),
   recorder: recorderRouter,
@@ -2643,6 +2742,7 @@ export const appRouter = router({
   tokens: tokensRouter,
   projects: projectsRouter,
   walkthroughs: walkthroughsRouter,
+  usage: usageRouter,
   admin: adminRouter,
 })
 

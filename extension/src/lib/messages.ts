@@ -2,6 +2,7 @@ import type {
   PageEvent,
   PointerSample,
   RecordingMeta,
+  SessionIntent,
   SessionKind,
   Settings,
   TranscriberId,
@@ -30,6 +31,9 @@ export type Request =
   // the worker refuses it once the session holds one — the two modes can't mix
   // inside a walkthrough.
   | { type: 'session:kind'; id: string; kind: SessionKind }
+  // What this walkthrough is — bug, feature, or idea — picked on the review screen
+  // and sent with the upload. null clears it back to untagged.
+  | { type: 'session:intent'; sessionId: string; intent: SessionIntent | null }
   | { type: 'state:get' }
   // sessionId → SessionSummary for every session on this machine. Its own message
   // rather than a field on `state:get`, which lands on every broadcast: this walks

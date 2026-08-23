@@ -150,6 +150,9 @@ export interface Recording {
  */
 export type SessionKind = 'agent' | 'human';
 
+/** What a walkthrough is about: a bug to fix, a feature to build, or an idea to weigh. Absent/null = untagged. */
+export type SessionIntent = 'bug' | 'feature' | 'idea';
+
 export interface Session {
   id: string;
   name: string;
@@ -163,6 +166,8 @@ export interface Session {
    * `sessionKind()`, which answers 'agent' for them.
    */
   kind?: SessionKind;
+  /** What the walkthrough is — chosen on the review screen, shipped with the declare. Absent/null = untagged. */
+  intent?: SessionIntent | null;
   /** How many takes this gripe holds — the next one is `recCount + 1`. Deleting a
    *  take renumbers the rest contiguously, so this is always their count. */
   recCount: number;

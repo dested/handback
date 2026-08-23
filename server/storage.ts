@@ -125,6 +125,33 @@ export async function getObjectText(key: string): Promise<string> {
   return (await res.Body?.transformToString()) ?? ''
 }
 
+/** Read one object's bytes — the refine pass feeds keyframes to the vision
+ *  model this way. Frames are a few hundred KB; never call this on a video. */
+export async function getObjectBytes(key: string): Promise<Uint8Array> {
+  const res = await s3.send(new GetObjectCommand({ Bucket: env.S3_BUCKET, Key: key }))
+  return (await res.Body?.transformToByteArray()) ?? new Uint8Array(0)
+}
+
+/**
+ * Server-side write of a small text object. The ONLY writer besides presigned
+ * PUTs — exists so the walkthrough agent can rewrite a transcript.json in
+ * place. Buffered, never streamed (Bun hangs on a streamed S3 Body).
+ */
+export async function putObjectText(
+  key: string,
+  text: string,
+  contentType = 'application/json'
+): Promise<void> {
+  await s3.send(
+    new PutObjectCommand({
+      Bucket: env.S3_BUCKET,
+      Key: key,
+      Body: Buffer.from(text, 'utf8'),
+      ContentType: contentType,
+    })
+  )
+}
+
 /** Every object under a prefix, paged through. Keys only — never the bodies. */
 export async function listPrefix(prefix: string): Promise<Array<{ key: string; size: number }>> {
   const out: Array<{ key: string; size: number }> = []

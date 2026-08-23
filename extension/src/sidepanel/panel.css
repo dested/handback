@@ -1523,6 +1523,39 @@ button.ticker.warn:hover {
   padding: 0 14px;
   font-size: var(--fs-3);
 }
+/* What this walkthrough is — one line above the destination, in the same mono
+ * pills the queue filters use: hairline off, cobalt on, nothing filled. */
+.intent-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-bottom: 6px;
+  font-size: var(--fs-1);
+}
+.intent-label {
+  flex: none;
+  color: var(--muted);
+}
+.intent-chip {
+  padding: 3px 9px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-0);
+}
+.intent-chip:hover {
+  color: var(--ink);
+  border-color: var(--muted);
+}
+.intent-chip.on {
+  background: var(--cobalt-wash);
+  border-color: var(--cobalt);
+  color: var(--cobalt);
+}
+
 /* Where it lands, one line under the send: space · project, as ONE control.
  * A single trigger opens one panel grouped by space; a row sets both at once. */
 .dest {

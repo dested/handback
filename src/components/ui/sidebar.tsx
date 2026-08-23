@@ -5,7 +5,7 @@ import { PanelLeft, type LucideIcon } from 'lucide-react'
 import { NavLink } from 'react-router-dom'
 import { cn } from '~/lib/utils'
 
-const STORAGE_KEY = 'handback.adminSidebar'
+const DEFAULT_STORAGE_KEY = 'handback.adminSidebar'
 
 type SidebarContextValue = {
   collapsed: boolean
@@ -24,7 +24,13 @@ function useSidebar(): SidebarContextValue {
   return ctx
 }
 
-function SidebarProvider({ children }: { children: React.ReactNode }) {
+function SidebarProvider({
+  children,
+  storageKey = DEFAULT_STORAGE_KEY,
+}: {
+  children: React.ReactNode
+  storageKey?: string
+}) {
   // Starts expanded on both server and client — reading localStorage in the
   // initializer would render a different width than the SSR markup and break
   // hydration. The persisted state lands in an effect, after first paint.
@@ -32,15 +38,18 @@ function SidebarProvider({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = React.useState(false)
 
   React.useEffect(() => {
-    if (window.localStorage.getItem(STORAGE_KEY) === 'collapsed') setCollapsedState(true)
-  }, [])
+    if (window.localStorage.getItem(storageKey) === 'collapsed') setCollapsedState(true)
+  }, [storageKey])
 
-  const setCollapsed = React.useCallback((v: boolean) => {
-    setCollapsedState(v)
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(STORAGE_KEY, v ? 'collapsed' : 'open')
-    }
-  }, [])
+  const setCollapsed = React.useCallback(
+    (v: boolean) => {
+      setCollapsedState(v)
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(storageKey, v ? 'collapsed' : 'open')
+      }
+    },
+    [storageKey]
+  )
 
   const value = React.useMemo<SidebarContextValue>(
     () => ({ collapsed, setCollapsed, mobileOpen, setMobileOpen }),

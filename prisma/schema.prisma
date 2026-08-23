@@ -38,6 +38,9 @@ model User {
   // hourly sweep from double-sending inside one Monday window.
   notifyUploads Boolean   @default(true) @map("notify_uploads")
   notifyDigest  Boolean   @default(true) @map("notify_digest")
+  // "Your agent answered / asked" mail — the uploader-only doorbell on the
+  // return path, muted by its own unsubscribe kind ('results').
+  notifyResults Boolean   @default(true) @map("notify_results")
   digestSentAt  DateTime? @map("digest_sent_at")
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @default(now()) @map("updated_at")
@@ -167,6 +170,9 @@ model Project {
   // URL origins (https://app.example.com) used to auto-route uploaded walkthroughs
   // by their recorded origin.
   originHints String[] @map("origin_hints")
+  // Standing context for agents — prepended to every brief pulled from this
+  // project ("repo lives at ~/code/x, run typecheck before posting a result").
+  instructions String?
   createdAt   DateTime @default(now()) @map("created_at")
 
   walkthroughs Walkthrough[]
@@ -240,12 +246,32 @@ model Walkthrough {
   // (severity, repro, acceptance criteria, source time ranges). When set, the
   // agent brief serves it as the report.
   briefMd      String?   @map("brief_md")
+  // What the recording is FOR — 'bug' | 'feature' | 'idea'; null = untagged
+  // (old recorders, or the person never said). Drives the brief's framing and
+  // the refine prompts; never guessed server-side.
+  intent       String?
+  // The Refine pass (server/refine.ts, pro-gated). Original report.md in S3 is
+  // never touched: the rewrite lives here and the brief prefers it.
+  // summaryMd = the terse-but-complete ledger of everything raised;
+  // refinedBriefMd = the intent-aware brief agents read; healthJson =
+  // [{severity:'info'|'warn', text, atMs|null}] capture-QC notes for the
+  // uploader; curationJson = {frames:[{path, caption, atMs|null}],
+  // excluded:[{startMs, endMs, reason}]} — excluded spans are markers only,
+  // the video is never re-encoded.
+  summaryMd      String?   @map("summary_md")
+  refinedBriefMd String?   @map("refined_brief_md")
+  healthJson     Json?     @map("health_json")
+  curationJson   Json?     @map("curation_json")
+  refineStatus   String?   @map("refine_status") // 'running' | 'done' | 'failed'
+  refinedAt      DateTime? @map("refined_at")
 
-  takes    Take[]
-  files    WalkthroughFile[]
-  notes    WalkthroughNote[]
-  access   WalkthroughAccess[]
-  comments WalkthroughComment[]
+  takes     Take[]
+  files     WalkthroughFile[]
+  notes     WalkthroughNote[]
+  access    WalkthroughAccess[]
+  comments  WalkthroughComment[]
+  chats     WalkthroughChat[]
+  revisions WalkthroughRevision[]
 
   @@map("walkthrough")
 }
@@ -281,6 +307,13 @@ model WalkthroughNote {
   walkthroughId String      @map("walkthrough_id")
   walkthrough   Walkthrough @relation(fields: [walkthroughId], references: [id], onDelete: Cascade)
   role          String // 'agent' | 'reviewer'
+  // What the entry is: 'result' (agent's answer, or a reviewer send-back),
+  // 'question' (agent asking — flips status to needs_info), 'answer' (the
+  // reviewer's reply — flips back to open).
+  kind          String      @default("result")
+  // Walkthrough-relative paths (evidence/<ts>-<name>) of proof screenshots the
+  // agent attached to this entry via attach_evidence.
+  evidencePaths String[]    @default([]) @map("evidence_paths")
   summary       String
   prUrl         String?     @map("pr_url")
   filesTouched  String[]    @map("files_touched")
@@ -308,6 +341,40 @@ model WalkthroughAccess {
 
   @@index([walkthroughId, createdAt])
   @@map("walkthrough_access")
+}
+
+// The walkthrough agent's conversation (walkthroughs.chat) — persisted so a
+// reload keeps the thread. `userId` is a plain column (no FK): the transcript
+// should read even after the account goes. `actions` is the applied tool calls
+// for that assistant turn, as [{action, detail}] for the transcript's meta line.
+model WalkthroughChat {
+  id            String      @id @default(uuid())
+  walkthroughId String      @map("walkthrough_id")
+  walkthrough   Walkthrough @relation(fields: [walkthroughId], references: [id], onDelete: Cascade)
+  userId        String?     @map("user_id")
+  role          String // 'user' | 'assistant'
+  content       String
+  actions       Json?
+  createdAt     DateTime    @default(now()) @map("created_at")
+
+  @@index([walkthroughId, createdAt])
+  @@map("walkthrough_chat")
+}
+
+// The mutation log behind the walkthrough agent: every edit it applies (and any
+// future non-chat mutation worth auditing) lands here, so "what did it change?"
+// always has an answer. Append-only.
+model WalkthroughRevision {
+  id            String      @id @default(uuid())
+  walkthroughId String      @map("walkthrough_id")
+  walkthrough   Walkthrough @relation(fields: [walkthroughId], references: [id], onDelete: Cascade)
+  authorName    String      @map("author_name") // 'assistant' or the human's name
+  action        String // tool name: update_title | update_summary | update_brief | edit_transcript | remove_span | set_curated_frames
+  detail        Json?
+  createdAt     DateTime    @default(now()) @map("created_at")
+
+  @@index([walkthroughId, createdAt])
+  @@map("walkthrough_revision")
 }
 
 model Take {

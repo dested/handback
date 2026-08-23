@@ -33,6 +33,8 @@ import { SignUpPage } from './sign-up'
 import { TeamPage } from './team'
 import { TermsPage } from './terms'
 import { UploadPage } from './upload'
+import { UsagePage } from './usage'
+import { UpgradePage } from './upgrade'
 import { WatchPage } from './watch'
 
 // Per-request context populated by entry-server.tsx and handed to loaders via
@@ -139,6 +141,8 @@ export const routes: RouteObject[] = [
       { path: 'upload', Component: UploadPage, loader: appLoader },
       { path: 'projects', Component: ProjectsPage, loader: appLoader },
       { path: 'team', Component: TeamPage, loader: appLoader },
+      { path: 'usage', Component: UsagePage, loader: appLoader },
+      { path: 'upgrade', Component: UpgradePage, loader: appLoader },
       {
         path: 'admin',
         Component: AdminLayout,

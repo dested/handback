@@ -1,6 +1,5 @@
 import {
   Link,
-  NavLink,
   Outlet,
   useLocation,
   useNavigate,
@@ -8,11 +7,39 @@ import {
   useRouteLoaderData,
 } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  CircleDot,
+  Film,
+  FolderKanban,
+  Gauge,
+  LogOut,
+  Plug,
+  Puzzle,
+  ShieldCheck,
+  Smartphone,
+  Sparkles,
+  Upload as UploadIcon,
+  Users,
+} from 'lucide-react'
 import { Wordmark } from '~/components/logo'
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarInset,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarMenuLink,
+  SidebarProvider,
+  SidebarTrigger,
+} from '~/components/ui/sidebar'
 import { authClient } from '~/lib/auth-client'
 import { SpaceProvider, clearIdentity } from '~/lib/space'
 import { useTRPC } from '~/lib/trpc'
-import { cn } from '~/lib/utils'
 import type { RootLoaderData } from './routes'
 
 const APP_PREFIXES = [
@@ -20,6 +47,8 @@ const APP_PREFIXES = [
   '/walkthroughs',
   '/team',
   '/projects',
+  '/usage',
+  '/upgrade',
   // '/record' before '/recorder' is not just tidiness: the guard is a
   // `startsWith`, and without its own entry '/record' matches nothing here
   // ('/record' does not start with '/recorder') and falls through to the
@@ -37,19 +66,143 @@ export function Layout() {
   const session = data?.session ?? null
   const location = useLocation()
   const inApp = session !== null && APP_PREFIXES.some((p) => location.pathname.startsWith(p))
-  // /admin runs its own sidebar shell edge to edge; the shared container would
-  // box it in and double the padding.
-  const fullBleed = inApp && location.pathname.startsWith('/admin')
+  // /admin runs its own sidebar shell edge to edge; nesting it inside the app
+  // sidebar would stack two shells and double the chrome.
+  const isAdmin = location.pathname.startsWith('/admin')
+
+  if (!inApp) {
+    return (
+      <SpaceProvider enabled={session !== null}>
+        <MarketingHeader signedIn={!!session} />
+        <main>
+          <Outlet />
+        </main>
+        <MarketingFooter />
+      </SpaceProvider>
+    )
+  }
 
   return (
-    <SpaceProvider enabled={session !== null}>
-      {inApp ? <AppHeader email={session!.user.email} /> : <MarketingHeader signedIn={!!session} />}
-      <main
-        className={inApp ? (fullBleed ? 'flex w-full' : 'mx-auto w-full max-w-6xl px-6 py-8') : ''}>
-        <Outlet />
-      </main>
-      {!inApp && <MarketingFooter />}
+    <SpaceProvider enabled>
+      {isAdmin ? (
+        <main className="flex w-full">
+          <Outlet />
+        </main>
+      ) : (
+        <AppShell email={session!.user.email}>
+          <Outlet />
+        </AppShell>
+      )}
     </SpaceProvider>
+  )
+}
+
+function AppShell({ email, children }: { email: string; children: React.ReactNode }) {
+  const navigate = useNavigate()
+  const revalidator = useRevalidator()
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const adminStatus = useQuery(trpc.admin.status.queryOptions())
+  const ent = useQuery(trpc.teams.entitlements.queryOptions())
+
+  async function signOut() {
+    await authClient.signOut()
+    // The cache holds this account's teams and inbox; the next sign-in on this
+    // browser must not inherit them.
+    clearIdentity(queryClient)
+    navigate('/', { replace: true })
+    revalidator.revalidate()
+  }
+
+  return (
+    <SidebarProvider storageKey="handback.appSidebar">
+      <Sidebar>
+        <SidebarHeader>
+          <Link
+            to="/app"
+            aria-label="Handback home"
+            className="group-data-[collapsed]/sidebar:hidden">
+            <Wordmark />
+          </Link>
+          <SidebarTrigger className="ml-auto group-data-[collapsed]/sidebar:ml-0" />
+        </SidebarHeader>
+        <SidebarContent>
+          <SidebarGroup>
+            <SidebarGroupLabel>Review</SidebarGroupLabel>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuLink to="/app" end icon={Film} label="Walkthroughs" />
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuLink to="/projects" icon={FolderKanban} label="Projects" />
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuLink to="/usage" icon={Gauge} label="Usage" />
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroup>
+          <SidebarGroup>
+            <SidebarGroupLabel>Capture</SidebarGroupLabel>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuLink to="/record" icon={CircleDot} label="Record" />
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuLink to="/upload" icon={UploadIcon} label="Upload" />
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuLink to="/phone" icon={Smartphone} label="Phone" />
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuLink to="/recorder" icon={Puzzle} label="Extension" />
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroup>
+          <SidebarGroup>
+            <SidebarGroupLabel>Team</SidebarGroupLabel>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuLink to="/team" icon={Users} label="Teams" />
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuLink to="/connect" icon={Plug} label="Connect" />
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroup>
+        </SidebarContent>
+        <SidebarFooter>
+          <SidebarMenu>
+            {ent.data && !ent.data.pro && (
+              <SidebarMenuItem>
+                <SidebarMenuLink to="/upgrade" icon={Sparkles} label="Upgrade" />
+              </SidebarMenuItem>
+            )}
+            {adminStatus.data?.isAdmin && (
+              <SidebarMenuItem>
+                <SidebarMenuLink to="/admin" icon={ShieldCheck} label="Admin" />
+              </SidebarMenuItem>
+            )}
+          </SidebarMenu>
+          <div className="px-2.5 py-1.5">
+            <p
+              title={email}
+              className="text-muted-foreground truncate text-xs group-data-[collapsed]/sidebar:hidden">
+              {email}
+            </p>
+            <SidebarMenuButton icon={LogOut} label="Sign out" onClick={signOut} />
+          </div>
+        </SidebarFooter>
+      </Sidebar>
+      <SidebarInset>
+        <div className="mb-2 flex items-center gap-2 px-6 pt-4 md:hidden">
+          <SidebarTrigger />
+          <Link to="/app" aria-label="Handback home">
+            <Wordmark />
+          </Link>
+        </div>
+        <main className="mx-auto w-full max-w-6xl px-6 py-8">{children}</main>
+      </SidebarInset>
+    </SidebarProvider>
   )
 }
 
@@ -79,84 +232,6 @@ function MarketingHeader({ signedIn }: { signedIn: boolean }) {
               </Link>
             </>
           )}
-        </div>
-      </nav>
-    </header>
-  )
-}
-
-function AppHeader({ email }: { email: string }) {
-  const navigate = useNavigate()
-  const revalidator = useRevalidator()
-  const trpc = useTRPC()
-  const queryClient = useQueryClient()
-  const adminStatus = useQuery(trpc.admin.status.queryOptions())
-
-  async function signOut() {
-    await authClient.signOut()
-    // The cache holds this account's teams and inbox; the next sign-in on this
-    // browser must not inherit them.
-    clearIdentity(queryClient)
-    navigate('/', { replace: true })
-    revalidator.revalidate()
-  }
-
-  const tab = ({ isActive }: { isActive: boolean }) =>
-    cn(
-      'rounded-md px-3 py-1.5 text-sm font-medium whitespace-nowrap transition-colors',
-      isActive ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground'
-    )
-
-  return (
-    <header className="border-border bg-card border-b">
-      {/* One row on md+; on a phone the tab list takes `order-last w-full` and
-          wraps into its own swipeable second row. The tabs render ONCE — a
-          hidden duplicate would double every nav locator (e2e finds "Team"
-          twice) and ship two DOMs to keep in sync. */}
-      <nav className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 sm:px-6">
-        <Link to="/app" aria-label="Handback walkthroughs" className="shrink-0">
-          <Wordmark />
-        </Link>
-        <div className="order-last flex w-full items-center gap-1 overflow-x-auto [scrollbar-width:none] md:order-none md:ml-2 md:w-auto md:overflow-visible [&::-webkit-scrollbar]:hidden">
-          <NavLink to="/app" className={tab} end>
-            Walkthroughs
-          </NavLink>
-          <NavLink to="/projects" className={tab}>
-            Projects
-          </NavLink>
-          {/* Always, and plural. The inbox spans every space now, so the header
-              no longer knows which one you are "in" — and a Teams tab that
-              appears and disappears was the switcher's tell. */}
-          <NavLink to="/team" className={tab}>
-            Teams
-          </NavLink>
-          {/* Record is the verb, Extension is the install. They used to be one
-              tab called "Recorder", which stopped being true the moment the
-              website could record on its own — and "Record"/"Recorder" side by
-              side reads as a typo. */}
-          <NavLink to="/record" className={tab}>
-            Record
-          </NavLink>
-          <NavLink to="/recorder" className={tab}>
-            Extension
-          </NavLink>
-          <NavLink to="/connect" className={tab}>
-            Connect
-          </NavLink>
-          {adminStatus.data?.isAdmin && (
-            <NavLink to="/admin" className={tab}>
-              Admin
-            </NavLink>
-          )}
-        </div>
-        <div className="ml-auto flex shrink-0 items-center gap-3 text-sm">
-          <span className="text-muted-foreground hidden sm:inline">{email}</span>
-          <button
-            type="button"
-            className="text-muted-foreground hover:text-foreground"
-            onClick={signOut}>
-            Sign out
-          </button>
         </div>
       </nav>
     </header>
