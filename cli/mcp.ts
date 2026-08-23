@@ -166,17 +166,83 @@ registerTool(
         .max(20_000)
         .optional()
         .describe('Optional longer markdown: what changed, how to verify, anything left open'),
+      evidence: z
+        .array(z.string().max(300))
+        .max(4)
+        .optional()
+        .describe('Paths returned by attach_evidence, after uploading'),
     },
   },
-  async ({ walkthroughId, summary, prUrl, filesTouched, body }) => {
+  async ({ walkthroughId, summary, prUrl, filesTouched, body, evidence }) => {
     const result = await api<{ ok: boolean }>(
       `/walkthroughs/${encodeURIComponent(walkthroughId)}/result`,
-      { method: 'POST', body: { summary, prUrl, filesTouched, body } }
+      { method: 'POST', body: { summary, prUrl, filesTouched, body, evidence } }
     )
     if ('error' in result) return result.error
     return text(
       `Result posted on ${walkthroughId} — the reviewer will see it on the walkthrough page.`
     )
+  }
+)
+
+registerTool(
+  'ask_reviewer',
+  {
+    title: 'Ask the reviewer a question',
+    description:
+      'When a walkthrough is ambiguous or you need a human decision, ask instead of guessing. The walkthrough moves to needs_info, the human is emailed, and their answer appears in the review thread — re-pull the walkthrough later and read it there. Stop working on this walkthrough until it is answered.',
+    inputSchema: {
+      walkthroughId: z.string(),
+      question: z
+        .string()
+        .min(1)
+        .max(2000)
+        .describe('The specific question — what you need decided or clarified before you can proceed'),
+    },
+  },
+  async ({ walkthroughId, question }) => {
+    const result = await api<{ ok: boolean; status: string }>(
+      `/walkthroughs/${encodeURIComponent(walkthroughId)}/question`,
+      { method: 'POST', body: { question } }
+    )
+    if ('error' in result) return result.error
+    return text(
+      `Question posted on ${walkthroughId} — status is needs_info; the reviewer has been notified. Re-pull this walkthrough later to read the answer in the review thread.`
+    )
+  }
+)
+
+registerTool(
+  'attach_evidence',
+  {
+    title: 'Attach proof screenshots',
+    description:
+      'Before post_result, attach up to 4 proof screenshots (before/after, the fixed screen). Returns one presigned PUT url per file: upload each file\'s raw bytes with curl -X PUT -H "Content-Type: <type>" --data-binary @file "<url>" (size must match exactly), then pass the returned paths as post_result\'s evidence.',
+    inputSchema: {
+      walkthroughId: z.string(),
+      files: z
+        .array(
+          z.object({
+            name: z.string().regex(/^[a-z0-9._-]{1,80}$/i),
+            contentType: z.enum(['image/png', 'image/jpeg', 'image/webp']),
+            size: z
+              .number()
+              .int()
+              .min(1)
+              .max(5 * 1024 * 1024),
+          })
+        )
+        .min(1)
+        .max(4),
+    },
+  },
+  async ({ walkthroughId, files }) => {
+    const result = await api<{ uploads: { path: string; url: string; contentType: string }[] }>(
+      `/walkthroughs/${encodeURIComponent(walkthroughId)}/evidence`,
+      { method: 'POST', body: { files } }
+    )
+    if ('error' in result) return result.error
+    return text(JSON.stringify(result.data, null, 2))
   }
 )
 

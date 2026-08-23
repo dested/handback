@@ -89,6 +89,10 @@ export function OverflowMenu({
 
   const setKind = useMutation(trpc.walkthroughs.setKind.mutationOptions({ onSettled: invalidate }))
 
+  const setIntent = useMutation(
+    trpc.walkthroughs.setIntent.mutationOptions({ onSettled: invalidate })
+  )
+
   const keep = useMutation(trpc.walkthroughs.keep.mutationOptions({ onSettled: invalidate }))
 
   const share = useMutation(
@@ -125,6 +129,9 @@ export function OverflowMenu({
   // In-flight variables stand in for the server's answer, so the menu moves the
   // instant it's clicked and snaps back on its own if the write fails.
   const kind = setKind.isPending ? (setKind.variables?.kind ?? walkthrough.kind) : walkthrough.kind
+  const intent = setIntent.isPending
+    ? (setIntent.variables?.intent ?? walkthrough.intent)
+    : walkthrough.intent
 
   // Deleting a team's walkthrough is admin-only server-side; your own personal
   // space is always yours to delete from.
@@ -180,6 +187,35 @@ export function OverflowMenu({
                   className={cn('size-[5px] rounded-full', active ? 'bg-cobalt' : 'bg-transparent')}
                 />
                 {option === 'agent' ? 'For an agent' : 'For a person'}
+              </button>
+            )
+          })}
+
+          {/* What the recording is asking for — read by the brief and the agent
+              queue. A judgement like who-it's-for, not a property of the file. */}
+          <div className={DIVIDER} />
+          <p className={SECTION}>what it is</p>
+          {([null, 'bug', 'feature', 'idea'] as const).map((option) => {
+            const active = intent === option
+            return (
+              <button
+                key={option ?? 'untagged'}
+                type="button"
+                className={cn(ITEM, active && 'text-cobalt')}
+                disabled={setIntent.isPending}
+                onClick={() =>
+                  !active && setIntent.mutate({ walkthroughId: walkthrough.id, intent: option })
+                }>
+                <span
+                  className={cn('size-[5px] rounded-full', active ? 'bg-cobalt' : 'bg-transparent')}
+                />
+                {option === null
+                  ? 'Untagged'
+                  : option === 'bug'
+                    ? 'Bug'
+                    : option === 'feature'
+                      ? 'Feature'
+                      : 'Idea'}
               </button>
             )
           })}

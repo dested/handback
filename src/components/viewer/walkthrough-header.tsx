@@ -187,6 +187,8 @@ export function WalkthroughHeader({
     megabytes(walkthrough.bytes),
     walkthrough.uploadedByName ? `uploaded by ${walkthrough.uploadedByName}` : null,
     expiresLabel(walkthrough.expiresAt),
+    // What the recording is for, when it's been tagged — already lowercase.
+    walkthrough.intent,
   ].filter((part): part is string => part !== null)
 
   return (

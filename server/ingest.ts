@@ -29,6 +29,7 @@ import { Router, json, raw, type Request, type Response } from 'express'
 import { z } from 'zod'
 import {
   WALKTHROUGH_STATUSES,
+  askReviewerQuestion,
   authenticateToken,
   getWalkthroughDetail,
   listWalkthroughs,
@@ -474,6 +475,30 @@ ingestRouter.post('/walkthroughs/:id/result', statusLimit, async (req, res) => {
     return
   }
   res.json({ ok: true })
+})
+
+// POST /api/ingest/walkthroughs/:id/question — an agent asks the reviewer a
+// question instead of guessing (MCP `ask_reviewer` reaches this through
+// cli/mcp.ts; the hosted server calls the shared function directly). Moves the
+// walkthrough to needs_info and mails the uploader. No /gripes alias: no shipped
+// client posts it.
+const questionSchema = z.object({
+  question: z.string().min(1).max(2000),
+})
+
+ingestRouter.post('/walkthroughs/:id/question', statusLimit, async (req, res) => {
+  const auth = getAuth(req)
+  const parsed = questionSchema.safeParse(req.body)
+  if (!parsed.success) {
+    fail(res, 400, parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '))
+    return
+  }
+  const asked = await askReviewerQuestion(auth, pathId(req), parsed.data.question)
+  if (!asked) {
+    fail(res, 404, 'Unknown walkthrough')
+    return
+  }
+  res.json({ ok: true, status: 'needs_info' })
 })
 
 // POST /api/ingest/walkthroughs/:id/evidence — presigned PUTs for proof

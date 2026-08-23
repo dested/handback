@@ -10,7 +10,9 @@ import { CloudEditor } from '~/components/edit/cloud-editor'
 import { Button } from '~/components/ui/button'
 import { AgentAnswer } from '~/components/viewer/agent-answer'
 import { AgentView } from '~/components/viewer/agent-view'
+import { AssistantPanel } from '~/components/viewer/assistant-panel'
 import { FinalCut } from '~/components/viewer/final-cut'
+import { RefinePanel } from '~/components/viewer/refine-panel'
 import { SectionHead } from '~/components/viewer/section-head'
 import { SplitChildren, SplitPanel, TaskBrief } from '~/components/viewer/split-panel'
 import { WalkthroughHeader } from '~/components/viewer/walkthrough-header'
@@ -136,6 +138,10 @@ export function WalkthroughPage() {
           has answered, approving or sending back IS the job of this page. */}
       <AgentAnswer walkthrough={walkthrough} />
 
+      {/* A second, pro-gated read of the recording: summary, capture health,
+          and the spans it would drop. Renders itself away when there's nothing. */}
+      <RefinePanel walkthrough={walkthrough} />
+
       {/* What was carved out of this recording, when a split has run. */}
       <SplitChildren walkthrough={walkthrough} />
 
@@ -198,6 +204,9 @@ export function WalkthroughPage() {
           onEdit={canEdit && !human ? () => setEditing(true) : undefined}
         />
       )}
+
+      {/* The assistant is the power tool, below everything the recording is. */}
+      <AssistantPanel walkthrough={walkthrough} />
     </div>
   )
 }

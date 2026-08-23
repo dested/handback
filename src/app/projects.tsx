@@ -19,6 +19,7 @@ type ProjectRow = {
   slug: string
   teamId: string | null
   spaceName: string
+  instructions: string | null
   walkthroughCount: number
 }
 
@@ -64,6 +65,8 @@ export function ProjectsPage() {
   const [creating, setCreating] = useState(false)
   // One project is renamed at a time; opening another closes the last.
   const [editingId, setEditingId] = useState<string | null>(null)
+  // The standing-instructions editor, opened independently of rename.
+  const [instructionsId, setInstructionsId] = useState<string | null>(null)
 
   const projectsQuery = useQuery(trpc.projects.all.queryOptions())
   const teamsQuery = useQuery(trpc.teams.mine.queryOptions())
@@ -80,6 +83,17 @@ export function ProjectsPage() {
       onSuccess: () => {
         invalidateProjects()
         setEditingId(null)
+      },
+    })
+  )
+
+  // Instructions ride the same procedure but their own editor, so a save closes
+  // the right panel and a failed save's error stays on its own row.
+  const saveInstructions = useMutation(
+    trpc.projects.update.mutationOptions({
+      onSuccess: () => {
+        invalidateProjects()
+        setInstructionsId(null)
       },
     })
   )
@@ -144,6 +158,15 @@ export function ProjectsPage() {
                       <p className="text-muted-foreground font-mono text-xs">
                         {p.slug} · {plural(p.walkthroughCount, 'walkthrough')}
                       </p>
+                      <button
+                        type="button"
+                        className="text-muted-foreground hover:text-foreground font-mono text-xs"
+                        onClick={() => {
+                          saveInstructions.reset()
+                          setInstructionsId(instructionsId === p.id ? null : p.id)
+                        }}>
+                        {p.instructions ? 'instructions' : 'add instructions'}
+                      </button>
                       <Button
                         type="button"
                         variant="ghost"
@@ -167,6 +190,24 @@ export function ProjectsPage() {
                           update.mutate({ teamId: p.teamId, projectId: p.id, name })
                         }
                         onCancel={() => setEditingId(null)}
+                      />
+                    )}
+                    {instructionsId === p.id && (
+                      <InstructionsEditor
+                        project={p}
+                        pending={saveInstructions.isPending}
+                        error={saveInstructions.isError ? saveInstructions.error.message : null}
+                        onSave={(instructions) =>
+                          saveInstructions.mutate({
+                            teamId: p.teamId,
+                            projectId: p.id,
+                            // update REQUIRES name — pass the current one through
+                            // so an instructions save never renames the project.
+                            name: p.name,
+                            instructions,
+                          })
+                        }
+                        onCancel={() => setInstructionsId(null)}
                       />
                     )}
                   </div>
@@ -295,6 +336,64 @@ function ProjectEditor({
           variant="outline"
           disabled={pending || trimmed === ''}
           onClick={save}>
+          {pending ? 'Saving…' : 'Save'}
+        </Button>
+        <Button type="button" size="sm" variant="ghost" onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+      {error && <p className="text-destructive text-sm">{error}</p>}
+    </div>
+  )
+}
+
+const TEXTAREA = cn(
+  'border-input bg-background text-foreground w-full rounded-md border px-3 py-2 text-sm shadow-xs',
+  'outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]'
+)
+
+/**
+ * Standing context an agent gets prepended to every brief it pulls from this
+ * project — repo path, conventions, how to verify. A trimmed-empty save clears
+ * it back to null.
+ */
+function InstructionsEditor({
+  project,
+  pending,
+  error,
+  onSave,
+  onCancel,
+}: {
+  project: { name: string; instructions: string | null }
+  pending: boolean
+  error: string | null
+  onSave: (instructions: string | null) => void
+  onCancel: () => void
+}) {
+  const [text, setText] = useState(project.instructions ?? '')
+
+  function save() {
+    if (pending) return
+    const trimmed = text.trim()
+    onSave(trimmed === '' ? null : trimmed)
+  }
+
+  return (
+    <div className="mt-3 max-w-xl space-y-2">
+      <textarea
+        autoFocus
+        rows={3}
+        value={text}
+        aria-label={`Instructions for ${project.name}`}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') onCancel()
+        }}
+        placeholder="Standing context for agents pulling from this project — repo path, conventions, how to verify."
+        className={TEXTAREA}
+      />
+      <div className="flex items-center gap-2">
+        <Button type="button" size="sm" variant="outline" disabled={pending} onClick={save}>
           {pending ? 'Saving…' : 'Save'}
         </Button>
         <Button type="button" size="sm" variant="ghost" onClick={onCancel}>

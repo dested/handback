@@ -385,9 +385,14 @@ export function UploadPage() {
             </p>
           </div>
           <StageList progress={progress} rows={kind === 'human' ? HUMAN_ROWS : undefined} />
-          <p className="text-muted-foreground font-mono text-xs">
-            keep this tab open — the work happens here, not on the server
-          </p>
+          {/* The beforeunload guard only catches tab close/reload — a sidebar
+              click is a plain SPA navigation, so the warning has to do the work. */}
+          <div className="border-review border-l-2 pl-3">
+            <p className="text-sm leading-relaxed">
+              Stay on this page until it finishes. The distilling and upload happen in this tab —
+              navigating away (the sidebar included) throws the run away and you start over.
+            </p>
+          </div>
           {!isCommitted(progress) && (
             <Button type="button" variant="outline" onClick={() => abort.current?.abort()}>
               Cancel
