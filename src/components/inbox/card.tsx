@@ -23,6 +23,7 @@ export type InboxCard = {
   title: string
   origin: string | null
   status: string
+  intent: string | null
   kind: string
   recordedAt: string
   expiresAt: string | null
@@ -81,6 +82,9 @@ function expiresTag(expiresAt: string | null, now: number): string | null {
 function statusInk(status: string): { label: string; text: string; dot: string } {
   if (status === 'resolved') return { label: 'resolved', text: 'text-approve', dot: 'bg-approve' }
   if (status === 'in_review') return { label: 'in review', text: 'text-review', dot: 'bg-review' }
+  // needs_info is deliberately grey — a waiting state, not a fourth loud hue.
+  if (status === 'needs_info')
+    return { label: 'needs info', text: 'text-muted-foreground', dot: 'bg-muted-foreground' }
   return { label: 'open', text: 'text-cobalt', dot: 'bg-cobalt' }
 }
 
@@ -199,6 +203,12 @@ export function WalkthroughCard({
             </>
           )}
           <span>{card.projectName ?? 'General'}</span>
+          {card.intent && (
+            <>
+              <span className="text-border"> · </span>
+              <span>{card.intent}</span>
+            </>
+          )}
         </p>
 
         <div className="text-muted-foreground mt-auto flex items-baseline gap-x-2 pt-1 font-mono text-xs">

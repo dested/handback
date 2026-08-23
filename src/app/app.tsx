@@ -26,15 +26,16 @@ import { cn } from '~/lib/utils'
 /** The personal space's key in every facet — teamId is null and null is not a Map key you can read back. */
 const PERSONAL = 'personal'
 
-type StatusKey = 'all' | 'open' | 'in_review' | 'resolved'
+type StatusKey = 'all' | 'open' | 'in_review' | 'needs_info' | 'resolved'
 
 const STATUS_LABELS: Record<StatusKey, string> = {
   all: 'All',
   open: 'Open',
   in_review: 'In review',
+  needs_info: 'Needs info',
   resolved: 'Resolved',
 }
-const STATUS_ORDER: StatusKey[] = ['all', 'open', 'in_review', 'resolved']
+const STATUS_ORDER: StatusKey[] = ['all', 'open', 'in_review', 'needs_info', 'resolved']
 
 type Filters = {
   status: StatusKey

@@ -10,9 +10,10 @@ import {
   spaceId,
   type SpaceOwner,
 } from './access'
-import { inviteEmail, sendEmail } from './email'
+import { agentConfigured, runWalkthroughChat } from './agent'
+import { inviteEmail, sendEmail, walkthroughQuestionEmail } from './email'
 import { env } from './env'
-import { isPlatformAdmin, requireAdmin, teamHasFeature, userHasFeature } from './features'
+import { isPlatformAdmin, requireAdmin, teamHasFeature, userHasFeature, userIsPro } from './features'
 import {
   MAX_FILE_BYTES,
   MAX_WALKTHROUGH_BYTES,
@@ -26,8 +27,10 @@ import {
 } from './limits'
 import { log } from './logger'
 import { briefFrameLimit, formatWalkthrough } from './mcp-format'
+import { unsubscribeUrl } from './notify'
 import { prisma } from './prisma'
 import { checkLimit } from './ratelimit'
+import { refineConfigured, runRefine } from './refine'
 import { latestRecorderRelease } from './releases'
 import { expiryFor } from './retention'
 import { indexWalkthrough, searchWalkthroughIds } from './search'
@@ -616,6 +619,8 @@ const projectsRouter = router({
         name: p.name,
         slug: p.slug,
         originHints: p.originHints,
+        // Standing project context, prepended to every brief in this project.
+        instructions: p.instructions ?? null,
         walkthroughCount: p._count.walkthroughs,
       }))
     }),
@@ -635,6 +640,7 @@ const projectsRouter = router({
         name: true,
         slug: true,
         teamId: true,
+        instructions: true,
         // The space's name off the relation, so a list spanning several teams
         // costs no extra query.
         team: { select: { name: true } },
@@ -648,6 +654,7 @@ const projectsRouter = router({
           name: p.name,
           slug: p.slug,
           teamId: p.teamId,
+          instructions: p.instructions ?? null,
           spaceName: p.team?.name ?? 'Personal',
           walkthroughCount: p._count.walkthroughs,
         }))
@@ -704,6 +711,9 @@ const projectsRouter = router({
         // Optional, not defaulted: the UI no longer edits hints, and a rename
         // must not silently wipe the routing an upload depends on.
         originHints: z.array(z.string().trim().max(200)).max(20).optional(),
+        // Standing project context. Optional like the hints — only touched when
+        // present; a trimmed-empty string clears it back to null.
+        instructions: z.string().trim().max(4000).nullable().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -719,6 +729,9 @@ const projectsRouter = router({
         data: {
           name: input.name,
           ...(input.originHints ? { originHints: input.originHints } : {}),
+          ...(input.instructions !== undefined
+            ? { instructions: input.instructions ? input.instructions : null }
+            : {}),
         },
       })
       return { ok: true }
@@ -731,6 +744,7 @@ const walkthroughListSelect = {
   title: true,
   origin: true,
   status: true,
+  intent: true,
   kind: true,
   recordedAt: true,
   uploadedAt: true,
@@ -838,13 +852,36 @@ const proposedTaskSchema = z.object({
 const commentStamp = (ms: number) =>
   `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`
 
+/**
+ * Refine's outputs live as Json columns; the viewer reads them through these,
+ * which never throw — an un-refined or malformed blob degrades to the empty
+ * shape (`[]` for health, `null` for curation) rather than breaking `get`.
+ */
+const healthJsonSchema = z.array(
+  z.object({
+    severity: z.enum(['info', 'warn']),
+    text: z.string(),
+    atMs: z.number().nullable().default(null),
+  })
+)
+const curationJsonSchema = z.object({
+  frames: z
+    .array(z.object({ path: z.string(), caption: z.string(), atMs: z.number().nullable() }))
+    .default([]),
+  excluded: z
+    .array(z.object({ startMs: z.number(), endMs: z.number(), reason: z.string() }))
+    .default([]),
+})
+/** A chat turn's applied tool calls, for the transcript's meta line. */
+const chatActionsSchema = z.array(z.object({ action: z.string(), detail: z.string() }))
+
 const walkthroughsRouter = router({
   list: protectedProcedure
     .input(
       z.object({
         teamId: z.string().nullable(),
         projectId: z.string().optional(),
-        status: z.enum(['open', 'in_review', 'resolved']).optional(),
+        status: z.enum(WALKTHROUGH_STATUSES).optional(),
       })
     )
     .query(async ({ ctx, input }) => {
@@ -867,6 +904,7 @@ const walkthroughsRouter = router({
         title: g.title,
         origin: g.origin,
         status: g.status,
+        intent: g.intent,
         kind: g.kind,
         recordedAt: g.recordedAt.toISOString(),
         uploadedAt: g.uploadedAt.toISOString(),
@@ -928,6 +966,7 @@ const walkthroughsRouter = router({
           title: g.title,
           origin: g.origin,
           status: asStatus(g.status),
+          intent: g.intent,
           kind: g.kind,
           recordedAt: g.recordedAt.toISOString(),
           expiresAt: iso(g.expiresAt),
@@ -996,6 +1035,8 @@ const walkthroughsRouter = router({
         title: g.title,
         origin: g.origin,
         status: g.status,
+        // 'bug' | 'feature' | 'idea' | null — what the recording is FOR.
+        intent: g.intent,
         kind: g.kind,
         // The whole credential for /w/<token>; null = not shared. Members only
         // ever see it here (the admin read-only path passes through too — a
@@ -1011,6 +1052,21 @@ const walkthroughsRouter = router({
         errorCount: g.errorCount,
         droppedCount: g.droppedCount,
         bytes: Number(g.bytes),
+        // Refine's outputs, when it ran: the complete ledger, the pass status
+        // ('running' | 'done' | 'failed' | null), and when it last finished.
+        summaryMd: g.summaryMd,
+        refineStatus: g.refineStatus,
+        refinedAt: iso(g.refinedAt),
+        // Capture-QC notes and the keyframe curation, both read leniently — an
+        // un-refined or malformed blob degrades to [] / null, never a throw.
+        health: (() => {
+          const parsed = healthJsonSchema.safeParse(g.healthJson)
+          return parsed.success ? parsed.data : []
+        })(),
+        curation: (() => {
+          const parsed = curationJsonSchema.safeParse(g.curationJson)
+          return parsed.success ? parsed.data : null
+        })(),
         project: g.project,
         uploadedByName: g.uploadedBy?.name ?? null,
         // A child task's whole content; null on every ordinary walkthrough.
@@ -1043,9 +1099,14 @@ const walkthroughsRouter = router({
         notes: g.notes.map((n) => ({
           id: n.id,
           role: n.role,
+          // 'result' | 'question' | 'answer' — the viewer renders each kind
+          // differently (a question opens the answer box).
+          kind: n.kind,
           summary: n.summary,
           prUrl: n.prUrl,
           filesTouched: n.filesTouched,
+          // Proof-screenshot paths on this entry; their urls are in `files`.
+          evidencePaths: n.evidencePaths,
           bodyMd: n.bodyMd,
           authorName: n.authorName,
           createdAt: n.createdAt.toISOString(),
@@ -1092,9 +1153,7 @@ const walkthroughsRouter = router({
     }),
 
   setStatus: protectedProcedure
-    .input(
-      z.object({ walkthroughId: z.string(), status: z.enum(['open', 'in_review', 'resolved']) })
-    )
+    .input(z.object({ walkthroughId: z.string(), status: z.enum(WALKTHROUGH_STATUSES) }))
     .mutation(async ({ ctx, input }) => {
       const g = await prisma.walkthrough.findUnique({
         where: { id: input.walkthroughId },
@@ -1111,6 +1170,32 @@ const walkthroughsRouter = router({
           // it. Same call as the shared MCP path (setWalkthroughStatus).
           expiresAt: expiryFor(input.status),
         },
+      })
+      return { ok: true }
+    }),
+
+  /**
+   * Tag what a walkthrough is FOR — a bug to fix, a feature to build, an idea to
+   * assess — or clear it. Pure metadata; the brief's intent framing and the
+   * agent queue read it. Same access bar as setStatus.
+   */
+  setIntent: protectedProcedure
+    .input(
+      z.object({
+        walkthroughId: z.string(),
+        intent: z.enum(['bug', 'feature', 'idea']).nullable(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const g = await prisma.walkthrough.findUnique({
+        where: { id: input.walkthroughId },
+        select: { teamId: true, userId: true },
+      })
+      if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
+      await requireSpaceAccess(ctx.session.user.id, g)
+      await prisma.walkthrough.update({
+        where: { id: input.walkthroughId },
+        data: { intent: input.intent },
       })
       return { ok: true }
     }),
@@ -1144,6 +1229,92 @@ const walkthroughsRouter = router({
         data: { status: 'open', resolvedAt: null, expiresAt: expiryFor('open') },
       })
       return { ok: true }
+    }),
+
+  /**
+   * The reviewer answers an agent's question. Lands as a `kind:'answer'`
+   * reviewer note (the agent reads it in the brief on its next pull) and, only
+   * when the walkthrough is still waiting (`needs_info`), flips it back to open
+   * through the same expiryFor write every status change takes. A question on an
+   * already-resolved walkthrough leaves the status alone.
+   */
+  answerQuestion: protectedProcedure
+    .input(z.object({ walkthroughId: z.string(), text: z.string().trim().min(1).max(4000) }))
+    .mutation(async ({ ctx, input }) => {
+      const g = await prisma.walkthrough.findUnique({
+        where: { id: input.walkthroughId },
+        select: { teamId: true, userId: true, status: true },
+      })
+      if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
+      await requireSpaceAccess(ctx.session.user.id, g)
+      await prisma.walkthroughNote.create({
+        data: {
+          walkthroughId: input.walkthroughId,
+          role: 'reviewer',
+          kind: 'answer',
+          summary: input.text,
+          filesTouched: [],
+          authorName: ctx.session.user.name,
+        },
+      })
+      if (g.status === 'needs_info') {
+        await prisma.walkthrough.update({
+          where: { id: input.walkthroughId },
+          data: { status: 'open', resolvedAt: null, expiresAt: expiryFor('open') },
+        })
+      }
+      return { ok: true }
+    }),
+
+  /**
+   * Forward an agent's open question to the person who uploaded the walkthrough,
+   * by email — for when the reviewer looking at it isn't the one who can answer.
+   * Refuses if the caller is the uploader (they can answer here), if there's no
+   * open question, or if the uploader has no verified address to mail.
+   */
+  routeQuestion: protectedProcedure
+    .input(z.object({ walkthroughId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const g = await prisma.walkthrough.findUnique({
+        where: { id: input.walkthroughId },
+        select: {
+          teamId: true,
+          userId: true,
+          title: true,
+          uploadedById: true,
+          uploadedBy: { select: { name: true, email: true, emailVerified: true } },
+        },
+      })
+      if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
+      await requireSpaceAccess(ctx.session.user.id, g)
+      const note = await prisma.walkthroughNote.findFirst({
+        where: { walkthroughId: input.walkthroughId, kind: 'question' },
+        orderBy: { createdAt: 'desc' },
+        select: { summary: true },
+      })
+      if (!note) throw new TRPCError({ code: 'BAD_REQUEST', message: 'No open question' })
+      if (g.uploadedById === ctx.session.user.id) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'You are the uploader — answer it here',
+        })
+      }
+      if (!g.uploadedById || !g.uploadedBy || !g.uploadedBy.emailVerified) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'The uploader has no verified email',
+        })
+      }
+      const emailed = await sendEmail({
+        to: g.uploadedBy.email,
+        ...walkthroughQuestionEmail({
+          title: g.title,
+          question: note.summary,
+          url: `${env.BETTER_AUTH_URL}/walkthroughs/${input.walkthroughId}`,
+          unsubscribeUrl: unsubscribeUrl(g.uploadedById, 'results'),
+        }),
+      })
+      return { ok: true, emailed }
     }),
 
   /**
@@ -1314,13 +1485,29 @@ const walkthroughsRouter = router({
       return { ok: true }
     }),
 
-  /** Own comments only — `updateMany`'s where does the authorization. */
+  /**
+   * Delete a comment: your own anywhere, or — because they belong to nobody —
+   * the anonymous ones left by watch-page viewers (`userId: null`), which a
+   * member of the walkthrough's space moderates. Someone else's real comment is
+   * left untouched, the same silent no-op the old own-only `deleteMany` was.
+   */
   deleteComment: protectedProcedure
     .input(z.object({ commentId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      await prisma.walkthroughComment.deleteMany({
-        where: { id: input.commentId, userId: ctx.session.user.id },
+      const comment = await prisma.walkthroughComment.findUnique({
+        where: { id: input.commentId },
+        select: {
+          userId: true,
+          walkthrough: { select: { teamId: true, userId: true } },
+        },
       })
+      if (!comment) return { ok: true }
+      if (comment.userId === ctx.session.user.id) {
+        await prisma.walkthroughComment.delete({ where: { id: input.commentId } })
+      } else if (comment.userId === null) {
+        await requireSpaceAccess(ctx.session.user.id, comment.walkthrough)
+        await prisma.walkthroughComment.delete({ where: { id: input.commentId } })
+      }
       return { ok: true }
     }),
 
@@ -1688,6 +1875,136 @@ const walkthroughsRouter = router({
     }),
 
   /**
+   * Re-run the refine pass on a finalized agent walkthrough — a pro-gated,
+   * metered second read (server/refine.ts). Fire-and-forget: it flips
+   * `refineStatus` to 'running' and the client polls `get` for the outcome, so
+   * this returns as soon as the pass is kicked off. runRefine OWNS its safety
+   * (never throws, meters the CALLER), so the gates here are only about giving a
+   * fast, specific refusal instead of a silent no-op.
+   */
+  refine: protectedProcedure
+    .input(z.object({ walkthroughId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const g = await prisma.walkthrough.findUnique({
+        where: { id: input.walkthroughId },
+        select: {
+          teamId: true,
+          userId: true,
+          kind: true,
+          finalizedAt: true,
+          refineStatus: true,
+        },
+      })
+      if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
+      await requireSpaceAccess(ctx.session.user.id, g)
+      if (!(await userIsPro(ctx.session.user.id))) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Pro feature' })
+      }
+      if (g.kind !== 'agent') {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Only an agent walkthrough can be refined',
+        })
+      }
+      if (!g.finalizedAt) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'This walkthrough never finished uploading',
+        })
+      }
+      if (g.refineStatus === 'running') {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Refine is already running' })
+      }
+      if (!refineConfigured()) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: "Refine isn't configured on this server",
+        })
+      }
+      void runRefine(input.walkthroughId, { byUserId: ctx.session.user.id })
+      return { ok: true }
+    }),
+
+  /**
+   * Talk to the walkthrough assistant (server/agent.ts) — a pro-gated, metered
+   * agentic turn that can read the walkthrough and apply edits to it. Blocks on
+   * the reply because the turn's applied actions come back with it; each turn
+   * spends one polish call on the caller's budget.
+   */
+  chat: protectedProcedure
+    .input(z.object({ walkthroughId: z.string(), message: z.string().trim().min(1).max(4000) }))
+    .mutation(async ({ ctx, input }) => {
+      const g = await prisma.walkthrough.findUnique({
+        where: { id: input.walkthroughId },
+        select: { teamId: true, userId: true, kind: true, finalizedAt: true },
+      })
+      if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
+      await requireSpaceAccess(ctx.session.user.id, g)
+      if (!(await userIsPro(ctx.session.user.id))) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Pro feature' })
+      }
+      if (g.kind !== 'agent') {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Only an agent walkthrough has an assistant',
+        })
+      }
+      if (!g.finalizedAt) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'This walkthrough never finished uploading',
+        })
+      }
+      if (!agentConfigured()) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: "The assistant isn't configured on this server",
+        })
+      }
+      const { allowed } = await checkAndReservePolish(ctx.session.user.id)
+      if (!allowed) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: "This month's assistant budget is used up",
+        })
+      }
+      const result = await runWalkthroughChat({
+        walkthroughId: input.walkthroughId,
+        userId: ctx.session.user.id,
+        userName: ctx.session.user.name,
+        message: input.message,
+      })
+      return result
+    }),
+
+  /** The persisted assistant thread, oldest first — what a reload rehydrates. */
+  chatHistory: protectedProcedure
+    .input(z.object({ walkthroughId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      const g = await prisma.walkthrough.findUnique({
+        where: { id: input.walkthroughId },
+        select: { teamId: true, userId: true },
+      })
+      if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
+      await requireViewAccess(ctx.session.user.id, g)
+      const rows = await prisma.walkthroughChat.findMany({
+        where: { walkthroughId: input.walkthroughId },
+        orderBy: { createdAt: 'asc' },
+        take: 200,
+      })
+      return rows.map((r) => {
+        const parsed = chatActionsSchema.safeParse(r.actions)
+        return {
+          id: r.id,
+          role: r.role,
+          content: r.content,
+          actions: parsed.success ? parsed.data : [],
+          createdAt: r.createdAt.toISOString(),
+        }
+      })
+    }),
+
+  /**
    * The public read behind /w/<token> — no session, the token is the whole
    * credential (128+ bits, unguessable; the IP rate limit is defense in depth,
    * not the lock). Returns the same presigned-per-file shape the viewer gets,
@@ -1706,6 +2023,7 @@ const walkthroughsRouter = router({
         include: {
           takes: { orderBy: { index: 'asc' } },
           files: { where: { status: 'uploaded' }, orderBy: { path: 'asc' } },
+          comments: { orderBy: { createdAt: 'asc' } },
         },
       })
       if (!g || !g.finalizedAt) throw new TRPCError({ code: 'NOT_FOUND' })
@@ -1739,7 +2057,53 @@ const walkthroughsRouter = router({
             url: await presignGet(walkthroughKey(spaceId(space), g.id, f.path)),
           }))
         ),
+        // The margin notes, oldest first — the watch page shows them and lets a
+        // viewer add their own (sharedAddComment).
+        comments: g.comments.map((c) => ({
+          authorName: c.authorName,
+          atMs: c.atMs,
+          text: c.text,
+          createdAt: c.createdAt.toISOString(),
+        })),
       }
+    }),
+
+  /**
+   * A watch-page viewer leaves a comment — no session, the share token is the
+   * whole credential (same trust model as `shared`). The row is anonymous
+   * (`userId: null`) and its author name is suffixed "(viewer)" so members can
+   * tell it from a teammate's; a member of the space can delete it
+   * (deleteComment). IP-rate-limited as the only brake a public writer has.
+   */
+  sharedAddComment: publicProcedure
+    .input(
+      z.object({
+        token: z.string().min(8).max(80),
+        name: z.string().trim().min(1).max(60),
+        text: z.string().trim().min(1).max(2000),
+        atMs: z.number().int().min(0).nullable(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      if (ctx.ip !== null) {
+        const wait = checkLimit('share-comment', ctx.ip, { window: 3600, max: 30 })
+        if (wait !== null) throw new TRPCError({ code: 'TOO_MANY_REQUESTS' })
+      }
+      const g = await prisma.walkthrough.findUnique({
+        where: { shareToken: input.token },
+        select: { id: true, finalizedAt: true },
+      })
+      if (!g || !g.finalizedAt) throw new TRPCError({ code: 'NOT_FOUND' })
+      await prisma.walkthroughComment.create({
+        data: {
+          walkthroughId: g.id,
+          userId: null,
+          authorName: `${input.name} (viewer)`,
+          atMs: input.atMs,
+          text: input.text,
+        },
+      })
+      return { ok: true }
     }),
 })
 
@@ -2119,7 +2483,7 @@ const adminRouter = router({
     .input(
       z.object({
         query: z.string().trim().max(100).default(''),
-        status: z.enum(['open', 'in_review', 'resolved']).nullish(),
+        status: z.enum(WALKTHROUGH_STATUSES).nullish(),
       })
     )
     .query(async ({ ctx, input }) => {

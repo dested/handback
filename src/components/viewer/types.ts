@@ -11,7 +11,7 @@ type Outputs = inferRouterOutputs<AppRouter>
 export type Walkthrough = Outputs['walkthroughs']['get']
 export type Take = Walkthrough['takes'][number]
 
-export type WalkthroughStatus = 'open' | 'in_review' | 'resolved'
+export type WalkthroughStatus = 'open' | 'in_review' | 'needs_info' | 'resolved'
 
 /** One deduped keyframe. `file` is take-relative, e.g. `frames/03-0125.jpg`. */
 export type Frame = {

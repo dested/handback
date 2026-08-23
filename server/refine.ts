@@ -302,7 +302,12 @@ const SYNTH_OUTPUT_SCHEMA = {
  * Refine one walkthrough in place, or leave it be. NEVER throws: fire-and-forget
  * from finalize, so any failure is swallowed to a 'failed' status and logged.
  */
-export async function runRefine(walkthroughId: string): Promise<void> {
+export async function runRefine(
+  walkthroughId: string,
+  // A manual re-run from the viewer meters and pro-gates the CALLER, not the
+  // uploader — a pro teammate may refine a non-pro teammate's upload.
+  opts: { byUserId?: string } = {}
+): Promise<void> {
   const walkthrough = await prisma.walkthrough.findUnique({
     where: { id: walkthroughId },
     include: {
@@ -326,12 +331,12 @@ export async function runRefine(walkthroughId: string): Promise<void> {
   }
   if (walkthrough.refineStatus === 'running') return
 
-  const uploaderId = walkthrough.uploadedById
-  if (uploaderId === null || !(await userIsPro(uploaderId))) return
+  const payerId = opts.byUserId ?? walkthrough.uploadedById
+  if (payerId === null || !(await userIsPro(payerId))) return
 
   // Refine spends one metered Anthropic call, on the same per-user budget polish
   // uses. A refused reservation ends the pass before any provider is touched.
-  const budget = await checkAndReservePolish(uploaderId)
+  const budget = await checkAndReservePolish(payerId)
   if (!budget.allowed) return
 
   await prisma.walkthrough.update({

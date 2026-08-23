@@ -4,9 +4,10 @@
 // centered with the transcript under it — a screening, not the signed-in
 // two-column viewer; anything else falls back to take-by-take video + narration.
 
-import { useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useEffect, useMemo, useState } from 'react'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
+import { Button } from '~/components/ui/button'
 import { useTranscriptFile } from '~/components/viewer/final-cut'
 import { dateTime, mmss } from '~/components/viewer/format'
 import { SectionHead } from '~/components/viewer/section-head'
@@ -106,12 +107,128 @@ export function WatchPage() {
         ))
       )}
 
+      {shareToken && (
+        <WatchNotes
+          token={shareToken}
+          comments={walkthrough.comments}
+          currentAtMs={() => (finalUrl ? Math.round(player.outputMs) : null)}
+          onAdded={() => void shared.refetch()}
+        />
+      )}
+
       <p className="rule text-muted-foreground pt-6 text-center text-sm">
         Recorded with Handback →{' '}
         <Link to="/" className="text-cobalt hover:underline">
           handback.dev
         </Link>
       </p>
+    </div>
+  )
+}
+
+/** The watcher's name is theirs to keep — it rides along on every note they leave. */
+const NAME_KEY = 'handback.watch.name'
+
+type WatchComment = { authorName: string; text: string; atMs: number | null }
+
+/**
+ * The public screening's back-channel: notes anyone with the link can leave,
+ * optionally pinned to the moment on the player. Stamped notes lead with a mono
+ * cobalt `[m:ss]`; unstamped ones skip it. The name persists per browser so a
+ * repeat viewer isn't retyping it.
+ */
+function WatchNotes({
+  token,
+  comments,
+  currentAtMs,
+  onAdded,
+}: {
+  token: string
+  comments: readonly WatchComment[]
+  currentAtMs: () => number | null
+  onAdded: () => void
+}) {
+  const trpc = useTRPC()
+  const [name, setName] = useState('')
+  const [text, setText] = useState('')
+  const add = useMutation(
+    trpc.walkthroughs.sharedAddComment.mutationOptions({
+      onSuccess: () => {
+        setText('')
+        onAdded()
+      },
+    })
+  )
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(NAME_KEY)
+      if (stored) setName(stored)
+    } catch {
+      // Private mode or no storage — the field just starts empty.
+    }
+  }, [])
+
+  const error =
+    add.error &&
+    (add.error.data?.code === 'TOO_MANY_REQUESTS'
+      ? 'too many notes from this connection — try later'
+      : add.error.message)
+
+  return (
+    <div className="mx-auto max-w-2xl space-y-3 text-left">
+      <SectionHead>notes</SectionHead>
+      {comments.length > 0 ? (
+        <ul className="space-y-2">
+          {comments.map((comment, i) => (
+            <li key={i} className="text-sm leading-relaxed">
+              {comment.atMs !== null && (
+                <span className="text-cobalt font-mono">[{mmss(comment.atMs)}] </span>
+              )}
+              <span className="font-medium">{comment.authorName}</span> — {comment.text}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-muted-foreground text-sm">No notes yet.</p>
+      )}
+
+      <form
+        className="flex flex-wrap items-center gap-2"
+        onSubmit={(e) => {
+          e.preventDefault()
+          const trimmedName = name.trim()
+          const trimmedText = text.trim()
+          if (!trimmedName || !trimmedText) return
+          try {
+            localStorage.setItem(NAME_KEY, trimmedName)
+          } catch {
+            // Losing the remembered name is not worth failing the submit.
+          }
+          add.mutate({ token, name: trimmedName, text: trimmedText, atMs: currentAtMs() })
+        }}>
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="name"
+          aria-label="Your name"
+          className="border-input bg-background focus-visible:border-ring w-32 rounded-md border px-3 py-1.5 text-sm outline-none"
+        />
+        <input
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="Leave a note…"
+          aria-label="Note"
+          className="border-input bg-background focus-visible:border-ring min-w-0 flex-1 rounded-md border px-3 py-1.5 text-sm outline-none"
+        />
+        <Button
+          type="submit"
+          variant="outline"
+          disabled={add.isPending || !name.trim() || !text.trim()}>
+          leave a note
+        </Button>
+      </form>
+      {error && <p className="text-destructive text-sm">{error}</p>}
     </div>
   )
 }
