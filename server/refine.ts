@@ -14,9 +14,13 @@
 // prefill; JSON shape via structured outputs; `stop_reason: 'refusal'` degrades
 // like any other failure — Sonnet-not-Opus is the 2026-08-24 pricing decision,
 // decisions.md) and Haiku for the per-batch vision curation, which is cheap
-// classification against images the prompt already carries.
+// classification against images the prompt already carries. Vision frames are
+// downscaled to 800px JPEGs before sending, near-duplicate frames are skipped by
+// a dHash pass (click/nav/start frames immune), and the narration prefix is
+// prompt-cached so batches 2+ read it at a tenth of the price.
 
 import Anthropic from '@anthropic-ai/sdk'
+import sharp from 'sharp'
 import { z } from 'zod'
 import { spaceId } from './access'
 import { env } from './env'
@@ -40,6 +44,15 @@ const MAX_COMMENT_CHARS = 4_000
 /** Frames per vision request, and the ceiling of frames the pass will look at. */
 const VISION_BATCH = 12
 const MAX_VISION_FRAMES = 84
+/** Vision frames are downscaled before sending — classification survives 800px, tokens don't. */
+const VISION_MAX_EDGE = 800
+const VISION_JPEG_QUALITY = 70
+/** dHash hamming distance at or under this = near-duplicate of the last kept frame. */
+const DEDUP_HAMMING_MAX = 6
+/** Frames captured on an interaction are never deduped away — a click frame is load-bearing. */
+const PROTECTED_REASONS = new Set(['click', 'nav', 'start'])
+/** Ceiling on frames fetched+hashed for dedup, so a pathological recording stays bounded. */
+const MAX_DEDUP_CANDIDATES = 400
 /** Keepers past this get pruned by weight — a brief cites a handful, not a reel. */
 const MAX_KEEPERS = 20
 
@@ -71,7 +84,9 @@ export type Curation = {
 // Written by the recorder extension (src/components/viewer/types.ts). Parsed
 // defensively here: a missing or broken file yields empty arrays, never a throw.
 
-const recFrameSchema = z.object({ tMs: z.number(), file: z.string() }).passthrough()
+const recFrameSchema = z
+  .object({ tMs: z.number(), file: z.string(), reason: z.string().optional() })
+  .passthrough()
 const recLineSchema = z
   .object({ tMs: z.number(), endMs: z.number(), text: z.string() })
   .passthrough()
@@ -168,37 +183,137 @@ function pickEvenly<T>(items: T[], count: number): T[] {
   return out
 }
 
-type Candidate = { path: string; key: string; atMs: number | null }
+type Candidate = { path: string; key: string; atMs: number | null; reason: string | null }
 type Keeper = { path: string; caption: string; atMs: number | null; weight: number }
+
+/** A frame ready to send: downscaled JPEG bytes (or original bytes when sharp
+ *  couldn't process it) plus the media type those bytes carry. */
+type PreparedFrame = {
+  path: string
+  atMs: number | null
+  jpeg: Buffer
+  mediaType: 'image/jpeg' | 'image/png' | 'image/webp'
+}
+
+/** 64-bit dHash of a 9×8 grayscale raw buffer (72 bytes): bit(y*8+x) set when the
+ *  pixel is darker than its right neighbour. */
+function dHash(px: Buffer): bigint {
+  let hash = 0n
+  for (let y = 0; y < 8; y++) {
+    for (let x = 0; x < 8; x++) {
+      if (px[y * 9 + x]! < px[y * 9 + x + 1]!) hash |= 1n << BigInt(y * 8 + x)
+    }
+  }
+  return hash
+}
+
+/** Hamming distance between two dHashes — popcount of their xor. */
+function hamming(a: bigint, b: bigint): number {
+  let x = a ^ b
+  let count = 0
+  while (x > 0n) {
+    count += Number(x & 1n)
+    x >>= 1n
+  }
+  return count
+}
+
+/** Fetch, downscale, and perceptually dedup the candidate frames the vision pass
+ *  will see. Owns all frame I/O (curateFrames does no fetching). A sharp failure
+ *  degrades one frame to its raw bytes — it never throws, refine's contract holds. */
+async function prepareFrames(candidates: Candidate[]): Promise<PreparedFrame[]> {
+  type Prepared = PreparedFrame & { reason: string | null }
+  const prepared: Prepared[] = []
+  // The dHash of the most recent frame we kept (that had a hash); a near-duplicate
+  // of it is dropped. Corrupt frames carry a null hash and never set this.
+  let lastKeptHash: bigint | null = null
+
+  for (const c of pickEvenly(candidates, MAX_DEDUP_CANDIDATES)) {
+    let bytes: Buffer
+    try {
+      bytes = Buffer.from(await getObjectBytes(c.key))
+    } catch (err) {
+      log.warn(`[refine] frame ${c.path} unreadable: ${String(err)}`)
+      continue
+    }
+
+    let jpeg: Buffer
+    let mediaType: PreparedFrame['mediaType']
+    let hash: bigint | null
+    try {
+      jpeg = await sharp(bytes)
+        .resize(VISION_MAX_EDGE, VISION_MAX_EDGE, { fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: VISION_JPEG_QUALITY })
+        .toBuffer()
+      mediaType = 'image/jpeg'
+      const gray = await sharp(bytes).grayscale().resize(9, 8, { fit: 'fill' }).raw().toBuffer()
+      hash = dHash(gray)
+    } catch (err) {
+      // A corrupt image can't be downscaled or hashed: send it raw, and let a null
+      // hash keep it out of the dedup comparison entirely.
+      log.warn(`[refine] frame ${c.path} not processable, sending raw: ${String(err)}`)
+      const raw = mediaTypeFor(c.path)
+      if (!raw) continue
+      jpeg = bytes
+      mediaType = raw
+      hash = null
+    }
+
+    const isDuplicate =
+      !PROTECTED_REASONS.has(c.reason ?? '') &&
+      lastKeptHash !== null &&
+      hash !== null &&
+      hamming(hash, lastKeptHash) <= DEDUP_HAMMING_MAX
+    if (isDuplicate) continue
+    if (hash !== null) lastKeptHash = hash
+    prepared.push({ path: c.path, atMs: c.atMs, jpeg, mediaType, reason: c.reason })
+  }
+
+  if (prepared.length <= MAX_VISION_FRAMES) return prepared
+
+  // Over the cap: interaction frames survive whole, the rest fill what's left —
+  // blind sampling could drop a click frame, so protect them explicitly.
+  const isProtected = (f: Prepared) => PROTECTED_REASONS.has(f.reason ?? '')
+  const protectedFrames = prepared.filter(isProtected)
+  const unprotected = prepared.filter((f) => !isProtected(f))
+  const kept =
+    protectedFrames.length >= MAX_VISION_FRAMES
+      ? pickEvenly(protectedFrames, MAX_VISION_FRAMES)
+      : [...protectedFrames, ...pickEvenly(unprotected, MAX_VISION_FRAMES - protectedFrames.length)]
+  kept.sort((a, b) => (a.atMs ?? Infinity) - (b.atMs ?? Infinity))
+  return kept
+}
 
 async function curateFrames(
   client: Anthropic,
-  candidates: Candidate[],
+  frames: PreparedFrame[],
   narration: string
 ): Promise<Keeper[]> {
   const keepers: Keeper[] = []
-  // A running number keys each shown frame back to its candidate — the model
+  // A running number keys each shown frame back to its source — the model
   // echoes `k`, so it must be unique across every batch.
   let nextK = 0
 
-  for (let start = 0; start < candidates.length; start += VISION_BATCH) {
-    const batch = candidates.slice(start, start + VISION_BATCH)
+  for (let start = 0; start < frames.length; start += VISION_BATCH) {
+    const batch = frames.slice(start, start + VISION_BATCH)
     const content: Anthropic.ContentBlockParam[] = []
-    const shown = new Map<number, Candidate>()
+    const shown = new Map<number, PreparedFrame>()
+
+    // The narration is byte-identical across batches and leads the message so it
+    // caches: batch 1 writes the prefix, batches 2+ read it at a tenth of the price.
+    content.push({
+      type: 'text',
+      text: `Narration (timestamped):\n${narration}`,
+      cache_control: { type: 'ephemeral' },
+    })
 
     for (const frame of batch) {
-      const mediaType = mediaTypeFor(frame.path)
-      if (!mediaType) continue
-      let base64: string
-      try {
-        base64 = Buffer.from(await getObjectBytes(frame.key)).toString('base64')
-      } catch (err) {
-        log.warn(`[refine] frame ${frame.path} unreadable: ${String(err)}`)
-        continue
-      }
       const k = nextK++
       shown.set(k, frame)
-      content.push({ type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } })
+      content.push({
+        type: 'image',
+        source: { type: 'base64', media_type: frame.mediaType, data: frame.jpeg.toString('base64') },
+      })
       content.push({
         type: 'text',
         text: `frame ${k} — ${frame.atMs === null ? '??:??' : mmss(frame.atMs)}`,
@@ -206,10 +321,7 @@ async function curateFrames(
     }
     if (shown.size === 0) continue
 
-    content.push({
-      type: 'text',
-      text: `Narration (timestamped):\n${narration}\nReturn a verdict for every frame shown.`,
-    })
+    content.push({ type: 'text', text: 'Return a verdict for every frame shown.' })
 
     try {
       const message = await client.messages.create(
@@ -517,17 +629,26 @@ export async function runRefine(
       if (!mediaTypeFor(file.path)) continue
       const takeIdx = takes.findIndex((t) => file.path.startsWith(`${t.dir}/`))
       let atMs: number | null = null
+      let reason: string | null = null
       if (takeIdx >= 0) {
         const base = file.path.slice(file.path.lastIndexOf('/') + 1)
         const entry = recordings[takeIdx]!.frames.find(
           (fr) => fr.file.slice(fr.file.lastIndexOf('/') + 1) === base
         )
-        if (entry) atMs = offsets[takeIdx]! + entry.tMs
+        if (entry) {
+          atMs = offsets[takeIdx]! + entry.tMs
+          reason = entry.reason ?? null
+        }
       }
-      candidates.push({ path: file.path, key: walkthroughKey(space, walkthrough.id, file.path), atMs })
+      candidates.push({
+        path: file.path,
+        key: walkthroughKey(space, walkthrough.id, file.path),
+        atMs,
+        reason,
+      })
     }
     candidates.sort((a, b) => (a.atMs ?? Infinity) - (b.atMs ?? Infinity))
-    const sampled = pickEvenly(candidates, MAX_VISION_FRAMES)
+    const sampled = await prepareFrames(candidates)
 
     const narration = takes
       .flatMap((_, i) =>
