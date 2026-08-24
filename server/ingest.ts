@@ -460,6 +460,10 @@ const postResultSchema = z.object({
   prUrl: z.string().url().max(500).optional(),
   filesTouched: z.array(z.string().max(300)).max(100).optional(),
   body: z.string().max(20_000).optional(),
+  // Evidence paths from the evidence route — without this line the stdio MCP's
+  // REST path silently stripped them and only the hosted server's direct call
+  // ever landed evidence (fixed 2026-08-24).
+  evidence: z.array(z.string().max(300)).max(4).optional(),
   outcomes: z
     .array(
       z.object({
