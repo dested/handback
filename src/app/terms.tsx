@@ -110,9 +110,10 @@ export function TermsPage() {
 
       <Section heading="9. Fees">
         <p>
-          Handback is free during alpha. The pricing shown on our site describes intended plans and
-          is not an offer — no paid plan is live and nothing is being charged. Should that change,
-          you will be told before any charge, and you can stop using the service instead.
+          Handback is in an invite-only alpha and billing is not yet open. The pricing shown on
+          our site describes upcoming plans and is not an offer — no paid plan is live and nothing
+          is being charged today. Before any charge is ever made you will be told the price and
+          asked to opt in, and you can stop using the service instead.
         </p>
       </Section>
 
@@ -141,8 +142,8 @@ export function TermsPage() {
           To the fullest extent the law allows, we are not liable for indirect, incidental, special,
           consequential, or punitive damages, or for lost profits, revenue, or data. Our total
           liability for any claim relating to the service is limited to the greater of the amount
-          you paid us in the twelve months before the claim, or one hundred US dollars. Since the
-          service is currently free, that figure is one hundred dollars.
+          you paid us in the twelve months before the claim, or one hundred US dollars. While
+          billing is not open and you have paid us nothing, that figure is one hundred dollars.
         </p>
         <p>
           You agree to indemnify and hold us harmless against claims, damages, and costs arising

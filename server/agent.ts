@@ -25,7 +25,7 @@ import { indexWalkthrough } from './search'
 import { deleteKeys, getObjectText, putObjectText, walkthroughKey } from './storage'
 import type { Curation } from './refine'
 
-const MODEL = 'claude-opus-5'
+const MODEL = 'claude-sonnet-5'
 const MAX_TOKENS = 8_000
 const REQUEST_TIMEOUT_MS = 120_000
 const MAX_ITERATIONS = 12

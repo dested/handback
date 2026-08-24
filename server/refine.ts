@@ -10,10 +10,11 @@
 // otherwise untouched. The original report.md in S3 is never rewritten; the
 // refined text lives on the walkthrough row and the brief prefers it.
 //
-// Same model posture as structure.ts: Opus 5 for the synthesis (no assistant
+// Same model posture as structure.ts: Sonnet 5 for the synthesis (no assistant
 // prefill; JSON shape via structured outputs; `stop_reason: 'refusal'` degrades
-// like any other failure) and Haiku for the per-batch vision curation, which is
-// cheap classification against images the prompt already carries.
+// like any other failure — Sonnet-not-Opus is the 2026-08-24 pricing decision,
+// decisions.md) and Haiku for the per-batch vision curation, which is cheap
+// classification against images the prompt already carries.
 
 import Anthropic from '@anthropic-ai/sdk'
 import { z } from 'zod'
@@ -27,7 +28,7 @@ import { getObjectBytes, getObjectText, walkthroughKey } from './storage'
 import { checkAndReservePolish } from './usage'
 
 const VISION_MODEL = 'claude-haiku-4-5'
-const SYNTH_MODEL = 'claude-opus-5'
+const SYNTH_MODEL = 'claude-sonnet-5'
 const VISION_TIMEOUT_MS = 60_000
 const SYNTH_TIMEOUT_MS = 120_000
 const SYNTH_MAX_TOKENS = 16_000

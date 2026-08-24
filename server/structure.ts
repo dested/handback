@@ -26,7 +26,7 @@ import { z } from 'zod'
 import { env } from './env'
 import { log } from './logger'
 
-const MODEL = 'claude-opus-5'
+const MODEL = 'claude-sonnet-5'
 const REQUEST_TIMEOUT_MS = 120_000
 const MAX_TASKS = 10
 /** report.md for a long walkthrough is big but bounded; cap what we send anyway. */
