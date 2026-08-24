@@ -16,9 +16,17 @@ provisioned the test-mode products/prices/coupon (idempotent). User gained Strip
 `stripeCustomerId`, no DB @unique → no --accept-data-loss on predeploy). `/upgrade` rewritten as a
 real pricing wall with a graceful "billing off" fallback. Verified live in Stripe test mode:
 subscribe→pro, dup-reconcile→idempotent, upgrade→biz, cancel→revoked, $0-coupon activates with no
-card. `bun run typecheck` green. **Left for Sal:** set `STRIPE_WEBHOOK_SECRET` (dashboard endpoint
-or `stripe listen`) locally + in prod SSM, and add the four `STRIPE_*` to prod SSM. Landing/terms
-copy ("when billing opens" / "billing is not yet open") NOT touched — flagged, owner's call.
+card. `bun run typecheck` green.
+Follow-up (same day): **landing pricing fixed** (Pro/Business → real "Get Pro/Business" CTAs to
+/upgrade, dropped "coming soon"/"when billing opens"). **Shipped to prod** (commit 347ee95, CI
+success) and **wired prod on Stripe TEST/staging keys** via the Drydock portal (project `inloop`):
+all four `STRIPE_*` set in SSM, webhook endpoint `we_1U829a…` created at
+https://handback.dev/api/stripe/webhook, then `env.applyChanges` re-registered the task def +
+redeployed. Verified live: webhook route returns 400 (configured, verifying sigs) + /healthz 200.
+`cli/stripe-webhook-setup.ts` added (creates/rotates the endpoint, prints the whsec). **Prod runs
+test-mode keys deliberately** (owner: "set prod to stripe staging") — real cards won't charge;
+flip to live keys + re-run stripe-setup/webhook-setup in live mode to open real billing. terms.tsx
+"billing is not yet open" still NOT touched — flagged, owner's call.
 
 ## 2026-08-24 — untangle the viewer "exchange" pane
 Asked: "i hate the conversation thing on the right of the walkthrough… whos that for, what are the
