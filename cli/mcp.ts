@@ -171,12 +171,22 @@ registerTool(
         .max(4)
         .optional()
         .describe('Paths returned by attach_evidence, after uploading'),
+      outcomes: z
+        .array(
+          z.object({
+            point: z.string(),
+            status: z.enum(['fixed', 'partial', 'skipped', 'not_applicable']),
+            note: z.string().optional(),
+          })
+        )
+        .optional()
+        .describe('One entry per key point in the brief — how you addressed it'),
     },
   },
-  async ({ walkthroughId, summary, prUrl, filesTouched, body, evidence }) => {
+  async ({ walkthroughId, summary, prUrl, filesTouched, body, evidence, outcomes }) => {
     const result = await api<{ ok: boolean }>(
       `/walkthroughs/${encodeURIComponent(walkthroughId)}/result`,
-      { method: 'POST', body: { summary, prUrl, filesTouched, body, evidence } }
+      { method: 'POST', body: { summary, prUrl, filesTouched, body, evidence, outcomes } }
     )
     if ('error' in result) return result.error
     return text(

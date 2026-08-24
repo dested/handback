@@ -874,6 +874,25 @@ const curationJsonSchema = z.object({
 })
 /** A chat turn's applied tool calls, for the transcript's meta line. */
 const chatActionsSchema = z.array(z.object({ action: z.string(), detail: z.string() }))
+/** Refine's key points (Walkthrough.pointsJson) and a note's per-point outcomes
+ *  (WalkthroughNote.outcomesJson), read leniently — a malformed blob degrades to
+ *  the empty list rather than breaking `get`. */
+const keyPointsSchema = z.array(
+  z.object({
+    id: z.string(),
+    title: z.string(),
+    detail: z.string().catch(''),
+    severity: z.enum(['high', 'medium', 'low']).catch('medium' as const),
+    atMs: z.number().nullable().catch(null),
+  })
+)
+const pointOutcomesSchema = z.array(
+  z.object({
+    point: z.string(),
+    status: z.enum(['fixed', 'partial', 'skipped', 'not_applicable']),
+    note: z.string().catch(''),
+  })
+)
 
 const walkthroughsRouter = router({
   list: protectedProcedure
@@ -1057,6 +1076,16 @@ const walkthroughsRouter = router({
         summaryMd: g.summaryMd,
         refineStatus: g.refineStatus,
         refinedAt: iso(g.refinedAt),
+        // The refine-wave reads: the human-facing digest, the key-point ledger
+        // (empty on a malformed blob), the suggested title awaiting a human's
+        // accept/dismiss, and which refine stage last ran.
+        digestMd: g.digestMd,
+        suggestedTitle: g.suggestedTitle,
+        refineStage: g.refineStage,
+        points: (() => {
+          const parsed = keyPointsSchema.safeParse(g.pointsJson)
+          return parsed.success ? parsed.data : []
+        })(),
         // Capture-QC notes and the keyframe curation, both read leniently — an
         // un-refined or malformed blob degrades to [] / null, never a throw.
         health: (() => {
@@ -1108,6 +1137,12 @@ const walkthroughsRouter = router({
           // Proof-screenshot paths on this entry; their urls are in `files`.
           evidencePaths: n.evidencePaths,
           bodyMd: n.bodyMd,
+          // Per-key-point outcomes the agent reported for this note; [] on a
+          // malformed or absent blob.
+          outcomes: (() => {
+            const parsed = pointOutcomesSchema.safeParse(n.outcomesJson)
+            return parsed.success ? parsed.data : []
+          })(),
           authorName: n.authorName,
           createdAt: n.createdAt.toISOString(),
         })),
@@ -1566,9 +1601,31 @@ const walkthroughsRouter = router({
       })
       if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
       await requireSpaceAccess(ctx.session.user.id, g)
+      // A human just chose the title — drop refine's suggestion so it stops
+      // being offered.
       await prisma.walkthrough.update({
         where: { id: input.walkthroughId },
-        data: { title: input.title },
+        data: { title: input.title, suggestedTitle: null },
+      })
+      return { ok: true }
+    }),
+
+  /**
+   * Dismiss refine's suggested title without renaming — the reviewer is keeping
+   * the current title. Clears the suggestion so it stops being offered.
+   */
+  dismissSuggestedTitle: protectedProcedure
+    .input(z.object({ walkthroughId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const g = await prisma.walkthrough.findUnique({
+        where: { id: input.walkthroughId },
+        select: { teamId: true, userId: true },
+      })
+      if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
+      await requireSpaceAccess(ctx.session.user.id, g)
+      await prisma.walkthrough.update({
+        where: { id: input.walkthroughId },
+        data: { suggestedTitle: null },
       })
       return { ok: true }
     }),

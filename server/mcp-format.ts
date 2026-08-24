@@ -14,6 +14,11 @@ export type FormattableWalkthrough = {
   // Refine's outputs, when it ran: the complete ledger and the reviewer-curated
   // keyframe set / cut spans. All optional for the same back-compat reason.
   summaryMd?: string | null
+  // Refine's condensed brief and the numbered obligations an agent must address
+  // and report back on, one outcome per point. Optional: a wire body from an
+  // older server carries neither.
+  digestMd?: string | null
+  points?: Array<{ id: string; title: string; detail: string; severity: string; atMs: number | null }> | null
   projectInstructions?: string | null
   curation?: {
     frames: Array<{ path: string; caption: string; atMs: number | null }>
@@ -107,8 +112,19 @@ function intentFraming(intent: string | null | undefined): string | null {
  *  curated key frames up top when Refine picked a set, otherwise a length-scaled
  *  sample. */
 export function formatWalkthrough(walkthrough: FormattableWalkthrough): string {
-  const { reportMd, files, notes, comments, intent, summaryMd, projectInstructions, curation, ...meta } =
-    walkthrough
+  const {
+    reportMd,
+    files,
+    notes,
+    comments,
+    intent,
+    summaryMd,
+    digestMd,
+    points,
+    projectInstructions,
+    curation,
+    ...meta
+  } = walkthrough
   const maxFrames = briefFrameLimit(meta.durationMs)
   const curatedFrames = curation?.frames ?? []
 
@@ -164,8 +180,23 @@ export function formatWalkthrough(walkthrough: FormattableWalkthrough): string {
 
   const framing = intentFraming(intent)
 
+  // The numbered obligations: every key point becomes a line an agent must close
+  // out, and the last line tells it to report one outcome per point in post_result.
+  const pointLines =
+    points && points.length > 0
+      ? [
+          ...points.map(
+            (p) =>
+              `${p.id.toUpperCase()} ${p.atMs === null ? '' : `[${mmss(p.atMs)}] `}(${p.severity}) ${p.title} — ${p.detail}`
+          ),
+          "Address every key point above. When you post_result, pass outcomes: one entry per key point — {point: 'kp1', status: 'fixed'|'partial'|'skipped'|'not_applicable', note: one line on what you did or why not}.",
+        ]
+      : []
+
   return [
     ...(framing ? [framing] : []),
+    ...(digestMd ? ['--- digest ---', digestMd] : []),
+    ...(pointLines.length > 0 ? ['--- key points ---', pointLines.join('\n')] : []),
     JSON.stringify(meta, null, 2),
     ...(summaryMd ? ['--- summary ---', summaryMd] : []),
     ...(projectInstructions ? ['--- project instructions ---', projectInstructions] : []),

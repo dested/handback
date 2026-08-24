@@ -264,6 +264,17 @@ model Walkthrough {
   curationJson   Json?     @map("curation_json")
   refineStatus   String?   @map("refine_status") // 'running' | 'done' | 'failed'
   refinedAt      DateTime? @map("refined_at")
+  // The human-first read (2026-08-23 viewer rethink): digestMd = 2–4 plain
+  // sentences a person reads first; pointsJson = KeyPoint[] ({id 'kpN', title,
+  // detail, severity 'high'|'medium'|'low', atMs|null}) — the structured spine
+  // the brief numbers as obligations and post_result answers point by point;
+  // suggestedTitle = refine's title when a human-chosen one was kept (never
+  // overwritten); refineStage = 'reading'|'frames'|'writing' while running,
+  // null otherwise — the viewer's live progress copy.
+  digestMd       String?   @map("digest_md")
+  pointsJson     Json?     @map("points_json")
+  suggestedTitle String?   @map("suggested_title")
+  refineStage    String?   @map("refine_stage")
 
   takes     Take[]
   files     WalkthroughFile[]
@@ -318,6 +329,10 @@ model WalkthroughNote {
   prUrl         String?     @map("pr_url")
   filesTouched  String[]    @map("files_touched")
   bodyMd        String?     @map("body_md")
+  // On a kind:'result' note: PointOutcome[] ({point 'kpN', status
+  // 'fixed'|'partial'|'skipped'|'not_applicable', note}) mapping the agent's
+  // work back to the walkthrough's key points. Null from agents that predate it.
+  outcomesJson  Json?       @map("outcomes_json")
   authorName    String      @map("author_name")
   createdAt     DateTime    @default(now()) @map("created_at")
 

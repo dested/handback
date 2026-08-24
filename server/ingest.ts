@@ -460,6 +460,15 @@ const postResultSchema = z.object({
   prUrl: z.string().url().max(500).optional(),
   filesTouched: z.array(z.string().max(300)).max(100).optional(),
   body: z.string().max(20_000).optional(),
+  outcomes: z
+    .array(
+      z.object({
+        point: z.string(),
+        status: z.enum(['fixed', 'partial', 'skipped', 'not_applicable']),
+        note: z.string().optional(),
+      })
+    )
+    .optional(),
 })
 
 ingestRouter.post('/walkthroughs/:id/result', statusLimit, async (req, res) => {

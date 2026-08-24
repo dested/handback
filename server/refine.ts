@@ -49,6 +49,16 @@ export function refineConfigured(): boolean {
 /** One capture-QC note for the uploader. `atMs` is the walkthrough-wide clock. */
 export type HealthNote = { severity: 'info' | 'warn'; text: string; atMs: number | null }
 
+/** One distinct thing the narrator raised — the structured spine the brief
+ *  numbers as obligations and post_result answers point by point. */
+export type KeyPoint = {
+  id: string // 'kp1'… assigned in code, in ledger order
+  title: string
+  detail: string
+  severity: 'high' | 'medium' | 'low'
+  atMs: number | null
+}
+
 /** The keyframe curation: the frames worth citing, and the spans marked skippable
  *  (excluded is markers only — the video is never re-encoded). */
 export type Curation = {
@@ -251,16 +261,29 @@ async function curateFrames(
 
 // --- synthesis ------------------------------------------------------------
 
-const SYNTH_SYSTEM = `You are Handback's refine pass. You read one narrated screen walkthrough — its report, transcript, keyframe captions and capture-health notes — and write the two documents a coding agent and its human will actually read.
+const SYNTH_SYSTEM = `You are Handback's refine pass. You read one narrated screen walkthrough — its report, transcript, keyframe captions and capture-health notes — and write the documents a coding agent and its human will actually read.
 Rules:
+- digest is what the human sees first: 2–4 plain sentences — what this recording is, what the narrator wants, how urgent it reads. Written like a person, never a machine.
+- key_points is the structured spine: one entry per distinct thing raised — title in the narrator's own nouns, one-sentence detail, severity from the narrator's framing (high only when real damage is said or shown), at = the m:ss where it is raised (empty string when there is no moment). Complete but never padded; never invent.
 - summary_md is the LEDGER: one terse bullet per distinct thing the narrator raised — every bug, feature request, and idea, none merged, none invented — each with its m:ss stamp copied from the transcript and a severity word (high/medium/low) where the narrator's framing supports one. An hour-long recording gets a complete ledger, not a synopsis.
-- brief_md is the working brief an agent reads INSTEAD of the raw report: open with a one-paragraph situation statement, then one section per ledger item with concrete repro steps and checkable done-when criteria drawn only from what was said or shown, citing curated frames by their path and transcript moments by m:ss. Keep the narrator's own product nouns. Never invent behavior that was not narrated or visible.
+- brief_md opens with a one-paragraph situation statement, then one section PER KEY POINT headed 'KP1 — <title>' (KP numbering in key_points order), each with concrete repro steps and checkable done-when criteria drawn only from what was said or shown, citing curated frames by path and transcript moments by m:ss. Keep the narrator's own product nouns.
 - Respect the intent: bug = frame as defects to fix; feature = frame as things to build; idea = frame as an assessment to write, not work to do; untagged = no presumption.
 - title: a specific, ≤80-char name for the walkthrough in the narrator's own nouns.
 - health_extra: only genuine comprehension problems you noticed (audio that stops making sense, narration referring to something never visible), severity info or warn, at as m:ss or empty string.`
 
 const synthWireSchema = z.object({
   title: z.string().trim().min(1).max(200),
+  digest: z.string().trim().min(1),
+  key_points: z
+    .array(
+      z.object({
+        title: z.string().trim().min(1).max(200),
+        detail: z.string(),
+        severity: z.enum(['high', 'medium', 'low']),
+        at: z.string().max(10),
+      })
+    )
+    .max(24),
   summary_md: z.string(),
   brief_md: z.string(),
   health_extra: z.array(
@@ -275,9 +298,28 @@ const synthWireSchema = z.object({
 const SYNTH_OUTPUT_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['title', 'summary_md', 'brief_md', 'health_extra'],
+  required: ['title', 'digest', 'key_points', 'summary_md', 'brief_md', 'health_extra'],
   properties: {
     title: { type: 'string', description: 'Specific ≤80-char name in the narrator\'s nouns' },
+    digest: {
+      type: 'string',
+      description: '2–4 plain sentences a person reads first: what this recording is and what the narrator wants',
+    },
+    key_points: {
+      type: 'array',
+      description: 'every distinct thing the narrator raised, in order; typically 2–8; never invented',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['title', 'detail', 'severity', 'at'],
+        properties: {
+          title: { type: 'string', description: 'The point in the narrator\'s own nouns' },
+          detail: { type: 'string', description: 'One sentence on what was raised' },
+          severity: { type: 'string', enum: ['high', 'medium', 'low'] },
+          at: { type: 'string', description: 'm:ss where it is raised, or empty string when there is no moment' },
+        },
+      },
+    },
     summary_md: { type: 'string', description: 'The complete ledger, one bullet per raised item' },
     brief_md: { type: 'string', description: 'The intent-aware working brief an agent reads' },
     health_extra: {
@@ -339,9 +381,15 @@ export async function runRefine(
   const budget = await checkAndReservePolish(payerId)
   if (!budget.allowed) return
 
+  // Live progress for the viewer; a failed write never derails the pass.
+  const setStage = (stage: string | null) =>
+    prisma.walkthrough
+      .update({ where: { id: walkthrough.id }, data: { refineStage: stage } })
+      .catch(() => {})
+
   await prisma.walkthrough.update({
     where: { id: walkthrough.id },
-    data: { refineStatus: 'running' },
+    data: { refineStatus: 'running', refineStage: 'reading' },
   })
 
   try {
@@ -487,7 +535,11 @@ export async function runRefine(
       .join('\n')
       .slice(0, MAX_NARRATION_CHARS)
 
-    const keepers = sampled.length > 0 ? await curateFrames(client, sampled, narration) : []
+    let keepers: Keeper[] = []
+    if (sampled.length > 0) {
+      await setStage('frames')
+      keepers = await curateFrames(client, sampled, narration)
+    }
     const curation: Curation | null =
       keepers.length === 0
         ? null
@@ -516,6 +568,7 @@ export async function runRefine(
       .filter((part): part is string => part !== null)
       .join('\n\n')
 
+    await setStage('writing')
     const message = await client.messages.create(
       {
         model: SYNTH_MODEL,
@@ -536,6 +589,15 @@ export async function runRefine(
     if (!parsed.success) throw new Error('synthesis returned an unusable shape')
     const synth = parsed.data
 
+    // The structured spine: numbered in ledger order, stamps on the walkthrough clock.
+    const points: KeyPoint[] = synth.key_points.map((p, i) => ({
+      id: `kp${i + 1}`,
+      title: p.title,
+      detail: p.detail,
+      severity: p.severity,
+      atMs: p.at.trim() === '' ? null : parseStamp(p.at, durationMs),
+    }))
+
     // Model-flagged comprehension notes join the deterministic ones; their m:ss
     // parses on the same clock, an empty `at` means no moment.
     const healthExtra: HealthNote[] = synth.health_extra.map((h) => ({
@@ -554,25 +616,34 @@ export async function runRefine(
     }
 
     // Adopt the model's title only when the current one is a recorder default —
-    // never overwrite a name a human already chose.
+    // never overwrite a name a human already chose. When a human named it, the
+    // model's title becomes a suggestion instead of a rewrite.
+    const t = walkthrough.title.trim()
     const isDefaultTitle =
-      /^\d{4}-\d{2}-\d{2}[-_ ]/.test(walkthrough.title) || walkthrough.title === walkthrough.slug
+      /^\d{4}-\d{2}-\d{2}[-_ ]/.test(t) ||
+      t === walkthrough.slug ||
+      /^(session|recording|screen recording|walkthrough|untitled|new recording)( \d+)?$/i.test(t)
 
     await prisma.walkthrough.update({
       where: { id: walkthrough.id },
       data: {
+        digestMd: synth.digest,
+        pointsJson: points,
         summaryMd: synth.summary_md,
         refinedBriefMd: synth.brief_md,
         healthJson,
         curationJson,
         refineStatus: 'done',
+        refineStage: null,
         refinedAt: new Date(),
-        ...(isDefaultTitle ? { title: synth.title } : {}),
+        ...(isDefaultTitle
+          ? { title: synth.title, suggestedTitle: null }
+          : { suggestedTitle: synth.title !== walkthrough.title ? synth.title : null }),
       },
     })
 
     log.info(
-      `[refine] refined "${walkthrough.title}" (${walkthrough.id}): ${healthJson.length} notes, ${curationJson.frames.length} curated frames`
+      `[refine] refined "${walkthrough.title}" (${walkthrough.id}): ${points.length} key points, ${healthJson.length} notes, ${curationJson.frames.length} curated frames`
     )
 
     // Refined text is searchable; re-index off the fresh row.
@@ -591,7 +662,7 @@ export async function runRefine(
     }
   } catch (err) {
     await prisma.walkthrough
-      .update({ where: { id: walkthrough.id }, data: { refineStatus: 'failed' } })
+      .update({ where: { id: walkthrough.id }, data: { refineStatus: 'failed', refineStage: null } })
       .catch(() => {})
     log.warn(`[refine] pass failed for ${walkthrough.id}: ${String(err)}`)
   }

@@ -212,6 +212,21 @@ export async function listWalkthroughs(
 
 export type WalkthroughFileRef = { path: string; size: number; contentType: string; url: string }
 
+// Refine's numbered obligations (Walkthrough.pointsJson) and the per-point verdict
+// an agent posts back against them (WalkthroughNote.outcomesJson). Structural
+// twins of the shapes refine.ts writes and mcp-format.ts renders — declared here,
+// not imported, so this module doesn't depend on the ones edited alongside it.
+export type KeyPoint = {
+  id: string
+  title: string
+  detail: string
+  severity: 'high' | 'medium' | 'low'
+  atMs: number | null
+}
+const POINT_OUTCOME_STATUSES = ['fixed', 'partial', 'skipped', 'not_applicable'] as const
+type PointOutcomeStatus = (typeof POINT_OUTCOME_STATUSES)[number]
+export type PointOutcome = { point: string; status: PointOutcomeStatus; note: string }
+
 /** One entry of the review thread, as an agent (or the brief formatter) sees it. */
 export type WalkthroughNoteRef = {
   role: string
@@ -224,6 +239,8 @@ export type WalkthroughNoteRef = {
   // Walkthrough-relative paths of proof screenshots on this entry; the presigned
   // urls for them live in the `files` list (they're WalkthroughFile rows).
   evidencePaths: string[]
+  // One verdict per key point this result closed out; empty on notes that carry none.
+  outcomes: PointOutcome[]
   bodyMd: string | null
   authorName: string
   createdAt: string
@@ -263,6 +280,9 @@ export type WalkthroughDetail = {
   // complete ledger of everything raised; `curation` is the reviewer-curated
   // keyframe set plus the spans cut from the walkthrough.
   summaryMd: string | null
+  // Refine's condensed brief and its numbered key points; null before Refine runs.
+  digestMd: string | null
+  points: KeyPoint[] | null
   // Standing project context, prepended to every brief in this project.
   projectInstructions: string | null
   curation: {
@@ -276,6 +296,27 @@ export type WalkthroughDetail = {
   // Margin notes from humans, oldest first — part of the brief.
   comments: WalkthroughCommentRef[]
 }
+
+/** Parses `Walkthrough.pointsJson` leniently — a bad field degrades to no points
+ *  rather than failing the pull; a missing detail/severity/atMs falls to a default. */
+const pointsSchema = z.array(
+  z.object({
+    id: z.string(),
+    title: z.string(),
+    detail: z.string().catch(''),
+    severity: z.enum(['high', 'medium', 'low']).catch('medium' as const),
+    atMs: z.number().nullable().catch(null),
+  })
+)
+
+/** Parses `WalkthroughNote.outcomesJson` leniently — a bad field degrades to []. */
+const outcomesSchema = z.array(
+  z.object({
+    point: z.string(),
+    status: z.enum(POINT_OUTCOME_STATUSES),
+    note: z.string().catch(''),
+  })
+)
 
 /** Parses `Walkthrough.curationJson` — never throws; a malformed blob (or the
  *  null of an un-refined walkthrough) degrades to no curation. */
@@ -339,6 +380,9 @@ export async function getWalkthroughDetail(
   const curationParsed = curationSchema.safeParse(walkthrough.curationJson)
   const curation = curationParsed.success ? curationParsed.data : null
 
+  const pointsParsed = pointsSchema.safeParse(walkthrough.pointsJson)
+  const points = pointsParsed.success ? pointsParsed.data : null
+
   return {
     id: walkthrough.id,
     slug: walkthrough.slug,
@@ -361,6 +405,8 @@ export async function getWalkthroughDetail(
     })),
     intent: walkthrough.intent,
     summaryMd: walkthrough.summaryMd,
+    digestMd: walkthrough.digestMd,
+    points,
     projectInstructions: walkthrough.project?.instructions ?? null,
     curation,
     reportMd,
@@ -372,17 +418,21 @@ export async function getWalkthroughDetail(
         url: await presignGet(walkthroughKey(space, walkthrough.id, f.path)),
       }))
     ),
-    notes: walkthrough.notes.map((n) => ({
-      role: n.role,
-      kind: n.kind,
-      summary: n.summary,
-      prUrl: n.prUrl,
-      filesTouched: n.filesTouched,
-      evidencePaths: n.evidencePaths,
-      bodyMd: n.bodyMd,
-      authorName: n.authorName,
-      createdAt: n.createdAt.toISOString(),
-    })),
+    notes: walkthrough.notes.map((n) => {
+      const outcomesParsed = outcomesSchema.safeParse(n.outcomesJson)
+      return {
+        role: n.role,
+        kind: n.kind,
+        summary: n.summary,
+        prUrl: n.prUrl,
+        filesTouched: n.filesTouched,
+        evidencePaths: n.evidencePaths,
+        outcomes: outcomesParsed.success ? outcomesParsed.data : [],
+        bodyMd: n.bodyMd,
+        authorName: n.authorName,
+        createdAt: n.createdAt.toISOString(),
+      }
+    }),
     comments: walkthrough.comments.map((c) => ({
       authorName: c.authorName,
       atMs: c.atMs,
@@ -431,7 +481,13 @@ export type PostResultInput = {
   // Walkthrough-relative paths returned by requestEvidenceUploads and since
   // PUT — the proof screenshots to hang off this result.
   evidence?: string[]
+  // One verdict per key point in the brief; sanitized before it's stored.
+  outcomes?: Array<{ point: string; status: string; note?: string }>
 }
+
+/** A status is a PointOutcome status only if it's one of the four literals. */
+const isPointOutcomeStatus = (s: string): s is PointOutcomeStatus =>
+  (POINT_OUTCOME_STATUSES as readonly string[]).includes(s)
 
 /**
  * The return path: an agent posts what it did — a summary, optionally the PR
@@ -474,6 +530,18 @@ export async function postWalkthroughResult(
     }
   }
 
+  // Keep only well-formed outcomes: a real point id and one of the four statuses;
+  // note trimmed to 500 chars, the whole set capped at 24 (one per key point, with
+  // headroom). Stored only when something survives, so a note without outcomes
+  // leaves the column null.
+  const outcomes: PointOutcome[] = (input.outcomes ?? [])
+    .flatMap((o) => {
+      if (typeof o.point !== 'string' || o.point.length === 0) return []
+      if (!isPointOutcomeStatus(o.status)) return []
+      return [{ point: o.point, status: o.status, note: (o.note ?? '').slice(0, 500) }]
+    })
+    .slice(0, 24)
+
   await prisma.walkthroughNote.create({
     data: {
       walkthroughId: walkthrough.id,
@@ -485,6 +553,7 @@ export async function postWalkthroughResult(
       evidencePaths,
       bodyMd: input.body ?? null,
       authorName: auth.tokenName,
+      ...(outcomes.length > 0 ? { outcomesJson: outcomes } : {}),
     },
   })
   if (walkthrough.status === 'open') {

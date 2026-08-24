@@ -110,6 +110,27 @@ function readCuration(value: unknown): Curation {
   }
 }
 
+// --- key points (Walkthrough.pointsJson) ----------------------------------
+// Refine's key-point ledger. Read leniently for the model's payload; written
+// strictly by update_key_points with ids assigned in order.
+
+const keyPointReadSchema = z.array(
+  z.object({
+    id: z.string(),
+    title: z.string(),
+    detail: z.string().catch(''),
+    severity: z.enum(['high', 'medium', 'low']).catch('medium' as const),
+    atMs: z.number().nullable().catch(null),
+  })
+)
+
+type KeyPoint = z.infer<typeof keyPointReadSchema>[number]
+
+function readKeyPoints(value: unknown): KeyPoint[] {
+  const parsed = keyPointReadSchema.safeParse(value)
+  return parsed.success ? parsed.data : []
+}
+
 // --- the loop's shared context -------------------------------------------
 // Immutable for the life of one conversation: takes, offsets and the space never
 // change under the tools (remove_span deletes frames, never takes). Everything
@@ -157,7 +178,7 @@ const TOOLS: Anthropic.Tool[] = [
   {
     name: 'read_walkthrough',
     description:
-      'Read the full current state of the walkthrough — title, intent, summary, brief, health notes, curation, and every take\'s transcript on the walkthrough-wide m:ss clock. Call this before your first edit in a conversation.',
+      'Read the full current state of the walkthrough — title, intent, summary, digest, key points, brief, health notes, curation, and every take\'s transcript on the walkthrough-wide m:ss clock. Call this before your first edit in a conversation.',
     input_schema: { type: 'object', additionalProperties: false, properties: {} },
   },
   {
@@ -188,6 +209,46 @@ const TOOLS: Anthropic.Tool[] = [
       additionalProperties: false,
       required: ['brief_md'],
       properties: { brief_md: { type: 'string', description: 'The full replacement brief' } },
+    },
+  },
+  {
+    name: 'update_digest',
+    description: 'Replace the human-facing digest (markdown).',
+    input_schema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['digest_md'],
+      properties: { digest_md: { type: 'string', description: 'The full replacement digest, 1–2000 chars' } },
+    },
+  },
+  {
+    name: 'update_key_points',
+    description:
+      'Replace the key-point ledger. Points are re-ordered as given and re-ided kp1, kp2, … Up to 12 points.',
+    input_schema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['points'],
+      properties: {
+        points: {
+          type: 'array',
+          description: '0–12 key points, in the order they should read',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['title', 'severity'],
+            properties: {
+              title: { type: 'string', description: 'Short point title, 1–200 chars' },
+              detail: { type: 'string', description: 'Supporting detail, ≤300 chars' },
+              severity: { type: 'string', enum: ['high', 'medium', 'low'] },
+              at_ms: {
+                type: ['integer', 'null'],
+                description: 'Time on the walkthrough-wide clock in ms, or null if untimed',
+              },
+            },
+          },
+        },
+      },
     },
   },
   {
@@ -263,6 +324,19 @@ const TOOLS: Anthropic.Tool[] = [
 const titleInput = z.object({ title: z.string().trim().min(1).max(300) })
 const summaryInput = z.object({ summary_md: z.string().max(30_000) })
 const briefInput = z.object({ brief_md: z.string().max(60_000) })
+const digestInput = z.object({ digest_md: z.string().trim().min(1).max(2_000) })
+const keyPointsInput = z.object({
+  points: z
+    .array(
+      z.object({
+        title: z.string().trim().min(1).max(200),
+        detail: z.string().max(300).default(''),
+        severity: z.enum(['high', 'medium', 'low']),
+        at_ms: z.number().int().nullable().default(null),
+      })
+    )
+    .max(12),
+})
 const editLinesInput = z.object({
   take_dir: z.string().min(1),
   edits: z
@@ -307,6 +381,10 @@ async function runTool(ctx: Ctx, name: string, rawInput: unknown): Promise<ToolO
       return updateSummaryTool(ctx, rawInput)
     case 'update_brief':
       return updateBriefTool(ctx, rawInput)
+    case 'update_digest':
+      return updateDigestTool(ctx, rawInput)
+    case 'update_key_points':
+      return updateKeyPointsTool(ctx, rawInput)
     case 'edit_transcript_lines':
       return editTranscriptLinesTool(ctx, rawInput)
     case 'remove_span':
@@ -325,6 +403,8 @@ async function readWalkthroughTool(ctx: Ctx): Promise<string> {
       title: true,
       intent: true,
       summaryMd: true,
+      digestMd: true,
+      pointsJson: true,
       refinedBriefMd: true,
       healthJson: true,
       curationJson: true,
@@ -367,6 +447,16 @@ async function readWalkthroughTool(ctx: Ctx): Promise<string> {
     project: ctx.projectName,
     durationMs: ctx.durationMs,
     summaryMd: wt.summaryMd ? wt.summaryMd.slice(0, READ_SUMMARY_CHARS) : null,
+    digestMd: wt.digestMd ? wt.digestMd.slice(0, READ_SUMMARY_CHARS) : null,
+    // id, severity, m:ss (null when untimed), title, detail — the ledger the
+    // reviewer and coding agents read.
+    keyPoints: readKeyPoints(wt.pointsJson).map((p) => ({
+      id: p.id,
+      severity: p.severity,
+      at: p.atMs === null ? null : mmss(p.atMs),
+      title: p.title,
+      detail: p.detail,
+    })),
     briefMd: wt.refinedBriefMd ? wt.refinedBriefMd.slice(0, READ_BRIEF_CHARS) : null,
     health: wt.healthJson ?? [],
     curation: readCuration(wt.curationJson),
@@ -416,6 +506,43 @@ async function updateBriefTool(ctx: Ctx, rawInput: unknown): Promise<ToolOutcome
   return {
     content: JSON.stringify({ ok: true }),
     action: { action: 'update_brief', detail: 'brief rewritten' },
+  }
+}
+
+async function updateDigestTool(ctx: Ctx, rawInput: unknown): Promise<ToolOutcome> {
+  const { digest_md } = digestInput.parse(rawInput)
+  await prisma.walkthrough.update({
+    where: { id: ctx.walkthroughId },
+    data: { digestMd: digest_md },
+  })
+  await logRevision(ctx.walkthroughId, 'update_digest', { digest_md })
+  return {
+    content: JSON.stringify({ ok: true }),
+    action: { action: 'update_digest', detail: 'digest rewritten' },
+  }
+}
+
+async function updateKeyPointsTool(ctx: Ctx, rawInput: unknown): Promise<ToolOutcome> {
+  const { points } = keyPointsInput.parse(rawInput)
+  // Ids are assigned in order — kp1 is the first point, and so on.
+  const nextPoints: KeyPoint[] = points.map((p, i) => ({
+    id: `kp${i + 1}`,
+    title: p.title,
+    detail: p.detail,
+    severity: p.severity,
+    atMs: p.at_ms,
+  }))
+  await prisma.walkthrough.update({
+    where: { id: ctx.walkthroughId },
+    data: { pointsJson: nextPoints },
+  })
+  await logRevision(ctx.walkthroughId, 'update_key_points', { points })
+  return {
+    content: JSON.stringify({ set: nextPoints.length }),
+    action: {
+      action: 'update_key_points',
+      detail: `set ${nextPoints.length} key point${nextPoints.length === 1 ? '' : 's'}`,
+    },
   }
 }
 
@@ -627,7 +754,8 @@ async function setCuratedFramesTool(ctx: Ctx, rawInput: unknown): Promise<ToolOu
 // --- the conversation -----------------------------------------------------
 
 const SYSTEM = `You are the walkthrough assistant inside Handback. A walkthrough is a narrated screen recording a person made for a coding agent; you are talking to the REVIEWER who owns it, and you hold real tools over its content.
-What you can change: the title, the summary ledger, the agent brief, transcript line text, which keyframes are curated, and which time spans are excluded from the result. What you can never change: the video itself (excluded spans are markers — the video is not re-encoded), transcript timings, or the original uploaded report.md.
+What you can change: the title, the summary ledger, the digest, the key points, the agent brief, transcript line text, which keyframes are curated, and which time spans are excluded from the result. What you can never change: the video itself (excluded spans are markers — the video is not re-encoded), transcript timings, or the original uploaded report.md.
+The digest and key points are the human-facing read of the recording and drive what coding agents answer, so keep every edit to them faithful to what the narrator actually said and showed.
 Rules:
 - Act, then report. When the request is clear, apply it with tools in this turn and answer with one terse paragraph of what you changed. Ask a question only when genuinely ambiguous.
 - Read before you write: call read_walkthrough before your first edit of a conversation.
