@@ -1,5 +1,9 @@
 import { z } from 'zod'
 
+// An optional secret that treats an empty value (`KEY=` in .env) as unset, so a
+// blank line never crashes boot — it just disables the feature.
+const optionalSecret = z.preprocess((v) => (v === '' ? undefined : v), z.string().min(1).optional())
+
 const schema = z.object({
   DATABASE_URL: z.string().url(),
   BETTER_AUTH_SECRET: z.string().min(32, 'BETTER_AUTH_SECRET must be at least 32 chars'),
@@ -26,6 +30,18 @@ const schema = z.object({
   // Comma-separated emails that are platform admins even without the DB flag —
   // the bootstrap path for prod, where there's no shell to run cli/make-admin.
   ADMIN_EMAILS: z.string().default(''),
+  // Stripe billing. All optional: unset means billing is off — /upgrade falls
+  // back to the "write us" card, checkout/portal refuse cleanly, and the webhook
+  // route 503s. A dev without keys boots exactly as before.
+  //  - STRIPE_SECRET_KEY      sk_… — the API credential (test or live)
+  //  - STRIPE_WEBHOOK_SECRET  whsec_… — signs the webhook; without it the webhook
+  //                           route refuses (billing.sync is the local fallback)
+  //  - STRIPE_PRICE_PRO/BIZ   price_… — the recurring prices checkout sells;
+  //                           create them with `bun cli/stripe-setup.ts`
+  STRIPE_SECRET_KEY: optionalSecret,
+  STRIPE_WEBHOOK_SECRET: optionalSecret,
+  STRIPE_PRICE_PRO: optionalSecret,
+  STRIPE_PRICE_BIZ: optionalSecret,
 })
 
 export const env = schema.parse(process.env)

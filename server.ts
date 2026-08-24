@@ -15,6 +15,7 @@ import { prisma } from './server/prisma'
 import { latestRecorderRelease } from './server/releases'
 import { appRouter } from './server/router'
 import { startRetentionSweep } from './server/retention'
+import { stripeWebhookRouter } from './server/stripe-webhook'
 import { presignGet } from './server/storage'
 import { createContext } from './server/trpc'
 
@@ -79,6 +80,10 @@ async function createServer() {
   // Token-authed upload surface for the CLI / extension / MCP. Parses its own
   // JSON bodies; keep it after the auth mount, which needs the raw stream.
   app.use('/api/ingest', ingestRouter)
+
+  // Stripe billing webhook. Mounted here (before the SSR catch-all and outside
+  // any JSON parser) because signature verification needs the raw request body.
+  app.use('/api/stripe', stripeWebhookRouter)
 
   // Uncaught browser errors POST here so a broken client build alerts the owner.
   app.use('/api/client-error', clientErrorRouter)

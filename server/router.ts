@@ -13,7 +13,14 @@ import {
 import { agentConfigured, runWalkthroughChat } from './agent'
 import { inviteEmail, sendEmail, walkthroughQuestionEmail } from './email'
 import { env } from './env'
-import { isPlatformAdmin, requireAdmin, teamHasFeature, userHasFeature, userIsPro } from './features'
+import {
+  isPlatformAdmin,
+  requireAdmin,
+  teamHasFeature,
+  tierOfUser,
+  userHasFeature,
+  userIsPro,
+} from './features'
 import {
   MAX_FILE_BYTES,
   MAX_WALKTHROUGH_BYTES,
@@ -21,15 +28,20 @@ import {
   SPACE_QUOTA_BYTES,
 } from './ingest'
 import {
-  FREE_CLOUD_TRANSCRIBE_SECONDS,
-  FREE_WALKTHROUGHS_PER_MONTH,
   MAX_ACTIVE_TOKENS,
   MAX_REFINE_RUNS_PER_WALKTHROUGH,
-  PRO_ASSISTANT_TURNS,
-  PRO_CLOUD_TRANSCRIBE_SECONDS,
-  PRO_WALKTHROUGHS_PER_MONTH,
+  assistantCeiling,
   monthKey,
+  transcribeCeiling,
+  walkthroughCeiling,
 } from './limits'
+import {
+  billingConfigured,
+  getOrCreateCustomer,
+  priceForPlan,
+  reconcileByUser,
+  requireStripe,
+} from './stripe'
 import { LOCKED_PRICING_MODEL, pricingModelSchema } from './pricing'
 import { log } from './logger'
 import { briefFrameLimit, formatWalkthrough } from './mcp-format'
@@ -3126,7 +3138,10 @@ const adminRouter = router({
     }),
 
   setFeature: protectedProcedure
-    .input(z.object({ userId: z.string(), feature: z.enum(['team']), enabled: z.boolean() }))
+    // 'pro'/'biz' here are a hand comp — a full-access grant with no Stripe
+    // subscription. reconcile never touches an account without a Stripe customer,
+    // so a comp sticks until an admin flips it back.
+    .input(z.object({ userId: z.string(), feature: z.enum(['team', 'pro', 'biz']), enabled: z.boolean() }))
     .mutation(async ({ ctx, input }) => {
       await requireAdmin(ctx.session.user.id)
       const u = await prisma.user.findUnique({
@@ -3210,11 +3225,7 @@ const usageRouter = router({
       select: { email: true, isAdmin: true, features: true },
     })
     if (!u) throw new TRPCError({ code: 'NOT_FOUND' })
-    const tier: 'admin' | 'pro' | 'free' = isPlatformAdmin(u)
-      ? 'admin'
-      : userHasFeature(u, 'pro')
-        ? 'pro'
-        : 'free'
+    const tier = tierOfUser(u)
 
     // Personal first, then each team by name — the same order the rest of the
     // app lists spaces in (projects.all).
@@ -3251,21 +3262,16 @@ const usageRouter = router({
     // remaining is null (unmetered: admin or first-walkthrough magic), so the
     // page can render "N of M" only when both halves are real numbers.
     const transcribeLimitSeconds =
-      tier === 'admin' || cloud.firstWalkthroughMagic
-        ? null
-        : tier === 'pro'
-          ? PRO_CLOUD_TRANSCRIBE_SECONDS
-          : FREE_CLOUD_TRANSCRIBE_SECONDS
+      tier === 'admin' || cloud.firstWalkthroughMagic ? null : transcribeCeiling(tier)
 
-    // The assistant-turn ceiling: unmetered for admin, the Pro quota, else 0.
-    const assistantTurnsLimit =
-      tier === 'admin' ? null : tier === 'pro' ? PRO_ASSISTANT_TURNS : 0
+    // The assistant-turn ceiling: unmetered for admin, the tier quota otherwise
+    // (0 on free).
+    const assistantTurnsLimit = tier === 'admin' ? null : assistantCeiling(tier)
 
     // The monthly walkthrough meter: admin is unmetered (both null); everyone
     // else counts this month's creates against their tier ceiling. Read-only —
     // this reserves nothing.
-    const walkthroughsLimit =
-      tier === 'admin' ? null : tier === 'pro' ? PRO_WALKTHROUGHS_PER_MONTH : FREE_WALKTHROUGHS_PER_MONTH
+    const walkthroughsLimit = tier === 'admin' ? null : walkthroughCeiling(tier)
     let walkthroughsRemaining: number | null = null
     if (walkthroughsLimit !== null) {
       const usage = await prisma.monthlyUsage.findUnique({
@@ -3310,6 +3316,117 @@ const usageRouter = router({
   }),
 })
 
+/**
+ * Billing (Stripe). Checkout and the Customer Portal are the only two surfaces a
+ * user touches; the webhook (server/stripe-webhook.ts) is what actually flips
+ * entitlements. `sync` is the belt-and-suspenders path so a just-returned
+ * checkout reflects instantly without waiting on webhook delivery. Every
+ * procedure degrades cleanly when billing isn't configured.
+ */
+const ENTITLING_STATUSES = new Set(['active', 'trialing', 'past_due'])
+
+const billingRouter = router({
+  /** What the account's subscription looks like right now — drives /upgrade. */
+  status: protectedProcedure.query(async ({ ctx }) => {
+    const u = await prisma.user.findUnique({
+      where: { id: ctx.session.user.id },
+      select: {
+        plan: true,
+        subscriptionStatus: true,
+        currentPeriodEnd: true,
+        stripeCustomerId: true,
+      },
+    })
+    const plan = u?.plan === 'pro' || u?.plan === 'biz' ? u.plan : null
+    return {
+      configured: billingConfigured(),
+      plan,
+      status: u?.subscriptionStatus ?? null,
+      currentPeriodEnd: iso(u?.currentPeriodEnd),
+      hasCustomer: !!u?.stripeCustomerId,
+    }
+  }),
+
+  /** Start a Checkout Session for a plan; the client redirects to `url`. */
+  checkout: protectedProcedure
+    .input(z.object({ plan: z.enum(['pro', 'biz']) }))
+    .mutation(async ({ ctx, input }) => {
+      if (!billingConfigured()) {
+        throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'Billing is not open yet.' })
+      }
+      const s = requireStripe()
+      const me = ctx.session.user.id
+
+      // Already subscribed? Switching plans / updating cards belongs in the
+      // portal — a second Checkout would create a duplicate subscription.
+      const existing = await prisma.user.findUnique({
+        where: { id: me },
+        select: { subscriptionStatus: true },
+      })
+      if (existing?.subscriptionStatus && ENTITLING_STATUSES.has(existing.subscriptionStatus)) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: 'You already have a subscription — manage or change it from the billing portal.',
+        })
+      }
+
+      const price = priceForPlan(input.plan)
+      if (!price) {
+        throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'That plan is not available.' })
+      }
+      const customer = await getOrCreateCustomer(me)
+      const origin = env.BETTER_AUTH_URL
+      const session = await s.checkout.sessions.create({
+        mode: 'subscription',
+        customer,
+        line_items: [{ price, quantity: 1 }],
+        // Lets a customer type a promotion code (e.g. a 100%-off comp) at checkout.
+        allow_promotion_codes: true,
+        client_reference_id: me,
+        subscription_data: { metadata: { userId: me } },
+        success_url: `${origin}/upgrade?checkout=success`,
+        cancel_url: `${origin}/upgrade?checkout=cancel`,
+      })
+      if (!session.url) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Stripe returned no checkout URL.' })
+      }
+      return { url: session.url }
+    }),
+
+  /** Open the Stripe Customer Portal (cancel, switch plan, update card, invoices). */
+  portal: protectedProcedure.mutation(async ({ ctx }) => {
+    if (!billingConfigured()) {
+      throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'Billing is not open yet.' })
+    }
+    const s = requireStripe()
+    const u = await prisma.user.findUnique({
+      where: { id: ctx.session.user.id },
+      select: { stripeCustomerId: true },
+    })
+    if (!u?.stripeCustomerId) {
+      throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'No billing account yet.' })
+    }
+    const session = await s.billingPortal.sessions.create({
+      customer: u.stripeCustomerId,
+      return_url: `${env.BETTER_AUTH_URL}/upgrade`,
+    })
+    return { url: session.url }
+  }),
+
+  /** Pull the caller's live subscription state from Stripe and re-derive their
+   *  entitlements now — the instant-feedback path after returning from checkout,
+   *  and a manual repair if a webhook was ever missed. No-op without a customer. */
+  sync: protectedProcedure.mutation(async ({ ctx }) => {
+    if (!billingConfigured()) return { ok: false as const }
+    await reconcileByUser(ctx.session.user.id)
+    const u = await prisma.user.findUnique({
+      where: { id: ctx.session.user.id },
+      select: { plan: true, subscriptionStatus: true },
+    })
+    return { ok: true as const, plan: u?.plan ?? null, status: u?.subscriptionStatus ?? null }
+  }),
+})
+
 export const appRouter = router({
   me: protectedProcedure.query(({ ctx }) => ctx.session.user),
   recorder: recorderRouter,
@@ -3320,6 +3437,7 @@ export const appRouter = router({
   projects: projectsRouter,
   walkthroughs: walkthroughsRouter,
   usage: usageRouter,
+  billing: billingRouter,
   admin: adminRouter,
 })
 

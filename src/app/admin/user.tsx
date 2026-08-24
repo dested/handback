@@ -47,7 +47,6 @@ export function AdminUserPage() {
   if (!user.data) return <ErrorText message="No such user." />
 
   const u = user.data
-  const teamOn = u.features.includes('team')
 
   return (
     <div className="space-y-8">
@@ -68,26 +67,37 @@ export function AdminUserPage() {
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        {u.isAdmin ? (
-          // Admins have every feature implicitly — no toggle to lie with.
-          <span className="bg-cobalt-wash text-cobalt rounded px-2 py-0.5 text-xs font-medium">
-            team on
-          </span>
-        ) : (
-          <button
-            type="button"
-            aria-pressed={teamOn}
-            disabled={setFeature.isPending}
-            onClick={() => setFeature.mutate({ userId: u.id, feature: 'team', enabled: !teamOn })}
-            className={cn(
-              'rounded px-2 py-0.5 text-xs font-medium transition-colors',
-              teamOn
-                ? 'bg-cobalt-wash text-cobalt'
-                : 'bg-muted text-muted-foreground hover:text-foreground'
-            )}>
-            {teamOn ? 'team on' : 'team off'}
-          </button>
-        )}
+        {/* team/pro/biz comps — a direct grant with no Stripe subscription
+            (billing's webhook never touches an account without a customer). */}
+        {(['team', 'pro', 'biz'] as const).map((feat) => {
+          if (u.isAdmin) {
+            // Admins have every feature implicitly — no toggle to lie with.
+            return (
+              <span
+                key={feat}
+                className="bg-cobalt-wash text-cobalt rounded px-2 py-0.5 text-xs font-medium">
+                {feat} on
+              </span>
+            )
+          }
+          const on = u.features.includes(feat)
+          return (
+            <button
+              key={feat}
+              type="button"
+              aria-pressed={on}
+              disabled={setFeature.isPending}
+              onClick={() => setFeature.mutate({ userId: u.id, feature: feat, enabled: !on })}
+              className={cn(
+                'rounded px-2 py-0.5 text-xs font-medium transition-colors',
+                on
+                  ? 'bg-cobalt-wash text-cobalt'
+                  : 'bg-muted text-muted-foreground hover:text-foreground'
+              )}>
+              {feat} {on ? 'on' : 'off'}
+            </button>
+          )
+        })}
         <button
           type="button"
           aria-pressed={u.isAdmin}

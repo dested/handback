@@ -107,7 +107,9 @@ server/
                         optional S3_ENDPOINT (point at R2 without code changes),
                         GROQ_API_KEY / ANTHROPIC_API_KEY / RESEND_API_KEY + EMAIL_FROM (all
                         optional — each unset one disables its feature, nothing crashes),
-                        ADMIN_EMAILS (comma-separated bootstrap platform admins)
+                        ADMIN_EMAILS (comma-separated bootstrap platform admins),
+                        STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET / STRIPE_PRICE_PRO / STRIPE_PRICE_BIZ
+                        (all optional via optionalSecret — empty = unset; unset disables billing)
   auth.ts               better-auth: email+password, autoSignIn, reset/verify email, rate limits.
                         No sign-up hook — a personal space needs no provisioning, it just exists
   trpc.ts               context (session from headers) + public/protectedProcedure
@@ -116,12 +118,18 @@ server/
                         spaceId (teamId ?? userId — the S3 path segment) / slugify
   features.ts           entitlements: isPlatformAdmin (User.isAdmin OR ADMIN_EMAILS env),
                         teamHasFeature('team') checked at Team.owner, userIsPro ('pro' feature or
-                        admin), requireAdmin
+                        admin — biz grants 'pro' too so this stays true), requireAdmin.
+                        Features are 'team'|'pro'|'biz'. THE billing-entitlement math lives here:
+                        featuresForPlan/applyPlanFeatures (idempotent; billing owns pro/biz/team)
+                        + tierOfUser → 'admin'|'biz'|'pro'|'free' (the one tier resolver)
   limits.ts             tier ceilings (2026-08-24 final: free tier BACK — tiny counts, full
                         treatment): free 2 walkthroughs + 3 600s transcribe + 20 polish; pro
                         54 000s (15h) + 80 walkthroughs + 1 000 polish (abuse bound) +
                         PRO_ASSISTANT_TURNS=30/mo (real quota, Pro-only);
-                        MAX_REFINE_RUNS_PER_WALKTHROUGH=4, MAX_ACTIVE_TOKENS=10, monthKey()
+                        MAX_REFINE_RUNS_PER_WALKTHROUGH=4, MAX_ACTIVE_TOKENS=10, monthKey().
+                        Business tier (biz): 30h transcribe (108 000s) + 130 walkthroughs +
+                        1 600 polish; ceiling helpers transcribe/polish/walkthrough/assistantCeiling
+                        (tier) are the single source for usage.ts + /usage
   pricing.ts            the pricing PLANNING model: zod schema + LOCKED_PRICING_MODEL (owner's
                         2026-08-24 bench lock: $29/$49, 15h+80/30h+130, free 2, cost assumptions).
                         Saved edits live in AdminSetting 'pricing-model' (admin.pricingModel/
@@ -133,12 +141,23 @@ server/
                         unmetered. Walkthrough creates 429 at ingest declare past the tier cap
                         (re-push of a slug exempt). First-walkthrough magic stays dead
                         (decisions.md)
+  stripe.ts             THE Stripe boundary (only module that imports the SDK): typed client (null
+                        when unconfigured), billingConfigured, getOrCreateCustomer (race-safe),
+                        price⇆plan mapping, and reconcileByCustomer/reconcileByUser — THE ONLY
+                        writer of billing state, which PULLS live subscriptions and re-derives
+                        User.features (idempotent; safe against dup/out-of-order/missed events)
+  stripe-webhook.ts     POST /api/stripe/webhook — express.raw + signature verify → reconcile.
+                        Mounted before any parser (needs the raw body). 400 bad-sig, 500 on
+                        transient failure so Stripe retries, 503 when billing unconfigured
   router.ts             THE tRPC API: teams (incl. get/transferOwnership), invites (seat-capped),
                         tokens (user-scoped, no team input), projects (incl. `instructions`),
                         walkthroughs (incl. setIntent, answerQuestion/routeQuestion, refine, chat/
                         chatHistory, sharedAddComment), usage.mine — space inputs are
                         `teamId: string | null` (null = the caller's personal space). Pro gates
-                        throw FORBIDDEN with the LITERAL message 'Pro feature' (client contract)
+                        throw FORBIDDEN with the LITERAL message 'Pro feature' (client contract).
+                        billing.* (status/checkout/portal/sync) — Stripe Checkout + Customer Portal
+                        + the instant-sync-on-return path; admin.setFeature now toggles team|pro|biz
+                        (pro/biz = a hand comp, no Stripe)
   refine.ts             THE Refine pass (budget-gated, free tier included; manual re-run
                         walkthroughs.refine stays Pro): capture-health checks → Haiku vision
                         curation (frames downscaled 800px JPEG, dHash near-dup dedup with
@@ -201,6 +220,9 @@ server/
 cli/
   push.ts               `handback push` — declare → PUT xN → finalize; `--team <id>` or personal
   mcp.ts                stdio MCP server — the LOCAL fallback; prod uses server/mcp.ts at /mcp
+  stripe-setup.ts       idempotent Stripe provisioning: Pro $29 + Business $49 products/prices
+                        (matched by metadata / lookup_key) + a 100%-off comp coupon (promo
+                        HANDBACK100). Prints the price ids for .env. Run once per Stripe account/mode
   dev-bootstrap.ts      idempotent dev seed: user (admin + team feature) + owned Team + token
   migrate-teams.ts      the one-shot workspace→teams data migration (raw SQL + S3 re-prefixing;
                         idempotent/resumable). ALREADY RUN on prod 2026-08-02 — keep for reference
@@ -227,9 +249,11 @@ src/
                         client-side filtering. No provisioning state — Personal always exists
     walkthrough.tsx     WalkthroughPage: THE REVIEW DESK (2026-08-24 rethink — assembles
                         src/components/viewer/desk/*): full-bleed masthead over
-                        [tab rail | work | exchange]; state-driven hero tab; modes: editing
+                        [tab rail | work]; state-driven hero tab; the review is TABBED
+                        (exchange 3rd column deleted 2026-08-24pm — Conversation tab + Edit
+                        with AI tab + sign-off/answer on the Overview hero). Modes: editing
                         (CloudEditor), human (edit→share, no desk), child task (TaskBrief +
-                        Exchange). App sidebar forced to icon rail on this route
+                        SignOff/AnswerForm + Conversation). App sidebar forced to icon rail here
     projects.tsx        Projects list + create (origin-hints field removed from the UI)
     team.tsx            Members / Invites for team spaces (seat line, owner-only role select +
                         ownership transfer); a lone personal card otherwise. No guests
@@ -311,18 +335,24 @@ src/
                         masthead (crumb·title·StatusChip·intent pill·project·Copy-brief-when-open·⋯;
                         suggested-title use/dismiss row) · status-chip (dot+word, popover) ·
                         rail (vertical tabs w/ counts + refine control footer; horizontal <lg) ·
-                        overview-tab (state-driven hero: refining progress / digest+key points /
-                        THE VERDICT w/ per-point outcomes / question / signed-off+Keep) ·
-                        key-points (the table, seek chips) · exchange (ONE thread: notes+comments+
-                        assistant+activity+refine lines; one composer comment|assistant; pinned
-                        sign-off; needs_info answer form + voice) · markdown (react-markdown+gfm) ·
+                        overview-tab (state-driven hero + the reviewer's ACTION inline:
+                        refining progress / digest+key points / THE VERDICT w/ per-point
+                        outcomes + SignOff card / question + AnswerForm / signed-off+Keep) ·
+                        key-points (the table, seek chips) · conversation (ONE thread: notes+
+                        comments+activity+refine lines + a single comment box; NO assistant,
+                        NO sign-off) · review-actions (SignOff card + AnswerForm+voice, rendered
+                        on the Overview hero; self-guarding) · assistant (AssistantTab — the
+                        "Edit with AI" tab, Pro-gated, pulled out of the thread) · markdown
+                        (react-markdown+gfm) ·
                         recording-tab (stage + fixed 300px transcript col + Timeline) · frames-tab
                         (slideshow + staged deletes) · console-tab · report-tab (raw on purpose) ·
                         brief-tab (refined brief rendered; report.md fallback) · tasks-tab
                         (SplitChildren + gated SplitPanel) · use-walkthrough-media (recordings/
                         frames/player/staged-deletes hook) · use-voice-answer · types.
                         DELETED 2026-08-24: walkthrough-header, agent-view, agent-answer,
-                        assistant-panel, refine-panel, comments-panel, status-control.
+                        assistant-panel, refine-panel, comments-panel, status-control; then
+                        exchange (the single merged pane) DELETED 2026-08-24pm — split into
+                        conversation + review-actions + assistant.
                         Still live beside desk/: overflow-menu (usePopover +
                         kind/move/share/delete, inline arming, no window.confirm) ·
                         timeline (THE scrubber: source-global axis, cut tags are the only cut
@@ -435,6 +465,7 @@ extension/              Handback Recorder — the Chrome MV3 extension (own npm 
 | `/privacy` · `/terms` | Legal pages (linked from the marketing footer) | `src/app/{privacy,terms}.tsx` |
 | `/docs` | **How Handback works** — the loop, the hosted `claude mcp add` line, all six MCP tools, teams, FAQ. Public, legal-page chrome, linked from marketing nav + footer | `src/app/docs.tsx` |
 | `POST /api/client-error` | Browser error beacon (prod only) → alert email pipeline; per-IP rate-limited | `server/alerts.ts` |
+| `POST /api/stripe/webhook` | Stripe billing webhook — raw-body signature verify → reconcile the customer's entitlements from live subscriptions | `server/stripe-webhook.ts` |
 | `/app` | **Walkthroughs** — ALL spaces as a card GRID (not a list), light filter toolbar (search · status segments w/ mono counts · Space/Project popover selects, shown only when >1 space / any projects) over one `walkthroughs.inbox` query, client-side filtered. Cards carry a keyframe thumbnail (agent kind) or a paper title-card; rename lives in a per-card ⋯ menu via `walkthroughs.rename` | `src/app/app.tsx` + `src/components/inbox/card.tsx` |
 | `/upload` | Desktop intake: drop a clip → **for an agent** (distill) or **for a person** (ships whole, `kind: 'human'`, edit in the viewer) → upload (reuses capture lib + phone components) | `src/app/upload.tsx` |
 | `/walkthroughs/:walkthroughId` | The viewer (`/gripes/:id` 302s here) | `src/app/walkthrough.tsx` |
@@ -447,7 +478,7 @@ extension/              Handback Recorder — the Chrome MV3 extension (own npm 
 | `POST /share-target` | PWA share sheet target — SW intercepts + stashes; Express fallback 303s to /phone | `public/sw.js` · `server.ts` |
 | `/admin` (+ `/users[/:id]`, `/teams[/:id]`, `/walkthroughs`, `/usage`, `/costs`) | Platform-admin console — sidebar shell, overview stats, users + drill-down, teams + seat editor, platform feed, per-space usage, cost estimator (live anchors from `admin.costStats` + client-side scenario sliders → per-user cost + tier margins) | `src/app/admin/*` |
 | `/usage` | The account's own meters: storage per space vs 20 GB/500, cloud budgets, tokens n/10, expiring ≤7d — `usage.mine` | `src/app/usage.tsx` |
-| `/upgrade` | Pro pitch: refine · assistant · polish · budgets; invite-only during alpha (mailto sal@dested.com); pro accounts see the stamp | `src/app/upgrade.tsx` |
+| `/upgrade` | Pro/Business pricing wall → Stripe Checkout (`billing.checkout`), Manage subscription → Customer Portal (`billing.portal`); syncs on `?checkout=success`. Falls back to the invite-only mailto card when billing is unconfigured; comped accounts see the stamp | `src/app/upgrade.tsx` |
 | `/dashboard` | redirect → /app (legacy) | `routes.tsx` |
 | `/healthz` | DB probe | `server.ts` |
 | `/api/auth/*` · `/api/trpc/*` | better-auth · tRPC | `server.ts` |
@@ -499,7 +530,10 @@ tokens/deleted users still read) · **WalkthroughAccess** (the agent trace: toke
 pulled/status/result, 'pulled' deduped per 10 min) · ApiToken (**user-scoped**, no team column;
 sha256 hash only; `hb_` prefix; lastUsedAt stamped on ingest auth) · **WalkthroughComment**
 (margin notes, optional `atMs` on the output clock; rides into the brief; own-delete only) ·
-User.notifyUploads / notifyDigest (email mutes) + digestSentAt · Walkthrough.searchText (the
+User billing columns (Stripe): `stripeCustomerId` (plain, code-unique, indexed — NOT a DB
+@unique, so the prod predeploy needs no --accept-data-loss), `stripeSubscriptionId`, `plan`
+('pro'|'biz'|null), `subscriptionStatus`, `currentPeriodEnd` — a display mirror; `features` stays
+the enforcement truth · User.notifyUploads / notifyDigest (email mutes) + digestSentAt · Walkthrough.searchText (the
 FTS corpus, filled at finalize) · **Walkthrough.parentId / briefMd** (a split-out task: a
 metadata-only child row — no files, takes, or bytes; `briefMd` IS its report; self-relation
 "split" with `onDelete: SetNull` so children outlive a deleted parent as standalone tasks) ·
@@ -1260,7 +1294,9 @@ reaches the container on a plain push.
   also fixed ingest silently stripping `evidence`); assistant gains update_digest/
   update_key_points. **client** — /walkthroughs/:id rebuilt as the full-bleed review desk
   (masthead bar, vertical tab rail, state-driven hero incl. THE VERDICT "what you raised → what
-  came back", ONE exchange thread + composer replacing four panels; app sidebar forced to icon
+  came back", ONE exchange thread + composer replacing four panels — itself untangled
+  2026-08-24pm into Conversation tab + Edit-with-AI tab + Overview-hero sign-off/answer, see
+  plans/2026-08-24-exchange-untangle.md; app sidebar forced to icon
   rail on the route; react-markdown). **pricing** (same day, owner) — free tier killed in copy
   AND code (0 budget, magic removed, pro 15h), landing = Pro $20/15h · Business $40/30h ·
   Enterprise, all "coming soon". Cost model: real cost ≈ $1.50/recorded-hr (refine-dominated;

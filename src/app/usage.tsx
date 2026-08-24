@@ -11,8 +11,9 @@ import { cn } from '~/lib/utils'
 
 const GB = 1024 * 1024 * 1024
 
-const TIER_META: Record<'admin' | 'pro' | 'free', string> = {
+const TIER_META: Record<'admin' | 'biz' | 'pro' | 'free', string> = {
   admin: 'platform admin · unmetered',
+  biz: 'business plan · resets monthly',
   pro: 'pro plan · resets monthly',
   free: 'free plan',
 }

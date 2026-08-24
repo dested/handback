@@ -2,6 +2,57 @@
 
 > ADR-lite: what was decided, why, what was rejected. Append-only.
 
+## 2026-08-24 — Billing is Stripe Checkout + Customer Portal; entitlements reconcile FROM Stripe
+**Why:** billing finally exists (owner: "wire this fully… make sure it's bulletproof"). The paid
+plans are the locked $29 Pro / $49 Business, sold as two Stripe recurring prices via **hosted
+Checkout**; management (cancel, switch, card, invoices) is the **Customer Portal**. The subscriber
+is the **User** (per-account, matching the existing `features` model — a team inherits from its
+owner), not the team. **Business is now a real entitlement**: `biz` is added, a superset of `pro`,
+and both paid plans **bundle `team`** (owner's call — canceling revokes team creation too). `biz`
+lifts the metered ceilings to 30h/130 walkthroughs (assistant turns stay the single modeled
+turnQuota, shared with pro). The whole "which ceiling" question now routes through one resolver
+(`tierOfUser` → 'admin'|'biz'|'pro'|'free') + ceiling helpers in limits.ts, so usage.ts and /usage
+can't drift.
+**The bulletproofing that matters:** the webhook NEVER applies a delta from an event payload. The
+single writer of billing state is `reconcileByCustomer()`, which **pulls the customer's live
+subscriptions from Stripe** and computes the correct `features` + mirror. That makes duplicate
+delivery, out-of-order delivery, and missed events all converge to the same answer next time any
+event lands (or `billing.sync` runs). `applyPlanFeatures` is idempotent and preserves unrelated
+features. `features` on the row stays the enforcement source of truth; the Stripe columns are the
+link + a display cache. Signature-verified raw-body webhook at `/api/stripe/webhook` (mounted
+before any parser); a bad signature is a 400, a transient reconcile failure a 500 so Stripe
+retries. Checkout-return calls `billing.sync` so entitlement is instant without waiting on the
+webhook. **Comps:** `allow_promotion_codes` at checkout + a 100%-off coupon (promo `HANDBACK100`),
+AND `/admin` can toggle `pro`/`biz` directly (a comp with no Stripe subscription — reconcile only
+runs for accounts that have a Stripe customer, so a hand comp sticks). Verified live in test mode:
+subscribe→pro, dup-reconcile→idempotent, upgrade→biz, cancel→revoked, $0-coupon activates with no
+card. Billing is fully optional — with `STRIPE_SECRET_KEY` unset the app boots and runs exactly as
+before, /upgrade shows the "write us" fallback.
+**Rejected:** per-event delta application (the classic race/duplicate footgun — pull-and-reconcile
+instead); per-team subscriptions (the model is per-user; a team reads its owner); a DB `@unique` on
+`stripe_customer_id` (adding it would demand `--accept-data-loss` on the prod predeploy, which is
+deliberately flag-free — uniqueness is enforced in `getOrCreateCustomer` + a plain index instead);
+Stripe.js/embedded checkout (hosted redirect needs no client SDK, no publishable key); a separate
+`biz` for assistant turns (one modeled turnQuota covers both paid tiers).
+
+## 2026-08-24 — The viewer review is TABBED, not one merged pane (amends the 2026-08-24 rethink)
+**Why:** the rethink's "one exchange thread replacing four panels" (see the rethink entry below /
+plans/2026-08-23-viewer-rethink.md) fused three unrelated jobs into a single 360px right column —
+the human↔agent review + sign-off, timestamped comments, AND an AI assistant that *edits* the
+walkthrough — behind a `comment | assistant` composer toggle. Owner couldn't tell who the pane was
+for, what the two toggle buttons did, or what "the chat" was ("bad placement… make better
+decisions"). Consolidation traded four honest panels for one dishonest one. **Decided:** the AI
+assistant is an authoring tool, NOT part of the review, so it gets its own **Edit with AI** tab;
+the thread becomes a **Conversation** rail tab (single comment box, no toggle); and — the forced
+move — the **sign-off card + needs_info answer form migrate onto the Overview/Verdict hero**
+(`review-actions.tsx`) so the product's core action sits with the verdict instead of behind a tab.
+The 360px third column is deleted; the desk is `[rail | work]`.
+**Rejected:** keeping the merged pane and just relabeling the toggle (the audiences are different,
+a label doesn't fix that); removing the assistant entirely (it's wanted, just misplaced); burying
+sign-off inside the Conversation tab (hides the one thing a reviewer is here to do).
+**Kept:** the rethink's state-driven hero, key-point spine, THE VERDICT layout, full-bleed desk.
+See plans/2026-08-24-exchange-untangle.md.
+
 ## 2026-08-24 — The free tier is back: tiny counts, full treatment (supersedes "free tier dead")
 **Why:** owner reversal same day ("wait wait shit, we need a free tier… real small usage, like 1
 or 2 walkthroughs"). The funnel needs a taste of the product, and the taste must include the magic:

@@ -20,9 +20,8 @@ type Tier = {
   soon?: boolean
 }
 
-// Billing hasn't opened, so no card here may imply a charge. The prices are real
-// intentions and stay visible; the CTA and the badge say plainly that these
-// plans are coming soon and the alpha is invite-only.
+// Billing is live: the paid plans check out through Stripe. Their CTAs go to
+// /upgrade (which requires sign-in, then hands off to Stripe Checkout).
 const tiers: Tier[] = [
   {
     name: 'Free',
@@ -36,25 +35,21 @@ const tiers: Tier[] = [
   {
     name: 'Pro',
     price: '$29',
-    unit: 'per seat / mo, when billing opens',
+    unit: 'per reviewer / mo',
     quota: 'Up to 15 hours and 80 walkthroughs / mo',
     blurb: 'Your agent over MCP, the refine pass, and the walkthrough assistant',
-    cta: 'Request access',
-    href: 'mailto:sal@dested.com?subject=Handback%20Alpha',
+    cta: 'Get Pro',
+    to: '/upgrade',
     featured: true,
-    badge: 'Coming soon',
-    soon: true,
   },
   {
     name: 'Business',
     price: '$49',
-    unit: 'per seat / mo, when billing opens',
+    unit: 'per reviewer / mo',
     quota: 'Up to 30 hours and 130 walkthroughs / mo',
     blurb: 'Teams — invite reviewers, roles, projects',
-    cta: 'Request access',
-    href: 'mailto:sal@dested.com?subject=Handback%20Alpha',
-    badge: 'Coming soon',
-    soon: true,
+    cta: 'Get Business',
+    to: '/upgrade',
   },
   {
     name: 'Enterprise',
@@ -72,8 +67,8 @@ export function Pricing() {
       <SectionLabel>Pricing</SectionLabel>
       <SectionHeading>Priced per reviewer, not per walkthrough.</SectionHeading>
       <p className="text-muted-foreground mt-4 max-w-xl text-sm leading-relaxed">
-        The free tier is live today — record, and every walkthrough comes back refined. Billing on
-        the paid plans hasn't opened yet; they're coming soon, and the alpha is invite-only.
+        The free tier is live today — record, and every walkthrough comes back refined. Upgrade to
+        Pro or Business whenever you need more room; cancel anytime.
       </p>
       <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {tiers.map((tier) => {

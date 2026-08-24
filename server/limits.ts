@@ -26,6 +26,46 @@ export const PRO_ASSISTANT_TURNS = 30
 /** Walkthroughs a non-admin account may create per month (the locked plan's Pro cap). */
 export const PRO_WALKTHROUGHS_PER_MONTH = 80
 
+// Business tier (the locked plan's $49 SKU: 30 hours, 130 walkthroughs). biz is a
+// superset of pro — same assistant-turn quota (the pricing model carries one
+// turnQuota, not a per-tier one), just higher transcription/walkthrough ceilings.
+// The polish ceiling stays an abuse bound, scaled with the walkthrough cap.
+/** Business cloud transcription quota: 30 hours per user per month. */
+export const BIZ_CLOUD_TRANSCRIBE_SECONDS = 108_000
+/** Business polish-call ceiling per user per month (abuse bound, ~pro×1.6). */
+export const BIZ_POLISH_CALLS = 1_600
+/** Walkthroughs a Business account may create per month (the locked plan's cap). */
+export const BIZ_WALKTHROUGHS_PER_MONTH = 130
+
+// The ceiling a metered (non-admin) tier gets, in one place so usage.ts and the
+// /usage page can't drift. `admin` is unmetered and never reaches these.
+type MeteredTier = 'biz' | 'pro' | 'free'
+
+export function transcribeCeiling(tier: MeteredTier): number {
+  return tier === 'biz'
+    ? BIZ_CLOUD_TRANSCRIBE_SECONDS
+    : tier === 'pro'
+      ? PRO_CLOUD_TRANSCRIBE_SECONDS
+      : FREE_CLOUD_TRANSCRIBE_SECONDS
+}
+
+export function polishCeiling(tier: MeteredTier): number {
+  return tier === 'biz' ? BIZ_POLISH_CALLS : tier === 'pro' ? PRO_POLISH_CALLS : FREE_POLISH_CALLS
+}
+
+export function walkthroughCeiling(tier: MeteredTier): number {
+  return tier === 'biz'
+    ? BIZ_WALKTHROUGHS_PER_MONTH
+    : tier === 'pro'
+      ? PRO_WALKTHROUGHS_PER_MONTH
+      : FREE_WALKTHROUGHS_PER_MONTH
+}
+
+/** Assistant turns are Pro-and-up only (0 on free); biz shares the Pro quota. */
+export function assistantCeiling(tier: MeteredTier): number {
+  return tier === 'free' ? 0 : PRO_ASSISTANT_TURNS
+}
+
 /** Walkthroughs a free account may create per month — small on purpose; each gets the full cloud treatment. */
 export const FREE_WALKTHROUGHS_PER_MONTH = 2
 

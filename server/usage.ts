@@ -14,28 +14,26 @@
 //      Assistant turns stay Pro-only. (2026-08-24 owner reversal — the free
 //      cloud tier is back, tiny counts, full treatment.)
 
-import { isPlatformAdmin, userHasFeature } from './features'
+import { type Tier, tierOfUser } from './features'
 import {
-  FREE_CLOUD_TRANSCRIBE_SECONDS,
-  FREE_POLISH_CALLS,
-  FREE_WALKTHROUGHS_PER_MONTH,
   PRO_ASSISTANT_TURNS,
-  PRO_CLOUD_TRANSCRIBE_SECONDS,
-  PRO_POLISH_CALLS,
-  PRO_WALKTHROUGHS_PER_MONTH,
+  assistantCeiling,
   monthKey,
+  polishCeiling,
+  transcribeCeiling,
+  walkthroughCeiling,
 } from './limits'
 import { prisma } from './prisma'
 
 /** The account's cloud tier, resolved in one query. `admin` short-circuits to
- *  unmetered; `pro` picks the higher ceiling. */
-async function tierOf(userId: string): Promise<{ admin: boolean; pro: boolean }> {
+ *  unmetered; `biz` > `pro` > `free` pick progressively higher ceilings. */
+async function tierOf(userId: string): Promise<Tier> {
   const u = await prisma.user.findUnique({
     where: { id: userId },
     select: { email: true, isAdmin: true, features: true },
   })
-  if (!u) return { admin: false, pro: false }
-  return { admin: isPlatformAdmin(u), pro: userHasFeature(u, 'pro') }
+  if (!u) return 'free'
+  return tierOfUser(u)
 }
 
 /** `remaining` is null when the caller is unmetered (magic or admin). */
@@ -51,9 +49,9 @@ export async function checkAndReserveTranscribe(
   userId: string,
   seconds: number
 ): Promise<TranscribeReservation> {
-  const { admin, pro } = await tierOf(userId)
-  if (admin) return { allowed: true, remaining: null }
-  const limit = pro ? PRO_CLOUD_TRANSCRIBE_SECONDS : FREE_CLOUD_TRANSCRIBE_SECONDS
+  const tier = await tierOf(userId)
+  if (tier === 'admin') return { allowed: true, remaining: null }
+  const limit = transcribeCeiling(tier)
   const month = monthKey(new Date())
   return await prisma.$transaction(async (tx) => {
     const row = await tx.monthlyUsage.upsert({
@@ -78,9 +76,9 @@ export async function checkAndReserveTranscribe(
  * PRO_POLISH_CALLS with Pro).
  */
 export async function checkAndReservePolish(userId: string): Promise<{ allowed: boolean }> {
-  const { admin, pro } = await tierOf(userId)
-  if (admin) return { allowed: true }
-  const limit = pro ? PRO_POLISH_CALLS : FREE_POLISH_CALLS
+  const tier = await tierOf(userId)
+  if (tier === 'admin') return { allowed: true }
+  const limit = polishCeiling(tier)
   const month = monthKey(new Date())
   return await prisma.$transaction(async (tx) => {
     const row = await tx.monthlyUsage.upsert({
@@ -105,9 +103,9 @@ export async function checkAndReservePolish(userId: string): Promise<{ allowed: 
 export async function checkAndReserveAssistantTurn(
   userId: string
 ): Promise<{ allowed: boolean; remaining: number | null }> {
-  const { admin, pro } = await tierOf(userId)
-  if (admin) return { allowed: true, remaining: null }
-  if (!pro) return { allowed: false, remaining: 0 }
+  const tier = await tierOf(userId)
+  if (tier === 'admin') return { allowed: true, remaining: null }
+  if (tier === 'free') return { allowed: false, remaining: 0 }
   const month = monthKey(new Date())
   return await prisma.$transaction(async (tx) => {
     const row = await tx.monthlyUsage.upsert({
@@ -136,9 +134,9 @@ export async function checkAndReserveAssistantTurn(
 export async function checkAndReserveWalkthrough(
   userId: string
 ): Promise<{ allowed: boolean; remaining: number | null; limit: number | null }> {
-  const { admin, pro } = await tierOf(userId)
-  if (admin) return { allowed: true, remaining: null, limit: null }
-  const limit = pro ? PRO_WALKTHROUGHS_PER_MONTH : FREE_WALKTHROUGHS_PER_MONTH
+  const tier = await tierOf(userId)
+  if (tier === 'admin') return { allowed: true, remaining: null, limit: null }
+  const limit = walkthroughCeiling(tier)
   const month = monthKey(new Date())
   return await prisma.$transaction(async (tx) => {
     const row = await tx.monthlyUsage.upsert({
@@ -172,8 +170,8 @@ export type CloudStatus = {
  * true while any polish budget for the tier remains this month.
  */
 export async function cloudStatus(userId: string): Promise<CloudStatus> {
-  const { admin, pro } = await tierOf(userId)
-  if (admin) {
+  const tier = await tierOf(userId)
+  if (tier === 'admin') {
     return {
       transcribeRemainingSeconds: null,
       polishAllowed: true,
@@ -181,8 +179,9 @@ export async function cloudStatus(userId: string): Promise<CloudStatus> {
       firstWalkthroughMagic: false,
     }
   }
-  const limit = pro ? PRO_CLOUD_TRANSCRIBE_SECONDS : FREE_CLOUD_TRANSCRIBE_SECONDS
-  const polishLimit = pro ? PRO_POLISH_CALLS : FREE_POLISH_CALLS
+  const limit = transcribeCeiling(tier)
+  const polishLimit = polishCeiling(tier)
+  const assistantLimit = assistantCeiling(tier)
   const month = monthKey(new Date())
   const row = await prisma.monthlyUsage.findUnique({
     where: { userId_month: { userId, month } },
@@ -191,7 +190,8 @@ export async function cloudStatus(userId: string): Promise<CloudStatus> {
   return {
     transcribeRemainingSeconds: Math.max(0, limit - used),
     polishAllowed: (row?.polishCalls ?? 0) < polishLimit,
-    assistantTurnsRemaining: pro ? Math.max(0, PRO_ASSISTANT_TURNS - (row?.assistantTurns ?? 0)) : 0,
+    assistantTurnsRemaining:
+      tier === 'free' ? 0 : Math.max(0, assistantLimit - (row?.assistantTurns ?? 0)),
     firstWalkthroughMagic: false,
   }
 }

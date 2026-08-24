@@ -32,6 +32,18 @@ model User {
   // hand-granted feature entitlements ("team").
   isAdmin       Boolean  @default(false) @map("is_admin")
   features      String[] @default([])
+  // Stripe billing (server/stripe.ts). `features` stays the enforcement source
+  // of truth — the webhook reconciles it from the subscription. These columns
+  // are the link back to Stripe (customer id, one per account — uniqueness is
+  // enforced in getOrCreateCustomer, not at the DB, so adding this column never
+  // needs prisma's --accept-data-loss on the prod predeploy) plus a cached mirror
+  // of the subscription for display and the Customer Portal. `plan` is the
+  // billing-owned tier: 'pro' | 'biz' | null.
+  stripeCustomerId     String?   @map("stripe_customer_id")
+  stripeSubscriptionId String?   @map("stripe_subscription_id")
+  plan                 String?
+  subscriptionStatus   String?   @map("subscription_status")
+  currentPeriodEnd     DateTime? @map("current_period_end")
   // Mail mutes + bookkeeping. One-click unsubscribe (the email footers) flips
   // them off; the /team personal card flips them back. `digestSentAt` is when
   // the last weekly digest went out (null = never), the guard that keeps the
@@ -57,6 +69,7 @@ model User {
   monthlyUsage MonthlyUsage[]
   comments     WalkthroughComment[]
 
+  @@index([stripeCustomerId])
   @@map("user")
 }
 

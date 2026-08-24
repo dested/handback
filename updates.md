@@ -2,6 +2,35 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-08-24 — wire Stripe billing, fully + bulletproof
+Asked: "start setting up stripe… wire this fully… make sure it's bulletproof… also give me a way
+to have like 100% off coupons." (Test keys pasted in chat → `.env` only.)
+Done (decisions.md): both paid tiers live — $29 Pro / $49 Business as Stripe Checkout, managed via
+the Customer Portal. Added the `biz` entitlement (superset of pro; both bundle `team`) + Business
+ceilings (30h/130) behind one `tierOfUser` resolver + ceiling helpers. `server/stripe.ts` is the
+only SDK boundary; `reconcileByCustomer` (pull-live-subs, idempotent) is the single writer of
+entitlements; signature-verified raw-body webhook at `/api/stripe/webhook`; `billing.*` tRPC
+(checkout/portal/status/sync) with sync-on-checkout-return. Comps: `allow_promotion_codes` + a
+100%-off coupon (promo `HANDBACK100`) and direct pro/biz toggles from `/admin`. `cli/stripe-setup.ts`
+provisioned the test-mode products/prices/coupon (idempotent). User gained Stripe columns (plain
+`stripeCustomerId`, no DB @unique → no --accept-data-loss on predeploy). `/upgrade` rewritten as a
+real pricing wall with a graceful "billing off" fallback. Verified live in Stripe test mode:
+subscribe→pro, dup-reconcile→idempotent, upgrade→biz, cancel→revoked, $0-coupon activates with no
+card. `bun run typecheck` green. **Left for Sal:** set `STRIPE_WEBHOOK_SECRET` (dashboard endpoint
+or `stripe listen`) locally + in prod SSM, and add the four `STRIPE_*` to prod SSM. Landing/terms
+copy ("when billing opens" / "billing is not yet open") NOT touched — flagged, owner's call.
+
+## 2026-08-24 — untangle the viewer "exchange" pane
+Asked: "i hate the conversation thing on the right of the walkthrough… whos that for, what are the
+two buttons, whats the chat, bad placement. make better decisions, ask questions."
+Done (per plans/2026-08-24-exchange-untangle.md, after a 3-question round): deleted the 360px
+exchange 3rd column. Split it — Conversation rail tab (thread + one comment box), Edit with AI
+rail tab (the assistant, pulled out of the thread, relabeled You/AI editor), and the sign-off card
++ needs_info answer form moved onto the Overview/Verdict hero (review-actions.tsx). Desk grid now
+[rail | work]. Reverses the 2026-08-24 "one merged pane" (decisions.md).
+Touched: src/components/viewer/desk/{conversation,assistant,review-actions,overview-tab,rail,types}.tsx,
+src/app/walkthrough.tsx, ui.md, cliffnotes.md; deleted desk/exchange.tsx.
+
 ## 2026-08-24 — /admin/pricing bench + /admin/costs plan-vs-actual
 Asked: "save this bench in the app so we can modify it and track it later… update the pricing
 charts in admin to trend against this data."
