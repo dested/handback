@@ -2,6 +2,17 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-08-24 — /admin/pricing bench + /admin/costs plan-vs-actual
+Asked: "save this bench in the app so we can modify it and track it later… update the pricing
+charts in admin to trend against this data."
+Done: /admin/pricing — the lever bench as an admin page (draft/save to AdminSetting via
+admin.pricingModel/setPricingModel, tier cards w/ cost breakdown, underwater canvas, at-scale
+tiles); /admin/costs — "Holding up against the plan" 6-month trend (refine runs, assistant turns,
+est AI/media $, $/active vs plan bar), tiers re-anchored to the saved model (killed the stale
+$20/3h ladder + "AI is a rounding error" copy; tier add-on is AI-only to avoid double-counting
+media). bx-verified live (save round-trip, no console errors); e2e re-baselined 4/4 (Free card).
+Touched: src/app/admin/{pricing,costs,layout}.tsx, src/app/routes.tsx, e2e/__screenshots__/
+
 ## 2026-08-24 — Locked plan + refine cost cut + the free tier returns
 Asked: lock the bench levers ($29/$49, 15h+80 / 30h+130, 30 turns); cut refine cost (downscale yes,
 never lose a click frame, cache narration); then "wait we need a free tier — 1 or 2 walkthroughs".

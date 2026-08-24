@@ -3,7 +3,7 @@
 
 import { useQuery } from '@tanstack/react-query'
 import { Link, Outlet } from 'react-router-dom'
-import { ArrowLeft, Building2, Calculator, Film, Gauge, HardDrive, Users } from 'lucide-react'
+import { ArrowLeft, Building2, Calculator, Film, Gauge, HardDrive, Scale, Users } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '~/components/ui/card'
 import {
   Sidebar,
@@ -28,6 +28,7 @@ const NAV = [
   { to: '/admin/teams', icon: Building2, label: 'Teams' },
   { to: '/admin/walkthroughs', icon: Film, label: 'Walkthroughs' },
   { to: '/admin/usage', icon: HardDrive, label: 'Usage' },
+  { to: '/admin/pricing', icon: Scale, label: 'Pricing' },
   { to: '/admin/costs', icon: Calculator, label: 'Costs' },
 ]
 

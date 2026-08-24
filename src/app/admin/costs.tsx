@@ -5,9 +5,20 @@
 import { useQuery } from '@tanstack/react-query'
 import { useState, type ReactNode } from 'react'
 import { Input } from '~/components/ui/input'
+import { bizEcon, proEcon } from '~/lib/pricing-model'
 import { useTRPC } from '~/lib/trpc'
 import { cn } from '~/lib/utils'
-import { ErrorText, Loading, PageHeader, SectionTitle, StatTile, Td, Th, fmtBytes } from './shared'
+import {
+  ErrorText,
+  Loading,
+  PageHeader,
+  SectionTitle,
+  StatTile,
+  Td,
+  Th,
+  fmtBytes,
+  fmtDate,
+} from './shared'
 
 // ---- pricing constants (editable on the page) -------------------------------
 
@@ -50,13 +61,9 @@ const RETENTIONS = [
   { days: Infinity, label: 'forever' },
 ]
 
-// Mirrors src/components/landing/pricing.tsx; retention per tier is the
-// proposed ladder (retention is a tier feature — see decisions).
-const TIERS = [
-  { name: 'Free', price: 0, hours: 1, retentionDays: 30 },
-  { name: 'Pro', price: 20, hours: 3, retentionDays: 90 },
-  { name: 'Business', price: 40, hours: 10, retentionDays: 365 },
-]
+// The per-tier quota/retention/price is derived from the saved pricing model
+// inside the component (see `tiers`) — no hardcoded ladder. Retention per tier
+// is the proposed ladder (30d / 90d / 1y — a tier feature, see decisions).
 
 // Fallbacks for anchors we can't measure yet (no human-kind uploads, say).
 // These reflect the throttled capture rates shipped 2026-08-12: agent kind is
@@ -188,6 +195,8 @@ function Row({ label, amount, note }: { label: string; amount: number; note?: Re
 export function AdminCostsPage() {
   const trpc = useTRPC()
   const stats = useQuery(trpc.admin.costStats.queryOptions())
+  const planQ = useQuery(trpc.admin.pricingModel.queryOptions())
+  const trend = useQuery(trpc.admin.costTrend.queryOptions())
 
   const [prices, setPrices] = useState<Prices>(DEFAULT_PRICES)
   const [users, setUsers] = useState(50)
@@ -201,11 +210,17 @@ export function AdminCostsPage() {
     human: '',
   })
 
-  if (stats.isPending) return <Loading />
+  if (stats.isPending || planQ.isPending || trend.isPending) return <Loading />
   if (stats.isError) return <ErrorText message={stats.error.message} />
-  if (!stats.data) return <ErrorText message="No usage data." />
+  if (planQ.isError) return <ErrorText message={planQ.error.message} />
+  if (trend.isError) return <ErrorText message={trend.error.message} />
+  if (!stats.data || !planQ.data || !trend.data) return <ErrorText message="No usage data." />
 
   const { total, byKind, last30d, files } = stats.data
+  const plan = planQ.data.model
+  const planSaved = planQ.data.isLocked ? 'locked defaults' : `plan saved ${fmtDate(planQ.data.savedAt)}`
+  const planExpPerActive = proEcon(plan).exp
+  const trendMonths = trend.data.months
 
   const measuredGbPerHour = (kind: 'agent' | 'human') => {
     const row = byKind.find((r) => r.kind === kind)
@@ -237,12 +252,118 @@ export function AdminCostsPage() {
   const totalHours = total.durationMs / 3_600_000
   const forever = retention === Infinity
 
+  // Tiers anchored to the saved pricing model — no hardcoded ladder. `hours`
+  // feeds the storage-scenario machinery below; `expCost` is the plan's AI-ONLY
+  // spend (refine + assistant) for an expected-behavior user on that tier — the
+  // infra estimator already counts transcription/polish/storage, so folding the
+  // plan's media number in too would double-count it.
+  const proParts = proEcon(plan).parts.exp
+  const bizParts = bizEcon(plan).parts.exp
+  const tiers = [
+    {
+      name: 'Free',
+      price: 0,
+      hours: (plan.freeCap * plan.avgLen) / 60,
+      retentionDays: 30,
+      expCost: plan.freeCap * plan.refineCost * plan.rerun,
+    },
+    {
+      name: 'Pro',
+      price: plan.proPrice,
+      hours: plan.proHours,
+      retentionDays: 90,
+      expCost: proParts.refine + proParts.assist,
+    },
+    {
+      name: 'Business',
+      price: plan.bizPrice,
+      hours: plan.bizHours,
+      retentionDays: 365,
+      expCost: bizParts.refine + bizParts.assist,
+    },
+  ]
+
   return (
     <div className="space-y-10">
       <PageHeader
         title="Costs"
         sub="What a user costs to serve — anchored to measured usage, projected by the sliders. Retention is the lever that keeps storage from compounding forever."
       />
+
+      {/* Plan vs actual */}
+      <section className="space-y-4">
+        <SectionTitle right={<span className="text-muted-foreground font-mono text-xs">{planSaved}</span>}>
+          Holding up against the plan
+        </SectionTitle>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr>
+                <Th>Month</Th>
+                <Th className="w-24">Walkthroughs</Th>
+                <Th className="w-24">Refine runs</Th>
+                <Th className="w-24">Assistant turns</Th>
+                <Th className="w-24">Transcribe h</Th>
+                <Th className="w-24">Est AI $</Th>
+                <Th className="w-24">Est media $</Th>
+                <Th className="w-24">Est total $</Th>
+                <Th className="w-20">Active</Th>
+                <Th className="w-40">$/active vs plan</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {trendMonths.map((m, i) => {
+                const current = i === trendMonths.length - 1
+                const transcribeH = m.transcribeSeconds / 3600
+                const estAI = m.refineRuns * plan.refineCost + m.assistantTurns * plan.turnCost
+                const estMedia = transcribeH * plan.mediaCost
+                const estTotal = estAI + estMedia
+                const perActive = m.meteredUsers > 0 ? estTotal / m.meteredUsers : 0
+                const over = perActive > planExpPerActive
+                const barPct =
+                  planExpPerActive > 0 ? Math.min(100, (perActive / planExpPerActive) * 100) : 0
+                return (
+                  <tr key={m.month}>
+                    <Td className="font-mono tabular-nums">
+                      {m.month}
+                      {current && <span className="text-muted-foreground"> · so far</span>}
+                    </Td>
+                    <Td className="font-mono tabular-nums">{m.walkthroughsUploaded}</Td>
+                    <Td className="font-mono tabular-nums">{m.refineRuns}</Td>
+                    <Td className="font-mono tabular-nums">{m.assistantTurns}</Td>
+                    <Td className="font-mono tabular-nums">{transcribeH.toFixed(1)}</Td>
+                    <Td className="font-mono tabular-nums">{money(estAI)}</Td>
+                    <Td className="font-mono tabular-nums">{money(estMedia)}</Td>
+                    <Td className="font-mono tabular-nums">{money(estTotal)}</Td>
+                    <Td className="font-mono tabular-nums">{m.meteredUsers}</Td>
+                    <Td>
+                      <div className="space-y-1">
+                        <span
+                          className={cn(
+                            'font-mono tabular-nums',
+                            over ? 'text-destructive' : 'text-foreground'
+                          )}>
+                          ${perActive.toFixed(2)}
+                        </span>
+                        <div className="bg-border h-1 rounded">
+                          <div
+                            className={cn('h-1 rounded', over ? 'bg-destructive' : 'bg-primary')}
+                            style={{ width: `${barPct}%` }}
+                          />
+                        </div>
+                      </div>
+                    </Td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+        <p className="text-muted-foreground font-mono text-xs">
+          plan expects ${planExpPerActive.toFixed(2)}/active user (Pro behavior) · storage & egress
+          excluded here — see the estimator below
+        </p>
+      </section>
 
       {/* Live anchors */}
       <section className="space-y-4">
@@ -450,9 +571,12 @@ export function AdminCostsPage() {
       <section className="space-y-4">
         <SectionTitle>Tier margins</SectionTitle>
         <p className="text-muted-foreground text-xs">
-          Each tier costed at its full hour quota with its own retention window (30d / 90d / 1y —
-          the proposed ladder), same mix and views as the scenario. Margin is price minus variable
-          cost; fixed costs sit above this table.
+          Tiers anchored to the saved pricing model (edit them at{' '}
+          <span className="font-mono">/admin/pricing</span>). Each costed at its full hour quota with
+          its own retention window (30d / 90d / 1y — the proposed ladder), same mix and views as the
+          scenario. Cost is the storage-scenario infra cost (which already covers transcription,
+          polish, and storage) plus the plan's AI spend — refine and assistant turns; margin is
+          price minus that total. Fixed costs sit above this table.
         </p>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -462,30 +586,33 @@ export function AdminCostsPage() {
                 <Th className="w-20">Price</Th>
                 <Th className="w-24">Quota</Th>
                 <Th className="w-24">Retention</Th>
-                <Th className="w-28">Cost at quota</Th>
+                <Th className="w-28">Infra at quota</Th>
+                <Th className="w-32">AI (plan)</Th>
                 <Th className="w-24">Margin</Th>
                 <Th>Headroom</Th>
               </tr>
             </thead>
             <tbody>
-              {TIERS.map((t) => {
-                const cost = monthlyCost(
+              {tiers.map((t) => {
+                const infra = monthlyCost(
                   { ...scenario, hoursPerMonth: t.hours, retentionDays: t.retentionDays },
                   prices
                 )
-                const margin = t.price - cost.total
-                const perHr = cost.total / t.hours
+                const totalCost = infra.total + t.expCost
+                const margin = t.price - totalCost
+                const perHr = t.hours > 0 ? totalCost / t.hours : 0
                 const maxHours = perHr > 0 ? t.price / perHr : Infinity
                 return (
                   <tr key={t.name}>
                     <Td className="font-medium">{t.name}</Td>
-                    <Td className="font-mono">${t.price}</Td>
-                    <Td className="font-mono">{t.hours} h/mo</Td>
-                    <Td className="font-mono">{t.retentionDays}d</Td>
-                    <Td className="font-mono">{money(cost.total)}</Td>
+                    <Td className="font-mono tabular-nums">${t.price}</Td>
+                    <Td className="font-mono tabular-nums">{t.hours.toFixed(1)} h/mo</Td>
+                    <Td className="font-mono tabular-nums">{t.retentionDays}d</Td>
+                    <Td className="font-mono tabular-nums">{money(infra.total)}</Td>
+                    <Td className="font-mono tabular-nums">{money(t.expCost)}</Td>
                     <Td
                       className={cn(
-                        'font-mono',
+                        'font-mono tabular-nums',
                         margin < 0 ? 'text-destructive' : 'text-approve'
                       )}>
                       {margin < 0 ? `−${money(-margin)}` : money(margin)}
@@ -497,7 +624,7 @@ export function AdminCostsPage() {
                     </Td>
                     <Td className="text-muted-foreground text-xs">
                       {t.price === 0
-                        ? `costs ${money(cost.total)} to give away`
+                        ? `costs ${money(totalCost)} to give away`
                         : `breaks even at ${maxHours >= 1000 ? '1000+' : Math.floor(maxHours)} h/mo`}
                     </Td>
                   </tr>
@@ -574,9 +701,12 @@ export function AdminCostsPage() {
           />
         </div>
         <p className="text-muted-foreground text-xs">
-          Defaults: S3 Standard us-west-2 ($0.023/GB-mo, $0.09/GB out), Groq whisper-large-v3-turbo
-          ($0.04/audio-hr), Haiku 4.5 polish (~$0.07/spoken-hr at $1/$5 per MTok). Storage and
-          egress are the whole story — the AI costs are rounding errors.
+          These knobs cost the <strong>infrastructure</strong> only — storage, egress, and request
+          writes (defaults: S3 Standard us-west-2 at $0.023/GB-mo, $0.09/GB out; R2 preset zeroes
+          egress). AI is no longer a rounding error and no longer lives here: refine ($/walkthrough ×
+          runs) and assistant turns come from the pricing model, trended against actuals in “Holding
+          up against the plan” above and folded into tier margins as “AI (plan)”. Change
+          those unit costs at <span className="font-mono">/admin/pricing</span>, not here.
         </p>
       </section>
     </div>

@@ -14,6 +14,7 @@ import { AdminWalkthroughsPage } from './admin/walkthroughs'
 import { AdminWalkthroughDebugPage } from './admin/walkthrough-debug'
 import { AdminUsagePage } from './admin/usage'
 import { AdminCostsPage } from './admin/costs'
+import { AdminPricingPage } from './admin/pricing'
 import { InboxPage } from './app'
 import { ConnectPage } from './connect'
 import { DocsPage } from './docs'
@@ -158,6 +159,7 @@ export const routes: RouteObject[] = [
           { path: 'walkthroughs', Component: AdminWalkthroughsPage },
           { path: 'walkthroughs/:walkthroughId', Component: AdminWalkthroughDebugPage },
           { path: 'usage', Component: AdminUsagePage },
+          { path: 'pricing', Component: AdminPricingPage },
           { path: 'costs', Component: AdminCostsPage },
         ],
       },

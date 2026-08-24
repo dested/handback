@@ -265,7 +265,8 @@ src/
                         feed, status filter, debug links), walkthrough-debug.tsx (full anatomy
                         of one walkthrough: the EXACT MCP brief via getWalkthroughDetail+
                         formatWalkthrough, frame-cap math, takes, all files incl. pending,
-                        report.md, move-to-any-space control), usage.tsx (per-space bytes/
+                        report.md, move-to-any-space control), pricing.tsx (the lever bench:
+                        edits the AdminSetting-saved planning model live), usage.tsx (per-space bytes/
                         recordings vs quota), costs.tsx (THE cost estimator: measured GB/hr
                         anchors via admin.costStats, editable unit prices, scenario sliders,
                         retention as the storage lever, tier-margin table — pricing constants
