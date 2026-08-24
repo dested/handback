@@ -43,7 +43,7 @@ export function Hero() {
           </p>
           <div className={cn(rise, 'mt-9 flex flex-wrap items-center gap-x-7 gap-y-4 delay-300')}>
             <Link to="/sign-up" className={cn(buttonVariants({ size: 'lg' }), 'px-6')}>
-              Start free
+              Start recording
             </Link>
             <Link
               to="/connect"
@@ -54,7 +54,7 @@ export function Hero() {
           </div>
           <div className={cn(rise, 'delay-300')}>
             <p className="text-muted-foreground mt-5 font-mono text-xs">
-              works with Claude Code · one claude mcp add · free during the alpha, no card
+              works with Claude Code · one claude mcp add · invite-only during the alpha
             </p>
           </div>
         </div>

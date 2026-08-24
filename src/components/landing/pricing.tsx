@@ -16,42 +16,34 @@ type Tier = {
   featured?: boolean
   /** Label in the corner of the card. */
   badge?: string
-  /** Priced, but not billable yet — free during the alpha. */
+  /** Priced, but not billable yet — the plan is coming soon. */
   soon?: boolean
 }
 
-// There is no billing yet, so no card here may imply a charge. The prices are
-// real intentions and stay visible; the CTA and the badge say plainly that
-// nothing is charged today.
+// Billing hasn't opened, so no card here may imply a charge. The prices are real
+// intentions and stay visible; the CTA and the badge say plainly that these
+// plans are coming soon and the alpha is invite-only.
 const tiers: Tier[] = [
-  {
-    name: 'Free',
-    price: '$0',
-    quota: 'Up to 1 hour of walkthroughs / mo',
-    blurb: 'Your personal space and your own agent over MCP',
-    cta: 'Start recording',
-    to: '/sign-up',
-  },
   {
     name: 'Pro',
     price: '$20',
     unit: 'per seat / mo, when billing opens',
-    quota: 'Up to 3 hours / mo',
-    blurb: 'A shared team, priced per seat — share links, MCP access',
-    cta: 'Use it free in alpha',
-    to: '/sign-up',
+    quota: 'Up to 15 hours of walkthroughs / mo',
+    blurb: 'Your agent over MCP, the refine pass, and the walkthrough assistant',
+    cta: 'Request access',
+    href: 'mailto:sal@dested.com?subject=Handback%20Alpha',
     featured: true,
-    badge: 'Free in alpha',
+    badge: 'Coming soon',
     soon: true,
   },
   {
     name: 'Business',
     price: '$40',
     unit: 'per seat / mo, when billing opens',
-    quota: 'Up to 10 hours / mo',
+    quota: 'Up to 30 hours / mo',
     blurb: 'Teams — invite reviewers, roles, projects',
-    cta: 'Use it free in alpha',
-    to: '/sign-up',
+    cta: 'Request access',
+    href: 'mailto:sal@dested.com?subject=Handback%20Alpha',
     badge: 'Coming soon',
     soon: true,
   },
@@ -71,10 +63,10 @@ export function Pricing() {
       <SectionLabel>Pricing</SectionLabel>
       <SectionHeading>Priced per reviewer, not per walkthrough.</SectionHeading>
       <p className="text-muted-foreground mt-4 max-w-xl text-sm leading-relaxed">
-        Handback is in alpha and nothing is billed yet — every plan below runs free while we build.
-        We'll ask before a card is ever needed.
+        Billing hasn't opened yet — these plans are coming soon. The alpha is invite-only; write us
+        for access.
       </p>
-      <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {tiers.map((tier) => {
           const ctaClass = cn(
             buttonVariants({ variant: tier.featured ? 'default' : 'outline' }),

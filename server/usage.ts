@@ -4,14 +4,13 @@
 // (plans/2026-08-12-security-retention-audit.md §Anti-abuse). server/ingest.ts
 // calls the reserve functions before spending the provider, and 429s on refusal.
 //
-// Three states decide the answer, checked in this order:
-//   1. First-walkthrough magic — a user with zero finalized walkthroughs gets
-//      cloud transcribe AND polish free and unmetered, because the first run IS
-//      the product. This is checked first so it can't be gated by tier.
-//   2. Platform admin — unmetered (a trusted operator; the context endpoint
-//      reports `null` remaining, same as magic).
-//   3. Tier — Pro gets the high abuse ceilings, free gets the small transcription
-//      budget and no polish. Ceilings live in server/limits.ts.
+// Two states decide the answer, checked in this order:
+//   1. Platform admin — unmetered (a trusted operator; the context endpoint
+//      reports `null` remaining).
+//   2. Tier — Pro gets the cloud quota (server/limits.ts); without a plan the
+//      transcribe budget is 0 and polish is off, so both cloud passes are
+//      refused and the recorder falls back on-device. There is no free cloud
+//      tier — the old first-walkthrough-unmetered magic is gone.
 
 import { isPlatformAdmin, userHasFeature } from './features'
 import {
@@ -21,18 +20,6 @@ import {
   monthKey,
 } from './limits'
 import { prisma } from './prisma'
-
-/**
- * True while the user has never finalized a walkthrough — counted by
- * `uploadedById`, so it spans their personal space and every team they've
- * uploaded into. While true, both cloud passes are free and unmetered.
- */
-export async function hasFirstWalkthroughMagic(userId: string): Promise<boolean> {
-  const finalized = await prisma.walkthrough.count({
-    where: { uploadedById: userId, finalizedAt: { not: null } },
-  })
-  return finalized === 0
-}
 
 /** The account's cloud tier, resolved in one query. `admin` short-circuits to
  *  unmetered; `pro` picks the higher ceiling. */
@@ -49,15 +36,15 @@ async function tierOf(userId: string): Promise<{ admin: boolean; pro: boolean }>
 export type TranscribeReservation = { allowed: boolean; remaining: number | null }
 
 /**
- * Reserve `seconds` of cloud transcription this month, or refuse. Magic and
- * admins pass without metering; everyone else is capped at their tier's budget,
- * incremented atomically so two concurrent takes can't both slip past the line.
+ * Reserve `seconds` of cloud transcription this month, or refuse. Admins pass
+ * without metering; everyone else is capped at their tier's budget (0 without a
+ * plan), incremented atomically so two concurrent takes can't both slip past
+ * the line.
  */
 export async function checkAndReserveTranscribe(
   userId: string,
   seconds: number
 ): Promise<TranscribeReservation> {
-  if (await hasFirstWalkthroughMagic(userId)) return { allowed: true, remaining: null }
   const { admin, pro } = await tierOf(userId)
   if (admin) return { allowed: true, remaining: null }
   const limit = pro ? PRO_CLOUD_TRANSCRIBE_SECONDS : FREE_CLOUD_TRANSCRIBE_SECONDS
@@ -80,11 +67,10 @@ export async function checkAndReserveTranscribe(
 }
 
 /**
- * Reserve one polish call this month, or refuse. Magic and admins pass; the free
- * tier has no polish at all; Pro is capped at PRO_POLISH_CALLS/mo.
+ * Reserve one polish call this month, or refuse. Admins pass; without a Pro plan
+ * there is no polish at all; Pro is capped at PRO_POLISH_CALLS/mo.
  */
 export async function checkAndReservePolish(userId: string): Promise<{ allowed: boolean }> {
-  if (await hasFirstWalkthroughMagic(userId)) return { allowed: true }
   const { admin, pro } = await tierOf(userId)
   if (admin) return { allowed: true }
   if (!pro) return { allowed: false }
@@ -108,17 +94,16 @@ export type CloudStatus = {
   /** Cloud transcription seconds left this month, or null when unmetered. */
   transcribeRemainingSeconds: number | null
   polishAllowed: boolean
+  /** Retained for the context/usage shape — the magic is gone, so always false. */
   firstWalkthroughMagic: boolean
 }
 
 /**
  * A read-only snapshot of the caller's cloud budget for GET /api/ingest/context,
  * so a recorder can self-configure. Reserves nothing — it never increments.
+ * Without a plan the remaining budget is 0 (transcription runs on-device).
  */
 export async function cloudStatus(userId: string): Promise<CloudStatus> {
-  if (await hasFirstWalkthroughMagic(userId)) {
-    return { transcribeRemainingSeconds: null, polishAllowed: true, firstWalkthroughMagic: true }
-  }
   const { admin, pro } = await tierOf(userId)
   if (admin) {
     return { transcribeRemainingSeconds: null, polishAllowed: true, firstWalkthroughMagic: false }

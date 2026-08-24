@@ -140,8 +140,9 @@ export function DocsPage() {
               term: 'pricing',
               detail: (
                 <>
-                  Free during the alpha — no card, and we'll ask before billing ever starts. Priced
-                  per reviewer, not per walkthrough. <Link to="/#pricing">See pricing</Link>.
+                  Billing hasn't opened yet — the paid plans are coming soon and the alpha is
+                  invite-only. Priced per reviewer, not per walkthrough.{' '}
+                  <Link to="/#pricing">See pricing</Link>.
                 </>
               ),
             },

@@ -1,14 +1,14 @@
-// Tier limits for the metered cloud passes plus one account-safety cap. These
-// are abuse ceilings, not product quotas — the free transcription budget is the
-// only number a real free user can feel; the Pro ceilings exist purely to bound
-// a runaway recorder or a compromised token. server/usage.ts enforces them, and
-// server/ingest.ts turns a refusal into a 429.
+// Tier limits for the metered cloud passes plus one account-safety cap. Cloud
+// transcription now comes with a plan: without one the budget is 0 and the
+// recorder falls back on-device. The Pro number is a real product quota (15
+// hours); PRO_POLISH_CALLS stays an abuse bound. server/usage.ts enforces them,
+// and server/ingest.ts turns a refusal into a 429.
 
-/** Free cloud transcription budget: 15 minutes per user per month. */
-export const FREE_CLOUD_TRANSCRIBE_SECONDS = 900
+/** No free cloud budget — transcription without a plan runs on-device. */
+export const FREE_CLOUD_TRANSCRIBE_SECONDS = 0
 
-/** Pro cloud transcription ceiling: 20 hours per user per month (abuse bound). */
-export const PRO_CLOUD_TRANSCRIBE_SECONDS = 72_000
+/** Pro cloud transcription quota: 15 hours per user per month. */
+export const PRO_CLOUD_TRANSCRIBE_SECONDS = 54_000
 
 /** Pro polish-call ceiling per user per month (abuse bound). */
 export const PRO_POLISH_CALLS = 1_000
