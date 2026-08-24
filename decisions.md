@@ -2,6 +2,40 @@
 
 > ADR-lite: what was decided, why, what was rejected. Append-only.
 
+## 2026-08-24 — The viewer is the review desk; the stacked chassis is dead
+**Why:** owner's verdict on the accreted page ("you can't just stack 10 features… rethink it from
+scratch") and on the first build ("double nav… this is fucking insane"). The page is now
+state-driven (status decides the hero tab), full-bleed with the app sidebar forced to its icon
+rail on the route, structured as masthead / vertical tab rail / work / exchange. ONE chronological
+exchange thread with ONE composer absorbed AgentAnswer + CommentsPanel + AssistantPanel +
+RefinePanel. Direction picked on a design canvas (C, "the review desk", pro cut approved).
+**Rejected:** the 2026-08-12 single-column stack (supersedes that chassis composition; its
+components — VideoStage, Timeline, Slideshow, editor — survive inside the desk), direction A
+(editorial dossier) and B (lifecycle rail), horizontal tabs (seven surfaces don't fit), keeping
+the expanded app sidebar beside the desk rail.
+
+## 2026-08-24 — Key points are the walkthrough's spine, answered point by point
+**Why:** owner: "the AI has to be really fucking smart — it needs to know what the key points
+are." Refine now extracts structured KeyPoint[] (kpN ids, severity, atMs) plus a 2–4 sentence
+human digestMd; the brief numbers them as obligations; post_result accepts per-point `outcomes`
+(fixed|partial|skipped|not_applicable) across hosted MCP + stdio + REST; the verdict renders
+"what you raised → what came back — N of M addressed". Titles: Session-class recorder defaults
+are replaced outright, human-chosen titles only ever get a suggestion (suggestedTitle,
+use/dismiss). refineStage makes the pass visibly alive from the first second.
+**Rejected:** prose-only summaries (the silent-refine + raw-markdown failure of 2026-08-23),
+hand-rolled markdown rendering (react-markdown + remark-gfm is in), free-text outcome mapping.
+
+## 2026-08-24 — The free tier is dead in copy AND code; quotas are 15h/30h
+**Why:** owner's order ("get rid of all that free shit… instead of free in the alpha just say
+coming soon"; quotas "15 hours… and 30 for extra money"). Landing shows Pro $20/15h (featured),
+Business $40/30h, Enterprise — badged Coming soon, Request-access CTAs. Enforcement: free cloud
+transcribe budget 0 (on-device fallback), the first-walkthrough-unmetered magic REMOVED
+(supersedes 2026-08-12 "magic — don't fix it"), pro ceiling 20h → 15h (54 000s).
+**Rejected:** copy-only change (owner explicitly chose killing it in code), a second entitlement
+for Business now (stays copy until billing exists). Cost model (agent, 2026-08-24): real cost
+≈ $1.50/recorded-hr dominated by refine; $20/$40 run underwater on a filled quota — pricing
+final call is the owner's; /admin/costs must learn refine+assistant cost (pending).
+
 ## 2026-08-18 — The kind choice reaches /upload and /phone, but never the share path
 **Why:** every capture surface should say who a video is for (the extension and /record already
 could; /upload and /phone could not). The choice rides the existing pipeline: `DistillOptions.kind`

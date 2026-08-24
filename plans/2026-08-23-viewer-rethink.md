@@ -1,7 +1,7 @@
 # Viewer rethink — state × content matrix + build spec
 
 - **Date:** 2026-08-23
-- **Status:** active
+- **Status:** done
 - **Type:** plan
 - **What:** Working doc for executing plans/2026-08-23-viewer-rethink-brief.md: the state ×
   content matrix (step 1), the design-canvas record (step 2), and — once the owner approves a
@@ -97,3 +97,19 @@ visual reference.
   assistant-panel, refine-panel, comments-panel).
 - **W3**: quality gate agent, bx live verify, e2e re-baseline, docs (ui.md viewer rewrite,
   cliffnotes, decisions ×3, updates), commits. Never push.
+
+## Delta vs the approved canvas (honest, 2026-08-24)
+
+Faithful: masthead bar anatomy, rail (groups, counts, icons, refine footer), the verdict
+(violet head, Fraunces statement, "what you raised → what came back" with outcome glyphs,
+evidence, files), the exchange (pinned sign-off card, thread voices, system `·` lines, one
+composer). Deviations: evidence renders real screenshots as h-28 thumbs (the mock's plates were
+illustrative drawings); question notes use an ink left rule, no "C" chip; comment time-pin is an
+`at m:ss` chip (not mocked); the suggested-title row and intent pill are additions. The full
+state suite was never boarded — owner short-circuited with "ship it", so open/refining/
+needs_info/resolved were designed in code in the anchor's language and verified live in Chrome.
+Mobile was never mocked: below lg the rail is a horizontal tab bar and the panes stack —
+functional, not yet art-directed. Curated-frame thumbnails unverified in dev (R2 CORS blocks
+localhost:3995-signed image loads for frames uploaded to R2) — check on prod. Post-approval
+layout crisis ("double nav… insane") fixed same-day: full-bleed route, forced icon rail,
+self-sized exchange, fixed transcript column (commit 03790d1).

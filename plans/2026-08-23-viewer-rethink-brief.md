@@ -1,7 +1,7 @@
 # The walkthrough-page rethink — brief for a fresh session
 
 - **Date:** 2026-08-23
-- **Status:** active
+- **Status:** done
 - **Type:** plan
 - **What:** The complete prompt for redesigning /walkthroughs/:id from scratch (page + the AI
   experience on it). Written by the previous session to be executed in a clean context. Start a

@@ -89,15 +89,11 @@ it. Buttons: `default` variant is cobalt; `outline` for secondary actions;
 destructive only for deletes. Marketing chrome on public pages is unchanged.
 Pro-gated surfaces refuse with the exact string `Pro feature`; clients render
 `ProUpsell` (`src/components/pro-upsell.tsx`) linking /upgrade — never a raw
-error. The viewer's new panels: **RefinePanel** (summary ledger, health notes
-as 2px-left-tick mono lines — warn red, info grey — removed-span lines, and a
-quiet right-aligned run/re-run control) sits under the review thread;
-**AssistantPanel** (the chat: mono-headed turns, action chips as mono `·` lines,
-one input + cobalt Send) sits at the page's foot. An agent's question renders as
-a left-ruled card ("agent asked"), the inline answer form under it; evidence
-screenshots are h-20 bordered thumbnails. /upload's working screen carries a
-violet-left-ruled "stay on this page" notice — the beforeunload guard can't
-catch sidebar navigation, the sentence has to.
+error. /upload's working screen carries a violet-left-ruled "stay on this page"
+notice — the beforeunload guard can't catch sidebar navigation, the sentence
+has to. The walkthrough viewer's surfaces (the desk, its rail, the exchange)
+are specified in the Viewer section below — RefinePanel / AssistantPanel /
+AgentAnswer / CommentsPanel are DELETED (2026-08-24), absorbed into it.
 
 ## Extension (`extension/`)
 
@@ -179,21 +175,60 @@ properties in `extension/src/sidepanel/styles.css` (no Tailwind there).
   the other one that has to hold: a walkthrough seconds old must be one quiet
   line, not a stack of empty scaffolding.
 
-## Viewer & editor (web) — the walkthrough chassis (2026-08-12 redesign)
+## Viewer — the review desk (2026-08-24 rethink; supersedes the 2026-08-12 chassis)
 
-`/walkthroughs/:id`, the cloud editor, and `/w` share one chassis
-(`src/components/viewer/*`, mocks: `plans/2026-08-12-viewer-redesign.md`):
+`/walkthroughs/:id` is **the desk** (`src/components/viewer/desk/*`, canvas:
+the Walkthrough Viewer design artifact; plan: `plans/2026-08-23-viewer-rethink.md`).
+The page is **state-driven** — status decides what the hero tab IS — and renders
+**full-bleed**: the app sidebar is forced to its icon rail on this route
+(`SidebarProvider forceCollapsed`, preference untouched) and the `max-w-6xl`
+container is dropped. Structure: a **masthead bar** (crumb `Walkthroughs /` ·
+Fraunces title + quiet Rename · StatusChip dot+word, popover to change · intent
+pill · quiet project picker · "Copy agent brief" only while open · `⋯`
+OverflowMenu; mono meta line below; a `refine suggests: "…" use · dismiss` mono
+row when refine proposed a title) over three columns:
+**[tab rail 208px | work | exchange 360px]**.
 
-- **Masthead header** (`walkthrough-header.tsx`): crumb, Fraunces title with quiet
-  Rename, then on the same row right-aligned: segmented **StatusControl**, the
-  **project picker as quiet text** (name + chevron opening a popover — never a
-  native `<select>`), ONE kind-appropriate primary action (agent → cobalt "Copy
-  agent brief"; human → the ShareControl pill `url · copy · revoke`), and the
-  `⋯` **OverflowMenu**. Everything rare or irreversible lives in the overflow
-  (kind switch, share for agent-kind, move, delete) and **arms into one inline
-  `question? yes / keep` row** — no `window.confirm`, no growing rows. One mono
-  meta line under the title says everything (slug · origin · date · duration ·
-  takes · frames · errors · size · uploader); frames/errors only for agent kind.
+- **The rail** (`desk/rail.tsx`): vertical tabs with 16px stroke icons + mono
+  counts. Hero tab label follows status (Overview / Verdict / Question / Signed
+  off — violet count pill on verdict/question), then group `the source`
+  (Recording · Frames · Agent brief · Console · report.md) and `carved out`
+  (Tasks). Footer = the refine run/re-run/refining…/failed control (pro only).
+  Below lg the rail is a horizontal scrollable tab bar.
+- **Overview tab** (`desk/overview-tab.tsx`) — the state-driven hero:
+  *refining* = progress hero ("Reading your walkthrough… / Watching the frames… /
+  Writing it up…" from `refineStage`) + skeletons, resolved live by polling;
+  *open* = the digest (react-markdown) + **the key-points table** + curated
+  frames strip + capture notes + removed spans + "the full ledger" disclosure;
+  *in_review* = **THE VERDICT**: violet `handed back` head, the agent's summary
+  as a Fraunces statement, rendered body, **what you raised → what came back**
+  (per-point outcomes: `✓ fixed` green · `◐ partial` · `— skipped/n-a` muted ·
+  `· unanswered`), evidence thumbs, files touched; *needs_info* = the agent's
+  question as the hero, answered in the exchange; *resolved* = THE `.stamp`
+  (the one stamp on the view — the exchange echoes only a mono line) + archival
+  verdict + expiry + Keep.
+- **Key points** (`desk/key-points.tsx`): severity dots (high red · medium ink ·
+  low muted), mono cobalt m:ss seek chips — the only interactive elements.
+- **The exchange** (`desk/exchange.tsx`): ONE chronological thread — refine
+  system `·` lines, agent results (white card, PR link, `N/M key points
+  addressed`), questions (ink left rule), answers, send-backs, timestamped
+  comments (initial chips, seek chip, inline-armed delete), assistant turns with
+  quiet `·` action lines — and ONE composer with `comment | assistant` mono
+  pills (+ an `at m:ss` pin chip once the player has moved). Sign-off pinned on
+  top while in_review (violet-left-ruled card, Approve & sign off cobalt / Send
+  back arming inline). needs_info adds the answer form (input row, then
+  Answer / Answer by voice / Ask <uploader>). The pane sizes to its own content
+  (`self-start`) — never to the work area's height.
+- **Recording tab**: VideoStage takes the width the aspect leaves; the
+  transcript keeps a fixed 300px column with bounded scroll (a portrait phone
+  recording must never shred it into one-word lines). Timeline below; console
+  and raw report.md live in their own tabs (report stays deliberately
+  unrendered).
+- Human kind keeps the edit→share page (masthead + FinalCut/CloudEditor, no
+  rail/exchange); a child task is brief + exchange in the ordinary container.
+
+The bullets below (player, timeline, frames slideshow, transcript, editor,
+watch page) describe components the desk reuses unchanged:
 - **Section heads** are `SectionHead` (small-caps mono) — transcript, console,
   frames, report, for a person. Sections divide with `.rule` hairlines, never
   boxes.
@@ -225,13 +260,9 @@ properties in `extension/src/sidepanel/styles.css` (no Tailwind there).
   pending in-point a dashed cobalt line. A manual cut's tag deletes it outright
   (silence cuts stay vetoed, line cuts belong to the transcript). Empty
   timeline collapses to one muted mono line.
-- **The viewer's main area is a two-way view switch** (2026-08-14): a segmented
-  **Video / Frames** control (status-control anatomy, cobalt-wash active) as the
-  first thing under the masthead. **Video** = player + transcript/console rail +
-  Timeline + the `cut this video down` link; **Frames** = the slideshow,
-  full-width. The video view is hidden, never unmounted (playback position
-  survives the switch); switching to Frames pauses playback. Comments and the
-  report sit below in both views.
+- (The 2026-08-14 Video/Frames two-way switch is superseded by the desk's rail
+  tabs; the hidden-not-unmounted rule survives — the Recording tab stays mounted
+  across tab switches so playback position holds, and leaving it pauses sound.)
 - **Frames view** is a shot-by-shot **slideshow** (`slideshow.tsx` — replaced
   the contact sheet + lightbox 2026-08-14; thousands of tiles were unreadable):
   one big still on a dark well with overlay ←/→ arrows (arrow keys work while

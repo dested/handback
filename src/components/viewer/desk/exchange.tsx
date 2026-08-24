@@ -520,10 +520,13 @@ export function Exchange({
 
   return (
     <div className="flex flex-col gap-4 self-start border-t px-6 pt-6 pb-8 lg:border-t-0 lg:border-l lg:px-6 lg:py-6">
-      {/* The sign-off, pinned first. */}
+      {/* The sign-off, pinned first. Resolved is a quiet mono line here — the
+          overview hero carries THE stamp, and ui.md allows one per view. */}
       {walkthrough.status === 'resolved' ? (
-        <div className="space-y-1.5">
-          <span className="stamp text-approve">signed off</span>
+        <div className="space-y-1">
+          <p className="text-approve font-mono text-[11px] tracking-[0.14em] uppercase">
+            signed off
+          </p>
           {latestActivity && (
             <p className="text-muted-foreground font-mono text-[11px]">{activityText(latestActivity)}</p>
           )}

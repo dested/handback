@@ -10,6 +10,32 @@
   loop and a polished cut, marketing runs **in parallel** with the fable5 mega-wave, and the Web
   Store listing is **already public**.
 
+## ⏭ Next actions — read this first when you're ready to launch
+
+The foundation is built; the plan is **blocked on the owner's recording day**. Everything
+downstream (polished cut, homepage video slot, PH gallery, announcement thread) waits on ~1–2h of
+footage. In order:
+
+1. **Record the real demo loop** (~1–2h, owner). Beat sheet is ready:
+   `plans/2026-08-23-demo-video.md`. The bug target is Handback itself — record a Handback bug in
+   Handback, Claude Code pulls it over Handback's own MCP, fix lands, sign-off on screen. Then
+   Claude cuts the polished ~60s Remotion version from that footage.
+2. **Submit the MCP directory pack** (owner, ~30min). Drafts ready:
+   `plans/2026-08-23-mcp-directory-pack.md` — official registry, mcp.so, PulseMCP, Glama,
+   Smithery, awesome-mcp-servers. Durable discovery, zero audience needed, exactly the beachhead.
+3. **Security housekeeping before traffic** (owner): rotate the Groq/Resend/Anthropic keys pasted
+   in chat 2026-07-30; mint the Object-R&W-only R2 token, delete the over-privileged migration
+   token. Also run `cli/backfill-expiry.ts` on prod once.
+4. **After the next deploy**: check https://handback.dev/og.png renders, paste handback.dev into
+   an X draft to confirm the card, hit /healthz manually (no smoke probe exists anymore).
+   **Do not post the announcement until the card renders.**
+5. **Start community groundwork NOW** (give-first, no links): Claude Code Discord, r/ClaudeAI —
+   needs 2–3 weeks of warm presence before the PH/HN moments, so it's on the critical path even
+   though it feels optional.
+6. Then Phase 1 (below): 3–4 build-in-public X posts/week from @dested in Sal's voice (Claude
+   drafts as part of finishing each ship), DM-onboard engaged devs, goal 50 signups → Phase 2
+   moments one per week: pinned announcement thread → Product Hunt → Show HN.
+
 ## Positioning
 
 **Handback is not a screen recorder.** Loom is video for humans; Jam is bug reports for humans;

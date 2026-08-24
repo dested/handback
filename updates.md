@@ -2,6 +2,30 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-08-24 — Pricing: free tier killed, 15h/30h coming-soon plans
+Asked: "get rid of all that free shit… 15 hours… 30 for extra money… say coming soon"; cost read.
+Landing Pro $20/15h · Business $40/30h · Enterprise; free budget 0 + magic removed; pro 15h.
+Cost model: ~$1.50/recorded-hr (refine-dominated); $20/$40 underwater at full quota. terms.tsx
+"free during alpha" flagged for owner (interlocked with the $100 liability cap). Pushed 41520b0.
+Touched: landing/pricing+hero, docs.tsx, upgrade.tsx, usage.tsx, server/limits.ts, server/usage.ts
+
+## 2026-08-24 — The viewer rethink: review desk + key-point spine
+Asked: execute plans/2026-08-23-viewer-rethink-brief.md (/design canvas → direction C → "ship it";
+then "double nav… insane" → full-bleed fix live in Chrome).
+Refine → digest + KeyPoint spine + suggestedTitle + refineStage; brief numbers KPs; post_result
+outcomes (MCP+REST; ingest evidence-strip bug fixed); desk client (rail/overview/verdict/exchange);
+e2e re-baselined 4/4; pushed through 41520b0. Per plans/2026-08-23-viewer-rethink.md.
+Touched: server/{refine,agent,router,walkthroughs-api,mcp-format,mcp,ingest,limits,usage}.ts,
+cli/mcp.ts, prisma/schema.prisma, src/app/{walkthrough,layout}.tsx, src/components/viewer/desk/*,
+ui/sidebar.tsx, e2e/smoke.spec.ts
+
+## 2026-08-23 — Launch checklist written down + standing reminder in cliffnotes
+Asked: explain the marketing plan, then save the "what to do next when ready" so it's never lost.
+Done: "⏭ Next actions" owner checklist added atop plans/2026-08-12-marketing-plan.md (record demo
+loop → directory pack → key rotation → OG-card check → community groundwork); cliffnotes.md got a
+Launch-runway callout in Status + the plan indexed under Plans.
+Touched: plans/2026-08-12-marketing-plan.md, cliffnotes.md
+
 ## 2026-08-23 — Viewer rethink brief written for a fresh session
 Asked: owner rejected the accreted viewer page ("stacked features, works like shit") AND the
 refine output quality (silent run, raw markdown dump, no digest, no rename); wants a full

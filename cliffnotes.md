@@ -117,11 +117,13 @@ server/
   features.ts           entitlements: isPlatformAdmin (User.isAdmin OR ADMIN_EMAILS env),
                         teamHasFeature('team') checked at Team.owner, userIsPro ('pro' feature or
                         admin), requireAdmin
-  limits.ts             tier ceilings: free 900s/mo cloud transcribe, pro 72 000s + 1 000 polish
-                        (abuse ceilings, not product quotas), MAX_ACTIVE_TOKENS=10, monthKey()
-  usage.ts              MonthlyUsage metering: first-walkthrough magic (zero finalized uploads =
-                        unmetered), checkAndReserveTranscribe/Polish (atomic upsert+increment),
-                        cloudStatus for GET /context. Admins fully unmetered
+  limits.ts             tier ceilings (2026-08-24: NO free cloud tier — owner's order): free
+                        transcribe budget 0 (recorders fall back on-device), pro 54 000s (15h)/mo
+                        + 1 000 polish, MAX_ACTIVE_TOKENS=10, monthKey()
+  usage.ts              MonthlyUsage metering: checkAndReserveTranscribe/Polish (atomic
+                        upsert+increment; refused outright without pro), cloudStatus for
+                        GET /context. Admins fully unmetered. The first-walkthrough magic was
+                        REMOVED 2026-08-24 with the free tier (decisions.md)
   router.ts             THE tRPC API: teams (incl. get/transferOwnership), invites (seat-capped),
                         tokens (user-scoped, no team input), projects (incl. `instructions`),
                         walkthroughs (incl. setIntent, answerQuestion/routeQuestion, refine, chat/
@@ -131,15 +133,20 @@ server/
   refine.ts             THE Refine pass (pro-gated, fire-and-forget from finalize + manual
                         walkthroughs.refine): deterministic capture-health checks → Haiku vision
                         frame curation w/ captions (batches of 12, ≤84 sampled, ≤20 keepers) →
-                        Opus 5 synthesis (summaryMd ledger + refinedBriefMd + title when
-                        recorder-default-ish). NEVER throws; refineStatus running|done|failed;
-                        payer = uploader on auto-run, the CALLER on manual ({byUserId});
-                        meters one polish call. Original report.md in S3 is never rewritten
+                        Opus 5 synthesis: digestMd (2–4 human sentences) + pointsJson KeyPoint[]
+                        (kpN ids, severity, atMs — THE structured spine) + summaryMd ledger +
+                        refinedBriefMd (sections headed per KP). Titles: Session-class defaults
+                        replaced outright; human-chosen ones only get suggestedTitle. Live
+                        refineStage reading|frames|writing for the viewer's progress hero.
+                        NEVER throws; refineStatus running|done|failed; payer = uploader on
+                        auto-run, the CALLER on manual ({byUserId}); meters one polish call.
+                        Original report.md in S3 is never rewritten
   agent.ts              THE walkthrough assistant (walkthroughs.chat): Opus 5 tool loop (≤12
                         iterations) over read_walkthrough / update_title / update_summary /
                         update_brief / edit_transcript_lines (text only, timings frozen) /
                         remove_span (strikes lines + deletes frames + records an excluded-span
-                        MARKER — video is never re-encoded) / set_curated_frames. Every mutation
+                        MARKER — video is never re-encoded) / set_curated_frames /
+                        update_digest / update_key_points (re-ids kp1..N). Every mutation
                         logged to walkthrough_revision; thread persisted in walkthrough_chat;
                         never throws into the router
   ingest.ts             Token-authed REST (Bearer hb_…): two-phase upload, size caps + per-org
@@ -205,9 +212,11 @@ src/
                         segments with mono counts · Space/Project popover selects that only appear
                         when you have >1 space / any projects). One `walkthroughs.inbox` query,
                         client-side filtering. No provisioning state — Personal always exists
-    walkthrough.tsx     WalkthroughPage: the viewer (assembles src/components/viewer/*); modes:
-                        editing (CloudEditor), splitting (SplitPanel), child task page (briefMd
-                        set → TaskBrief, no AgentView)
+    walkthrough.tsx     WalkthroughPage: THE REVIEW DESK (2026-08-24 rethink — assembles
+                        src/components/viewer/desk/*): full-bleed masthead over
+                        [tab rail | work | exchange]; state-driven hero tab; modes: editing
+                        (CloudEditor), human (edit→share, no desk), child task (TaskBrief +
+                        Exchange). App sidebar forced to icon rail on this route
     projects.tsx        Projects list + create (origin-hints field removed from the UI)
     team.tsx            Members / Invites for team spaces (seat line, owner-only role select +
                         ownership transfer); a lone personal card otherwise. No guests
@@ -284,23 +293,31 @@ src/
                         final-cta · demo-shot.tsx (a keyframe as SVG) + demo-data.ts (the one
                         demo walkthrough) + mock.tsx (Pane/ContactSheet/Filmstrip/PlayerStrip/
                         RecorderPanelMock — the hero's extension panel)
-    viewer/             THE 2026-08-12 chassis (mocks: plans/2026-08-12-viewer-redesign.md):
-                        walkthrough-header (masthead — status segments, project popover, one
-                        kind-appropriate primary action, ⋯ overflow) · overflow-menu (usePopover +
-                        kind/move/share/delete, inline arming, no window.confirm) · agent-view
-                        (Video/Frames view switch; video = player + rail + timeline, hidden
-                        not unmounted; holds the staged-deletes stack — undo pops, "done"
-                        commits batches over walkthroughs.deleteFrames; Frames mode
-                        lays stage+filmstrip 2/3 wide with the transcript as a
-                        full-height right rail on lg) ·
+    viewer/             desk/ is THE viewer (2026-08-24 rethink, plans/2026-08-23-viewer-rethink.md):
+                        masthead (crumb·title·StatusChip·intent pill·project·Copy-brief-when-open·⋯;
+                        suggested-title use/dismiss row) · status-chip (dot+word, popover) ·
+                        rail (vertical tabs w/ counts + refine control footer; horizontal <lg) ·
+                        overview-tab (state-driven hero: refining progress / digest+key points /
+                        THE VERDICT w/ per-point outcomes / question / signed-off+Keep) ·
+                        key-points (the table, seek chips) · exchange (ONE thread: notes+comments+
+                        assistant+activity+refine lines; one composer comment|assistant; pinned
+                        sign-off; needs_info answer form + voice) · markdown (react-markdown+gfm) ·
+                        recording-tab (stage + fixed 300px transcript col + Timeline) · frames-tab
+                        (slideshow + staged deletes) · console-tab · report-tab (raw on purpose) ·
+                        brief-tab (refined brief rendered; report.md fallback) · tasks-tab
+                        (SplitChildren + gated SplitPanel) · use-walkthrough-media (recordings/
+                        frames/player/staged-deletes hook) · use-voice-answer · types.
+                        DELETED 2026-08-24: walkthrough-header, agent-view, agent-answer,
+                        assistant-panel, refine-panel, comments-panel, status-control.
+                        Still live beside desk/: overflow-menu (usePopover +
+                        kind/move/share/delete, inline arming, no window.confirm) ·
                         timeline (THE scrubber: source-global axis, cut tags are the only cut
                         toggle, one-gesture drag, empty→one muted line) · use-segment-player
-                        (multi-take playback, rAF playhead) · agent-answer (the review thread +
-                        Approve/Send back sign-off + agent-activity line) · slideshow (shot-by-shot
+                        (multi-take playback, rAF playhead) · slideshow (shot-by-shot
                         frames: big still + filmstrip + synced dialog strip, edit-mode frame
                         deletion via walkthroughs.deleteFrames; replaced frames-grid
                         2026-08-14) · transcript-panel (borderless, live active line) · events-panel
-                        (mono, red/violet ticks) · section-head · report-panel · status-control ·
+                        (mono, red/violet ticks) · section-head · report-panel ·
                         share-control (url·copy·revoke pill) · final-cut · skeleton · types ·
                         format · use-copy · split-panel (SplitPanel — the propose/apply split
                         flow, + TaskBrief child page + SplitChildren parent ledger).
@@ -478,7 +495,13 @@ framing) · **the Refine columns** (`summaryMd` ledger, `refinedBriefMd` — the
 `curationJson` {frames:[{path,caption,atMs}], excluded:[{startMs,endMs,reason}]},
 `refineStatus` running|done|failed, `refinedAt`) · **WalkthroughNote.kind**
 ('result'|'question'|'answer'; default 'result' — a reviewer 'result' is a send-back) +
-**WalkthroughNote.evidencePaths** · **WalkthroughChat** (the assistant thread; userId is a
+**WalkthroughNote.evidencePaths** + **WalkthroughNote.outcomesJson** (PointOutcome[]:
+`{point 'kpN', status fixed|partial|skipped|not_applicable, note}` — how a result answered
+each key point; null from old agents) · **the key-point columns (2026-08-24)**:
+`Walkthrough.digestMd` (the human digest), `pointsJson` (KeyPoint[] `{id 'kpN', title, detail,
+severity, atMs|null}` — the spine the brief numbers and post_result answers), `suggestedTitle`
+(refine's title when a human-chosen one was kept; rename/dismiss clear it), `refineStage`
+('reading'|'frames'|'writing' while running) · **WalkthroughChat** (the assistant thread; userId is a
 plain column, no FK) · **WalkthroughRevision** (append-only mutation log of every assistant
 edit) · **Project.instructions** (standing agent context, prepended to every brief from that
 project) · **User.notifyResults** (+ unsubscribe kind 'results'). Statuses are now
@@ -945,8 +968,9 @@ reaches the container on a plain push.
 - **Uploads and AI passes require a verified email; budgets are per-USER per-month** (2026-08-12):
   declare, `/transcribe`, `/polish` and `tokens.create` all 403 on `emailVerified: false` (admins
   exempt; reads stay open so existing agents keep pulling their queue). Budgets ride
-  `monthly_usage` (user × 'YYYY-MM'): free = 900 cloud-transcribe seconds/mo + no polish; the
-  FIRST walkthrough is unmetered on purpose (magic — don't "fix" it). `GET /context` returns the
+  `monthly_usage` (user × 'YYYY-MM'): since 2026-08-24 there is NO free cloud budget (0s, no
+  polish) and the first-walkthrough magic is REMOVED (owner killed the free tier — supersedes the
+  "don't fix the magic" rule; decisions.md). `GET /context` returns the
   `cloud` block so recorders can self-configure. **Deploy ordering matters**: the `monthly_usage`
   table must exist before this code serves (Drydock predeploy `db push` handles a normal push;
   `handback_test` needs its own `DATABASE_URL=…/handback_test bunx prisma db push` like any
@@ -1048,6 +1072,16 @@ reaches the container on a plain push.
   flow asserts the h1 'Walkthroughs' (was 'Inbox' — stale since 2026-08-12).
 
 ## Status
+
+> **🚀 Launch runway — standing reminder.** The marketing foundation is built (OG card, /docs,
+> homepage fixes, error alerts — all shipped 2026-08-23); launch is **blocked on the owner's
+> recording day**. When Sal says he's ready (or asks "what's next for launch"), open
+> `plans/2026-08-12-marketing-plan.md` → the "⏭ Next actions" section at the top is the ordered
+> checklist: ① record the real demo loop (beat sheet: `plans/2026-08-23-demo-video.md`) → Claude
+> cuts the ~60s Remotion version; ② submit the MCP directory pack
+> (`plans/2026-08-23-mcp-directory-pack.md`); ③ rotate the pasted keys + R2 token cleanup;
+> ④ verify the OG card renders before any announcement; ⑤ community groundwork starts now
+> (2–3 weeks lead time). X posts come from @dested in Sal's voice (memory: sal-twitter-voice).
 
 - **Done (2026-07-29, day one)** — schema + S3 + two-phase ingest + push CLI (verified with a real
   36MB gripe, 172 files); tRPC API for orgs/invites/tokens/projects/gripes; full web app (landing,
@@ -1204,6 +1238,20 @@ reaches the container on a plain push.
   walkthrough (push → refine → MCP brief → question → answer → evidence → result; bx browser
   passes on shell/usage/upgrade/viewer). Outstanding: extension publish (Sal, Windows zip),
   prod deploy on next push, video-to-prompt intent mirror.
+- **Done (2026-08-24) — the viewer rethink + key-point spine + free-tier kill** (owner: "ship
+  it"; plans/2026-08-23-viewer-rethink.md; design canvas via /design, direction C "review desk"
+  approved; fable-opus, 8 Opus agents + gate): **server** — refine synthesizes digestMd +
+  pointsJson (kpN spine) + suggestedTitle + live refineStage; the brief opens with digest +
+  numbered KP obligations; post_result takes per-point `outcomes` (hosted MCP + stdio + REST —
+  also fixed ingest silently stripping `evidence`); assistant gains update_digest/
+  update_key_points. **client** — /walkthroughs/:id rebuilt as the full-bleed review desk
+  (masthead bar, vertical tab rail, state-driven hero incl. THE VERDICT "what you raised → what
+  came back", ONE exchange thread + composer replacing four panels; app sidebar forced to icon
+  rail on the route; react-markdown). **pricing** (same day, owner) — free tier killed in copy
+  AND code (0 budget, magic removed, pro 15h), landing = Pro $20/15h · Business $40/30h ·
+  Enterprise, all "coming soon". Cost model: real cost ≈ $1.50/recorded-hr (refine-dominated;
+  /admin/costs understates ~10× — fix pending); $20/$40 underwater on a filled quota.
+  e2e re-baselined 4/4; states live-verified in Chrome. Pushed to prod (41520b0).
 - **Next** — **deploy, then re-test the loop**: `/mcp` and `/connect` only exist locally until the
   next push to `main`, so the command `/connect` prints for handback.dev 404s until then. Sal's
   Drydock/DNS checklist in the rename plan (zone, project, S3 via
@@ -1214,6 +1262,11 @@ reaches the container on a plain push.
 
 ## Plans
 
+- `plans/2026-08-12-marketing-plan.md` — **active — THE LAUNCH PLAYBOOK.** Positioning ("task
+  capture for agents"), channel reality (X-only via @dested), phases, and the "⏭ Next actions"
+  owner checklist at the top. Read it whenever launch/marketing comes up. Companions:
+  `plans/2026-08-23-demo-video.md` (beat sheet + X drafts, waiting on the owner's recording day)
+  and `plans/2026-08-23-mcp-directory-pack.md` (directory submissions drafted, owner submits).
 - `plans/2026-07-30-transcription.md` — **active**. Why on-device Whisper stopped being the
   default, what shipped on Groq, and what's left (Deepgram if keyterm biasing is ever needed). The
   Haiku cleanup pass it proposed is built — `server/polish.ts`.
