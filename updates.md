@@ -2,6 +2,16 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-08-23 — Viewer rethink brief written for a fresh session
+Asked: owner rejected the accreted viewer page ("stacked features, works like shit") AND the
+refine output quality (silent run, raw markdown dump, no digest, no rename); wants a full
+from-scratch redesign run in a clean context.
+Done: plans/2026-08-23-viewer-rethink-brief.md — the complete executable prompt: settled
+decisions (state-driven page, one thread, nothing dies), AI full re-spec mandates, /design
+canvas process, quality bar (Linear/Vercel/Graphite/Notion AI). Half-done markdown patches
+reverted; real markdown lib mandated in the brief.
+Touched: plans/2026-08-23-viewer-rethink-brief.md
+
 ## 2026-08-23 — The fable5 mega-wave (fable-opus, 11 Opus agents, 4 waves)
 Asked: sidebar nav redesign, intent "prompt changers", the Refine pass, the walkthrough
 assistant, agent questions + evidence + notify-on-result, watch comments, /usage, /upgrade,
