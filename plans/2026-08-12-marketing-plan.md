@@ -85,8 +85,8 @@ records + dev's agent fixes (the team sell) → agencies (client feedback → ag
 2. ~~Prod round trip~~ — **proven de facto**: real walkthroughs live on prod (16 as of the Aug 2
    migration audit); R2 cutover byte-verified Aug 13.
 3. ~~Privacy truth-up~~ — **DONE** (Aug 12 rewrite; processors named).
-4. **Error tracking + post-deploy smoke check — STILL OPEN. The last real gate.** You'll be asleep
-   when launch traffic hits. No PH/HN moment until this is in.
+4. **Error tracking — DONE 2026-08-23** (server/alerts.ts + client beacon; the cron smoke probe
+   was deleted on the owner's order).
 5. ~~Retention~~ — **shipped** (30d resolved expiry, 14d raw purge). State it as a selling point.
    Minor: `cli/backfill-expiry.ts` not yet run on prod.
 6. **Security housekeeping before the traffic spike** (from go-live + cliffnotes): rotate the
@@ -98,7 +98,7 @@ records + dev's agent fixes (the team sell) → agencies (client feedback → ag
 | # | Item | Who | Status |
 | --- | --- | --- | --- |
 | 1 | **OG image + `twitter:*` meta + canonical + sitemap** | Claude | **DONE 2026-08-23** — og.png (`bun run make:og`), full twitter/og meta, per-route canonical, sitemap.xml, robots hardening |
-| 2 | **Error tracking + post-deploy smoke check** (gate 4) | Claude | **DONE 2026-08-23** — server/alerts.ts (email alerts, dedup+caps) + client beacon + .github/workflows/smoke.yml (post-deploy + 30-min cron). Alerts email ADMIN_EMAILS; a red smoke run emails via GitHub |
+| 2 | **Error tracking** (gate 4) | Claude | **DONE 2026-08-23** — server/alerts.ts (email alerts to ADMIN_EMAILS, dedup+caps) + client beacon. The smoke.yml cron probe was built then deleted on the owner's order — no external uptime check exists; a dead task goes unnoticed until someone looks |
 | 3 | **Homepage top-10 fixes** | Claude | **DONE 2026-08-23** — hero outcome rewrite, Claude Code named above the fold, loop strip 01–04, proof line pulled up, alpha line, nav anchors + Docs, /app onboarding sequence, README reconciled. Still open: demo video above the fold (waits on item 6b), named social proof (waits on real users) |
 | 4 | **/docs — "how it works with Claude Code"** | Claude | **DONE 2026-08-23** — /docs live: loop, hosted mcp add quickstart, six tools, teams, FAQ |
 | 5 | **MCP directory pack**: official registry, mcp.so, PulseMCP, Glama, Smithery, awesome-mcp-servers | Claude drafts, owner submits | drafted → `plans/2026-08-23-mcp-directory-pack.md`; **owner submits** |
@@ -107,7 +107,7 @@ records + dev's agent fixes (the team sell) → agencies (client feedback → ag
 
 **Deploy note:** all of the above ships on the next push to `main` (Drydock auto-deploys). After
 it rolls: sanity-check https://handback.dev/og.png, paste handback.dev into an X draft to see the
-card, and confirm the `smoke` workflow went green in Actions.
+card, and hit /healthz once yourself — with the smoke probe deleted, that check is manual now.
 
 ## Phase 1 — soft launch (weeks 1–2): X + directories
 

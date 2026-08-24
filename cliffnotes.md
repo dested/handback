@@ -174,8 +174,8 @@ server/
   alerts.ts             self-hosted error alerting: reportError (dedup 1/sig/hr, 20/day cap →
                         ADMIN_EMAILS via Resend), installProcessAlerts (uncaught/unhandled, no
                         exit), clientErrorRouter (POST /api/client-error). Never throws, never
-                        alerts on itself. Smoke probe lives in .github/workflows/smoke.yml (OURS,
-                        not Drydock's — post-deploy + 30-min cron, red run = GitHub emails Sal)
+                        alerts on itself. (A smoke.yml cron probe shipped 2026-08-23 and was
+                        deleted same day on Sal's order — don't reintroduce it)
   ratelimit.ts          in-memory fixed-window limiter (one ECS task, so one process sees all)
   prisma.ts / logger.ts PrismaClient singleton · ANSI request logger
 cli/
