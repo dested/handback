@@ -62,16 +62,29 @@ export function WalkthroughPage() {
     return () => clearInterval(id)
   }, [refineStatus, walkthroughId, queryClient, trpc])
 
+  // The app shell serves this route full-bleed (the desk owns its padding), so
+  // every simpler surface — skeleton, error, child, editor, human — brings back
+  // the ordinary page container itself.
+  const CONTAINER = 'mx-auto w-full max-w-6xl px-6 py-8'
+
   // A disabled query stays pending forever, so the id guard comes first.
-  if (walkthroughId && walkthroughQuery.isPending) return <ViewerSkeleton />
+  if (walkthroughId && walkthroughQuery.isPending) {
+    return (
+      <div className={CONTAINER}>
+        <ViewerSkeleton />
+      </div>
+    )
+  }
 
   if (!walkthrough) {
     return (
-      <div className="bg-card max-w-md space-y-3 rounded-md border p-6">
-        <p className="text-sm">Couldn't load this walkthrough.</p>
-        <Link to="/app" className="text-cobalt text-sm hover:underline">
-          ← Walkthroughs
-        </Link>
+      <div className={CONTAINER}>
+        <div className="bg-card max-w-md space-y-3 rounded-md border p-6">
+          <p className="text-sm">Couldn't load this walkthrough.</p>
+          <Link to="/app" className="text-cobalt text-sm hover:underline">
+            ← Walkthroughs
+          </Link>
+        </div>
       </div>
     )
   }
@@ -93,9 +106,9 @@ export function WalkthroughPage() {
   // no rail, no tabs.
   if (isChild) {
     return (
-      <div className="space-y-6">
+      <div className={cn(CONTAINER, 'space-y-6')}>
         <Masthead walkthrough={walkthrough} />
-        <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_396px]">
+        <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
           <TaskBrief walkthrough={walkthrough} />
           <Exchange walkthrough={walkthrough} playheadMs={0} onSeek={() => {}} />
         </div>
@@ -107,7 +120,7 @@ export function WalkthroughPage() {
   // while it's up.
   if (editing && canEdit) {
     return (
-      <div className="space-y-6">
+      <div className={cn(CONTAINER, 'space-y-6')}>
         <Masthead walkthrough={walkthrough} />
         <CloudEditor
           walkthroughId={walkthrough.id}
@@ -122,7 +135,7 @@ export function WalkthroughPage() {
 
   if (human) {
     return (
-      <div className="space-y-6">
+      <div className={cn(CONTAINER, 'space-y-6')}>
         <Masthead walkthrough={walkthrough} />
         <HumanBody
           walkthrough={walkthrough}
@@ -251,13 +264,19 @@ function AgentDesk({
   const takesExist = media.takes.length > 0
 
   return (
-    <div className="space-y-6">
-      <Masthead walkthrough={walkthrough} onTab={goTab} />
+    <div>
+      {/* Full-bleed: the masthead is a bar across the desk, not a block in a
+          centered column. */}
+      <div className="px-6 pt-5">
+        <Masthead walkthrough={walkthrough} onTab={goTab} />
+      </div>
 
-      <div className="lg:grid lg:grid-cols-[216px_minmax(0,1fr)_396px]">
+      {/* The exchange column sizes to its own content (self-start inside the
+          component) — its height must never be set by the work area's. */}
+      <div className="lg:grid lg:grid-cols-[208px_minmax(0,1fr)_360px]">
         <DeskRail walkthrough={walkthrough} tab={tab} onTab={goTab} media={media} />
 
-        <div className="min-w-0 px-6 py-6 lg:px-9">
+        <div className="min-w-0 px-6 py-6 lg:px-8">
           {/* Recording is hidden, never unmounted, so playback survives a tab
               switch and a seek from elsewhere lands on a live player. */}
           {takesExist && (

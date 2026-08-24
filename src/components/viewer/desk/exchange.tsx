@@ -279,8 +279,10 @@ function AnswerForm({ walkthrough, invalidate }: { walkthrough: Walkthrough; inv
 
   return (
     <div className="space-y-2">
+      {/* The pane is ~360px — the input gets its own full-width row so it never
+          collapses to a sliver beside its buttons. */}
       <form
-        className="flex flex-wrap items-center gap-2"
+        className="space-y-2"
         onSubmit={(e) => {
           e.preventDefault()
           const trimmed = text.trim()
@@ -292,26 +294,29 @@ function AnswerForm({ walkthrough, invalidate }: { walkthrough: Walkthrough; inv
           disabled={busy}
           placeholder="Answer the agent…"
           aria-label="Answer the agent"
-          className="border-input bg-card focus-visible:border-ring min-w-0 flex-1 rounded-md border px-3 py-1.5 text-sm outline-none"
+          className="border-input bg-card focus-visible:border-ring w-full min-w-0 rounded-md border px-3 py-1.5 text-sm outline-none"
         />
-        <Button type="submit" disabled={busy || !text.trim()}>
-          Answer
-        </Button>
-        <Button type="button" variant="outline" disabled={busy} onClick={voice.toggle}>
-          {voice.recording ? `stop · ${voice.clock}` : 'Answer by voice'}
-        </Button>
-        {uploader &&
-          (route.isSuccess ? (
-            <span className="text-muted-foreground font-mono text-xs">sent to {uploader}</span>
-          ) : (
-            <Button
-              type="button"
-              variant="ghost"
-              disabled={busy || route.isPending}
-              onClick={() => route.mutate({ walkthroughId: walkthrough.id })}>
-              Ask {uploader}
-            </Button>
-          ))}
+        <div className="flex flex-wrap items-center gap-2">
+          <Button type="submit" size="sm" disabled={busy || !text.trim()}>
+            Answer
+          </Button>
+          <Button type="button" variant="outline" size="sm" disabled={busy} onClick={voice.toggle}>
+            {voice.recording ? `stop · ${voice.clock}` : 'Answer by voice'}
+          </Button>
+          {uploader &&
+            (route.isSuccess ? (
+              <span className="text-muted-foreground font-mono text-xs">sent to {uploader}</span>
+            ) : (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={busy || route.isPending}
+                onClick={() => route.mutate({ walkthroughId: walkthrough.id })}>
+                Ask {uploader}
+              </Button>
+            ))}
+        </div>
       </form>
       {voice.transcribing && (
         <p className="text-muted-foreground font-mono text-sm">transcribing…</p>
@@ -514,7 +519,7 @@ export function Exchange({
     )
 
   return (
-    <div className="flex flex-col gap-4 border-t pt-6 lg:border-t-0 lg:border-l lg:pt-0 lg:pl-6">
+    <div className="flex flex-col gap-4 self-start border-t px-6 pt-6 pb-8 lg:border-t-0 lg:border-l lg:px-6 lg:py-6">
       {/* The sign-off, pinned first. */}
       {walkthrough.status === 'resolved' ? (
         <div className="space-y-1.5">

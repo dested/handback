@@ -182,8 +182,7 @@ export function Masthead({
     megabytes(walkthrough.bytes),
     walkthrough.uploadedByName ? `uploaded by ${walkthrough.uploadedByName}` : null,
     expiresLabel(walkthrough.expiresAt),
-    // What the recording is for, when it's been tagged — already lowercase.
-    walkthrough.intent,
+    // Intent is NOT in this line — it already reads as the pill on the right.
   ].filter((part): part is string => part !== null)
 
   const member = walkthrough.viewerIsMember

@@ -29,12 +29,15 @@ export function RecordingTab({
 
   return (
     <div className="space-y-8">
-      <div className="grid gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-2">
+      {/* The stage takes what the video's aspect leaves; the transcript keeps a
+          readable fixed column instead of splitting the row proportionally —
+          a portrait phone recording must not shred it into one-word lines. */}
+      <div className="flex flex-col gap-6 lg:flex-row">
+        <div className="min-w-0 flex-1">
           <VideoStage player={player} frames={frames} />
         </div>
 
-        <section className="space-y-2 lg:col-span-1">
+        <section className="space-y-2 lg:w-[300px] lg:shrink-0">
           <SectionHead>transcript</SectionHead>
           {noRecordings ? (
             <p className="text-muted-foreground text-sm">No narration was uploaded.</p>
@@ -43,11 +46,15 @@ export function RecordingTab({
               Couldn't load the narration — reload the page to try again.
             </p>
           ) : (
-            <TranscriptPanel
-              lines={lines}
-              activeMs={player.outputMs}
-              onSeek={(ms) => player.seekOutput(ms)}
-            />
+            // Bounded beside the stage so a long narration scrolls in place
+            // instead of setting the height of the whole desk row.
+            <div className="lg:max-h-[440px] lg:overflow-y-auto">
+              <TranscriptPanel
+                lines={lines}
+                activeMs={player.outputMs}
+                onSeek={(ms) => player.seekOutput(ms)}
+              />
+            </div>
           )}
         </section>
       </div>

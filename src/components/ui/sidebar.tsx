@@ -27,9 +27,15 @@ function useSidebar(): SidebarContextValue {
 function SidebarProvider({
   children,
   storageKey = DEFAULT_STORAGE_KEY,
+  forceCollapsed = false,
 }: {
   children: React.ReactNode
   storageKey?: string
+  /** Route-driven override: presents the icon rail regardless of the stored
+   *  preference, without writing it — the walkthrough desk needs the width and
+   *  must not clobber what the person chose everywhere else. Deterministic from
+   *  the route, so it's hydration-safe. */
+  forceCollapsed?: boolean
 }) {
   // Starts expanded on both server and client — reading localStorage in the
   // initializer would render a different width than the SSR markup and break
@@ -52,8 +58,8 @@ function SidebarProvider({
   )
 
   const value = React.useMemo<SidebarContextValue>(
-    () => ({ collapsed, setCollapsed, mobileOpen, setMobileOpen }),
-    [collapsed, setCollapsed, mobileOpen]
+    () => ({ collapsed: forceCollapsed || collapsed, setCollapsed, mobileOpen, setMobileOpen }),
+    [collapsed, forceCollapsed, setCollapsed, mobileOpen]
   )
 
   return (

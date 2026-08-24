@@ -100,10 +100,16 @@ export function Layout() {
 function AppShell({ email, children }: { email: string; children: React.ReactNode }) {
   const navigate = useNavigate()
   const revalidator = useRevalidator()
+  const location = useLocation()
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const adminStatus = useQuery(trpc.admin.status.queryOptions())
   const ent = useQuery(trpc.teams.entitlements.queryOptions())
+  // The walkthrough desk is a full-bleed three-column surface with its own left
+  // rail — beside an expanded app sidebar it reads as double nav in a squeezed
+  // container. On that route the sidebar presents as the icon rail and the main
+  // column drops its width cap; the desk owns its padding.
+  const desk = location.pathname.startsWith('/walkthroughs/')
 
   async function signOut() {
     await authClient.signOut()
@@ -115,7 +121,7 @@ function AppShell({ email, children }: { email: string; children: React.ReactNod
   }
 
   return (
-    <SidebarProvider storageKey="handback.appSidebar">
+    <SidebarProvider storageKey="handback.appSidebar" forceCollapsed={desk}>
       <Sidebar>
         <SidebarHeader>
           <Link
@@ -124,7 +130,9 @@ function AppShell({ email, children }: { email: string; children: React.ReactNod
             className="group-data-[collapsed]/sidebar:hidden">
             <Wordmark />
           </Link>
-          <SidebarTrigger className="ml-auto group-data-[collapsed]/sidebar:ml-0" />
+          {/* While the desk forces the icon rail, the toggle would look dead —
+              hide it rather than let it no-op. */}
+          {!desk && <SidebarTrigger className="ml-auto group-data-[collapsed]/sidebar:ml-0" />}
         </SidebarHeader>
         <SidebarContent>
           <SidebarGroup>
@@ -200,7 +208,9 @@ function AppShell({ email, children }: { email: string; children: React.ReactNod
             <Wordmark />
           </Link>
         </div>
-        <main className="mx-auto w-full max-w-6xl px-6 py-8">{children}</main>
+        <main className={desk ? 'w-full min-w-0' : 'mx-auto w-full max-w-6xl px-6 py-8'}>
+          {children}
+        </main>
       </SidebarInset>
     </SidebarProvider>
   )

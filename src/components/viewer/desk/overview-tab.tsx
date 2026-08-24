@@ -202,10 +202,10 @@ function OpenStateBody({
                       type="button"
                       onClick={() => onSeek(atMs)}
                       className="text-muted-foreground hover:text-cobalt">
-                      [{mmss(atMs)}]{' '}
+                      [{mmss(atMs)}]
                     </button>
                   )}
-                  <span className="text-foreground/80">{note.text}</span>
+                  <span className="text-foreground/80">{atMs !== null ? ' ' : ''}{note.text}</span>
                 </li>
               )
             })}
