@@ -2,6 +2,16 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-08-24 — Pricing work: Sonnet everywhere, real AI quotas, terms de-freed
+Asked: "work out pricing… nothing can be a loss leader"; owner: Sonnet straight away, quotas yes,
+$25/$50 lean pending a lever board. Done: refine synth + assistant + split Opus→Sonnet 5 (~65% off
+the dominant cost); PRO_ASSISTANT_TURNS=100/mo replaces the phantom polish cap on chat; refineRuns
+capped 4/walkthrough; /usage shows the assistant meter; terms §9/§12 drop "free during alpha".
+Pricing bench artifact (levers → margins/underwater curve/scale) delivered for the price call;
+walkthrough-count ceilings await owner's numbers. Schema pushed local+test.
+Touched: server/{refine,agent,structure,limits,usage,router}.ts, prisma/schema.prisma,
+src/app/{usage,terms}.tsx, cliffnotes.md, decisions.md
+
 ## 2026-08-24 — Pricing: free tier killed, 15h/30h coming-soon plans
 Asked: "get rid of all that free shit… 15 hours… 30 for extra money… say coming soon"; cost read.
 Landing Pro $20/15h · Business $40/30h · Enterprise; free budget 0 + magic removed; pro 15h.

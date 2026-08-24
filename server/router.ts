@@ -23,6 +23,8 @@ import {
 import {
   FREE_CLOUD_TRANSCRIBE_SECONDS,
   MAX_ACTIVE_TOKENS,
+  MAX_REFINE_RUNS_PER_WALKTHROUGH,
+  PRO_ASSISTANT_TURNS,
   PRO_CLOUD_TRANSCRIBE_SECONDS,
 } from './limits'
 import { log } from './logger'
@@ -47,7 +49,7 @@ import {
   presignPut,
 } from './storage'
 import { childBriefMd, proposeStructure, structureConfigured } from './structure'
-import { checkAndReservePolish, cloudStatus } from './usage'
+import { checkAndReserveAssistantTurn, checkAndReservePolish, cloudStatus } from './usage'
 import { protectedProcedure, publicProcedure, router } from './trpc'
 import {
   getWalkthroughDetail,
@@ -1951,6 +1953,7 @@ const walkthroughsRouter = router({
           kind: true,
           finalizedAt: true,
           refineStatus: true,
+          refineRuns: true,
         },
       })
       if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
@@ -1972,6 +1975,9 @@ const walkthroughsRouter = router({
       }
       if (g.refineStatus === 'running') {
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'Refine is already running' })
+      }
+      if (g.refineRuns >= MAX_REFINE_RUNS_PER_WALKTHROUGH) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Refine limit reached for this walkthrough' })
       }
       if (!refineConfigured()) {
         throw new TRPCError({
@@ -2019,7 +2025,7 @@ const walkthroughsRouter = router({
           message: "The assistant isn't configured on this server",
         })
       }
-      const { allowed } = await checkAndReservePolish(ctx.session.user.id)
+      const { allowed } = await checkAndReserveAssistantTurn(ctx.session.user.id)
       if (!allowed) {
         throw new TRPCError({
           code: 'FORBIDDEN',
@@ -3124,6 +3130,10 @@ const usageRouter = router({
           ? PRO_CLOUD_TRANSCRIBE_SECONDS
           : FREE_CLOUD_TRANSCRIBE_SECONDS
 
+    // The assistant-turn ceiling: unmetered for admin, the Pro quota, else 0.
+    const assistantTurnsLimit =
+      tier === 'admin' ? null : tier === 'pro' ? PRO_ASSISTANT_TURNS : 0
+
     const active = await prisma.apiToken.count({ where: { userId: me, revokedAt: null } })
 
     const expiring = await prisma.walkthrough.findMany({
@@ -3143,6 +3153,8 @@ const usageRouter = router({
         transcribeRemainingSeconds: cloud.transcribeRemainingSeconds,
         transcribeLimitSeconds,
         polishAllowed: cloud.polishAllowed,
+        assistantTurnsRemaining: cloud.assistantTurnsRemaining,
+        assistantTurnsLimit,
         firstWalkthroughMagic: cloud.firstWalkthroughMagic,
       },
       tokens: { active, max: MAX_ACTIVE_TOKENS },

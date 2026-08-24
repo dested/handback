@@ -99,6 +99,21 @@ export function UsagePage() {
               <span className="text-muted-foreground font-mono text-xs">Pro only</span>
             )}
           </Row>
+          <Row label="assistant">
+            {cloud.assistantTurnsRemaining === null ? (
+              <span className="text-muted-foreground font-mono text-xs">unmetered</span>
+            ) : cloud.assistantTurnsLimit !== null && cloud.assistantTurnsLimit > 0 ? (
+              <span className="text-muted-foreground font-mono text-xs">
+                {cloud.assistantTurnsRemaining} of {cloud.assistantTurnsLimit} turns left this month
+              </span>
+            ) : data.tier === 'free' ? (
+              <Link to="/upgrade" className="text-cobalt font-mono text-xs hover:underline">
+                Pro only
+              </Link>
+            ) : (
+              <span className="text-muted-foreground font-mono text-xs">Pro only</span>
+            )}
+          </Row>
         </div>
       </section>
 

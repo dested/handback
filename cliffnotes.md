@@ -119,11 +119,13 @@ server/
                         admin), requireAdmin
   limits.ts             tier ceilings (2026-08-24: NO free cloud tier — owner's order): free
                         transcribe budget 0 (recorders fall back on-device), pro 54 000s (15h)/mo
-                        + 1 000 polish, MAX_ACTIVE_TOKENS=10, monthKey()
-  usage.ts              MonthlyUsage metering: checkAndReserveTranscribe/Polish (atomic
-                        upsert+increment; refused outright without pro), cloudStatus for
-                        GET /context. Admins fully unmetered. The first-walkthrough magic was
-                        REMOVED 2026-08-24 with the free tier (decisions.md)
+                        + 1 000 polish (abuse bound) + PRO_ASSISTANT_TURNS=100/mo (real quota) +
+                        MAX_REFINE_RUNS_PER_WALKTHROUGH=4, MAX_ACTIVE_TOKENS=10, monthKey()
+  usage.ts              MonthlyUsage metering: checkAndReserveTranscribe/Polish/AssistantTurn
+                        (atomic upsert+increment; refused outright without pro), cloudStatus for
+                        GET /context (incl. assistantTurnsRemaining). Admins fully unmetered. The
+                        first-walkthrough magic was REMOVED 2026-08-24 with the free tier
+                        (decisions.md)
   router.ts             THE tRPC API: teams (incl. get/transferOwnership), invites (seat-capped),
                         tokens (user-scoped, no team input), projects (incl. `instructions`),
                         walkthroughs (incl. setIntent, answerQuestion/routeQuestion, refine, chat/
@@ -133,15 +135,17 @@ server/
   refine.ts             THE Refine pass (pro-gated, fire-and-forget from finalize + manual
                         walkthroughs.refine): deterministic capture-health checks → Haiku vision
                         frame curation w/ captions (batches of 12, ≤84 sampled, ≤20 keepers) →
-                        Opus 5 synthesis: digestMd (2–4 human sentences) + pointsJson KeyPoint[]
+                        Sonnet 5 synthesis (Opus→Sonnet 2026-08-24, decisions.md): digestMd
+                        (2–4 human sentences) + pointsJson KeyPoint[]
                         (kpN ids, severity, atMs — THE structured spine) + summaryMd ledger +
                         refinedBriefMd (sections headed per KP). Titles: Session-class defaults
                         replaced outright; human-chosen ones only get suggestedTitle. Live
                         refineStage reading|frames|writing for the viewer's progress hero.
                         NEVER throws; refineStatus running|done|failed; payer = uploader on
-                        auto-run, the CALLER on manual ({byUserId}); meters one polish call.
+                        auto-run, the CALLER on manual ({byUserId}); meters one polish call;
+                        refineRuns capped at 4 total per walkthrough (router gate).
                         Original report.md in S3 is never rewritten
-  agent.ts              THE walkthrough assistant (walkthroughs.chat): Opus 5 tool loop (≤12
+  agent.ts              THE walkthrough assistant (walkthroughs.chat): Sonnet 5 tool loop (≤12
                         iterations) over read_walkthrough / update_title / update_summary /
                         update_brief / edit_transcript_lines (text only, timings frozen) /
                         remove_span (strikes lines + deletes frames + records an excluded-span
@@ -174,7 +178,7 @@ server/
   transcribe.ts         speech-to-text via Groq whisper-large-v3-turbo; segments in ms
   polish.ts             transcript cleanup via claude-haiku-4-5 — text only, timings untouched
   structure.ts          the split pass: report.md + comments → 1–10 proposed tasks via
-                        claude-opus-5 structured outputs (no prefill — 400s on Opus 5); every
+                        claude-sonnet-5 structured outputs (no prefill); every
                         failure degrades to null like polish. childBriefMd() writes a child's
                         brief_md (steps, done-when, "Source: get_walkthrough(parent)")
   email.ts              Resend sender + reset/verify/invite templates; never throws

@@ -2,6 +2,18 @@
 
 > ADR-lite: what was decided, why, what was rejected. Append-only.
 
+## 2026-08-24 — Sonnet 5 for all AI passes; assistant turns and refine runs get real quotas
+**Why:** pricing has to carry itself ("nothing can be a loss leader"). Refine was ~90% of marginal
+cost at ~$0.35/walkthrough on Opus 5; Sonnet 5 on the synthesis leg (and the assistant + split
+pass) cuts that ~65% to ~$0.15, which is what lets the published $2x/$5x price points carry.
+Assistant chat moves off the never-tripping 1 000-polish abuse cap onto PRO_ASSISTANT_TURNS=100/mo,
+and refine is capped at 4 total runs per walkthrough (refineRuns column) — margin guards, not abuse
+bounds. Owner picked Sonnet sight-unseen ("Straight to Sonnet") over an A/B; watch digest/key-point
+quality in prod and revisit if it slips.
+**Rejected:** keeping Opus and repricing to $30/$60 (owner leaned cheaper); an A/B before switching
+(owner skipped it); metering by hours alone (walkthrough COUNT is the real cost driver — count
+ceilings pending owner's lever session on the pricing bench).
+
 ## 2026-08-24 — The viewer is the review desk; the stacked chassis is dead
 **Why:** owner's verdict on the accreted page ("you can't just stack 10 features… rethink it from
 scratch") and on the first build ("double nav… this is fucking insane"). The page is now

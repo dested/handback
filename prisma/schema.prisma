@@ -275,6 +275,7 @@ model Walkthrough {
   pointsJson     Json?     @map("points_json")
   suggestedTitle String?   @map("suggested_title")
   refineStage    String?   @map("refine_stage")
+  refineRuns     Int       @default(0) @map("refine_runs")
 
   takes     Take[]
   files     WalkthroughFile[]
@@ -456,6 +457,7 @@ model MonthlyUsage {
   month             String // 'YYYY-MM' UTC
   transcribeSeconds Int    @default(0) @map("transcribe_seconds")
   polishCalls       Int    @default(0) @map("polish_calls")
+  assistantTurns    Int    @default(0) @map("assistant_turns")
 
   @@unique([userId, month])
   @@map("monthly_usage")

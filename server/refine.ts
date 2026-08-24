@@ -390,7 +390,7 @@ export async function runRefine(
 
   await prisma.walkthrough.update({
     where: { id: walkthrough.id },
-    data: { refineStatus: 'running', refineStage: 'reading' },
+    data: { refineStatus: 'running', refineStage: 'reading', refineRuns: { increment: 1 } },
   })
 
   try {

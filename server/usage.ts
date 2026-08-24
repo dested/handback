@@ -15,6 +15,7 @@
 import { isPlatformAdmin, userHasFeature } from './features'
 import {
   FREE_CLOUD_TRANSCRIBE_SECONDS,
+  PRO_ASSISTANT_TURNS,
   PRO_CLOUD_TRANSCRIBE_SECONDS,
   PRO_POLISH_CALLS,
   monthKey,
@@ -90,10 +91,39 @@ export async function checkAndReservePolish(userId: string): Promise<{ allowed: 
   })
 }
 
+/**
+ * Reserve one assistant turn this month, or refuse. Admins pass unmetered
+ * (remaining null); without a Pro plan there is no assistant (remaining 0); Pro
+ * is capped at PRO_ASSISTANT_TURNS/mo — a real margin guard, not an abuse bound.
+ */
+export async function checkAndReserveAssistantTurn(
+  userId: string
+): Promise<{ allowed: boolean; remaining: number | null }> {
+  const { admin, pro } = await tierOf(userId)
+  if (admin) return { allowed: true, remaining: null }
+  if (!pro) return { allowed: false, remaining: 0 }
+  const month = monthKey(new Date())
+  return await prisma.$transaction(async (tx) => {
+    const row = await tx.monthlyUsage.upsert({
+      where: { userId_month: { userId, month } },
+      create: { userId, month },
+      update: {},
+    })
+    if (row.assistantTurns >= PRO_ASSISTANT_TURNS) return { allowed: false, remaining: 0 }
+    const updated = await tx.monthlyUsage.update({
+      where: { userId_month: { userId, month } },
+      data: { assistantTurns: { increment: 1 } },
+    })
+    return { allowed: true, remaining: Math.max(0, PRO_ASSISTANT_TURNS - updated.assistantTurns) }
+  })
+}
+
 export type CloudStatus = {
   /** Cloud transcription seconds left this month, or null when unmetered. */
   transcribeRemainingSeconds: number | null
   polishAllowed: boolean
+  /** Assistant turns left this month, or null when unmetered (admin). */
+  assistantTurnsRemaining: number | null
   /** Retained for the context/usage shape — the magic is gone, so always false. */
   firstWalkthroughMagic: boolean
 }
@@ -106,7 +136,12 @@ export type CloudStatus = {
 export async function cloudStatus(userId: string): Promise<CloudStatus> {
   const { admin, pro } = await tierOf(userId)
   if (admin) {
-    return { transcribeRemainingSeconds: null, polishAllowed: true, firstWalkthroughMagic: false }
+    return {
+      transcribeRemainingSeconds: null,
+      polishAllowed: true,
+      assistantTurnsRemaining: null,
+      firstWalkthroughMagic: false,
+    }
   }
   const limit = pro ? PRO_CLOUD_TRANSCRIBE_SECONDS : FREE_CLOUD_TRANSCRIBE_SECONDS
   const month = monthKey(new Date())
@@ -117,6 +152,7 @@ export async function cloudStatus(userId: string): Promise<CloudStatus> {
   return {
     transcribeRemainingSeconds: Math.max(0, limit - used),
     polishAllowed: pro,
+    assistantTurnsRemaining: pro ? Math.max(0, PRO_ASSISTANT_TURNS - (row?.assistantTurns ?? 0)) : 0,
     firstWalkthroughMagic: false,
   }
 }
