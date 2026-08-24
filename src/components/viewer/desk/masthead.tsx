@@ -1,6 +1,8 @@
-// The masthead: the title, and every control the walkthrough has. Triage status
-// and the one action that matters for who it's for sit on the line; everything
-// rare or irreversible lives behind the ⋯ menu.
+// The desk's masthead: the crumb, the title (with quiet inline rename), the
+// status chip, and every control the walkthrough has. The project picker, the
+// intent tag and the one kind-appropriate primary action sit on the line;
+// everything rare or irreversible lives behind the ⋯ menu. A third row surfaces
+// refine's suggested title when there is one to accept or dismiss.
 
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -9,12 +11,13 @@ import { Link } from 'react-router-dom'
 import { Button } from '~/components/ui/button'
 import { useTRPC } from '~/lib/trpc'
 import { cn } from '~/lib/utils'
-import { dateTime, megabytes, mmss, plural } from './format'
-import { OverflowMenu, usePopover } from './overflow-menu'
-import { ShareControl } from './share-control'
-import { StatusControl } from './status-control'
-import type { Walkthrough } from './types'
-import { useCopy } from './use-copy'
+import { dateTime, megabytes, mmss, plural } from '../format'
+import { OverflowMenu, usePopover } from '../overflow-menu'
+import { ShareControl } from '../share-control'
+import type { Walkthrough } from '../types'
+import { useCopy } from '../use-copy'
+import { StatusChip } from './status-chip'
+import type { DeskTab } from './types'
 
 const ITEM =
   'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent/50 disabled:opacity-60'
@@ -24,7 +27,7 @@ const DAY_MS = 24 * 60 * 60 * 1000
 /**
  * How soon a resolved walkthrough auto-deletes, for the meta line. Days, ceil;
  * "expires today" inside the last day. Null when nothing is scheduled. The
- * header only ever renders client-side (the page shows a skeleton during SSR),
+ * masthead only ever renders client-side (the page shows a skeleton during SSR),
  * so reading the clock here is hydration-safe.
  */
 function expiresLabel(expiresAt: string | null): string | null {
@@ -101,7 +104,7 @@ function ProjectPicker({ walkthrough }: { walkthrough: Walkthrough }) {
       </button>
 
       {open && (
-        <div className="bg-card border-border absolute left-0 z-20 mt-2 min-w-44 rounded-md border p-1 shadow-sm">
+        <div className="bg-card border-border absolute right-0 z-20 mt-2 min-w-44 rounded-md border p-1 shadow-sm">
           <button
             type="button"
             className={cn(ITEM, projectId === null && 'bg-cobalt-wash text-cobalt')}
@@ -136,35 +139,27 @@ function ProjectPicker({ walkthrough }: { walkthrough: Walkthrough }) {
   )
 }
 
-/** Title block: where it came from, and the shape of what was recorded. */
-export function WalkthroughHeader({
+export function Masthead({
   walkthrough,
-  onSplit,
+  onTab,
 }: {
   walkthrough: Walkthrough
-  /** Opens the split-into-tasks mode; absent when this walkthrough can't split. */
-  onSplit?: () => void
+  /** Lets a masthead control jump the desk to a tab (Split → Tasks). */
+  onTab?: (tab: DeskTab) => void
 }) {
   const trpc = useTRPC()
   const invalidate = useInvalidateWalkthrough(walkthrough.id)
   const { copied, copy } = useCopy()
   const [editing, setEditing] = useState(false)
 
-  // The inbox lists titles too — both readers of them refetch on a rename.
   const rename = useMutation(trpc.walkthroughs.rename.mutationOptions({ onSettled: invalidate }))
-  const setStatus = useMutation(
-    trpc.walkthroughs.setStatus.mutationOptions({ onSettled: invalidate })
+  const dismissSuggested = useMutation(
+    trpc.walkthroughs.dismissSuggestedTitle.mutationOptions({ onSettled: invalidate })
   )
 
-  // In-flight variables stand in for the server's answer, so the heading and the
-  // status read as written the instant they're submitted, and snap back on
-  // their own if the write fails.
-  const title = rename.isPending
-    ? (rename.variables?.title ?? walkthrough.title)
-    : walkthrough.title
-  const status = setStatus.isPending
-    ? (setStatus.variables?.status ?? walkthrough.status)
-    : walkthrough.status
+  // In-flight variables stand in for the server's answer, so the heading reads as
+  // written the instant it's submitted, and snaps back on its own if it fails.
+  const title = rename.isPending ? (rename.variables?.title ?? walkthrough.title) : walkthrough.title
 
   function commit(next: string) {
     const trimmed = next.trim()
@@ -191,13 +186,23 @@ export function WalkthroughHeader({
     walkthrough.intent,
   ].filter((part): part is string => part !== null)
 
-  return (
-    <header className="space-y-2">
-      <Link to="/app" className="text-muted-foreground hover:text-foreground text-sm">
-        ← Inbox
-      </Link>
+  const member = walkthrough.viewerIsMember
+  // The recording is still what the agent reads, so a raw agent walkthrough can
+  // be carved into tasks; a child (its brief IS its content) can't.
+  const splittable = member && walkthrough.kind === 'agent' && walkthrough.briefMd === null
+  // Narrowed once so the accept handler never has to re-assert it.
+  const suggested = walkthrough.suggestedTitle
 
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+  return (
+    <header className="border-border flex flex-col gap-1 border-b pb-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <span className="text-muted-foreground text-[13px]">
+          <Link to="/app" className="text-muted-foreground hover:text-foreground">
+            Walkthroughs
+          </Link>{' '}
+          <span className="opacity-50">/</span>
+        </span>
+
         {editing ? (
           <form
             className="flex flex-wrap items-center gap-2"
@@ -211,54 +216,61 @@ export function WalkthroughHeader({
               autoFocus
               defaultValue={title}
               aria-label="Title"
-              className="border-input bg-background font-display focus-visible:border-ring w-full max-w-2xl rounded-md border px-3 py-1.5 text-3xl font-semibold outline-none"
+              className="border-input bg-background font-display focus-visible:border-ring w-full max-w-xl rounded-md border px-3 py-1 text-xl font-semibold outline-none"
               onKeyDown={(e) => {
                 if (e.key === 'Escape') setEditing(false)
               }}
             />
-            <Button type="submit" variant="outline">
+            <Button type="submit" variant="outline" size="sm">
               Save
             </Button>
-            <Button type="button" variant="ghost" onClick={() => setEditing(false)}>
+            <Button type="button" variant="ghost" size="sm" onClick={() => setEditing(false)}>
               Cancel
             </Button>
           </form>
         ) : (
-          <div className="flex flex-wrap items-baseline gap-3">
-            <h1 className="font-display text-3xl font-semibold">{title}</h1>
-            <button
-              type="button"
-              className="text-muted-foreground hover:text-foreground text-sm"
-              onClick={() => setEditing(true)}>
-              Rename
-            </button>
+          <div className="flex flex-wrap items-baseline gap-2">
+            <h1 className="font-display text-xl font-semibold">{title}</h1>
+            {member && (
+              <button
+                type="button"
+                className="text-muted-foreground hover:text-foreground text-[13px]"
+                onClick={() => setEditing(true)}>
+                Rename
+              </button>
+            )}
           </div>
         )}
 
+        <StatusChip walkthrough={walkthrough} />
+
         <div className="ml-auto flex flex-wrap items-center gap-3">
-          {walkthrough.viewerIsMember ? (
+          {walkthrough.intent && (
+            <span className="border-border text-muted-foreground bg-card rounded-full border px-2.5 py-0.5 font-mono text-[11px]">
+              {walkthrough.intent}
+            </span>
+          )}
+
+          {member ? (
             <>
-              <StatusControl
-                status={status}
-                disabled={setStatus.isPending}
-                onChange={(next) =>
-                  setStatus.mutate({ walkthroughId: walkthrough.id, status: next })
-                }
-              />
               <ProjectPicker walkthrough={walkthrough} />
 
-              {/* A human handback is FOR a person — the share link is its point,
-                  and an agent brief would tell an agent to pull a walkthrough
-                  that its list deliberately hides. */}
+              {/* A human handback is FOR a person — the share link is its point.
+                  An agent walkthrough only needs its brief copied while it's
+                  still open work; once it's in review or resolved the exchange
+                  pane owns what happens next. */}
               {walkthrough.kind === 'human' ? (
                 <ShareControl walkthrough={walkthrough} />
-              ) : (
+              ) : walkthrough.status === 'open' ? (
                 <Button onClick={() => copy(agentBrief(walkthrough))}>
                   {copied ? 'Copied' : 'Copy agent brief'}
                 </Button>
-              )}
+              ) : null}
 
-              <OverflowMenu walkthrough={walkthrough} onSplit={onSplit} />
+              <OverflowMenu
+                walkthrough={walkthrough}
+                onSplit={splittable ? () => onTab?.('tasks') : undefined}
+              />
             </>
           ) : (
             // A platform admin reached this walkthrough from /admin without
@@ -278,7 +290,28 @@ export function WalkthroughHeader({
 
       {rename.error && <p className="text-destructive text-sm">{rename.error.message}</p>}
 
-      <p className="text-muted-foreground font-mono text-xs">{meta.join(' · ')}</p>
+      <p className="text-muted-foreground font-mono text-[11px]">{meta.join(' · ')}</p>
+
+      {suggested && member && (
+        <p className="text-muted-foreground font-mono text-[11px]">
+          refine suggests: &ldquo;{suggested}&rdquo;{' '}
+          <button
+            type="button"
+            className="text-cobalt hover:underline"
+            disabled={rename.isPending}
+            onClick={() => rename.mutate({ walkthroughId: walkthrough.id, title: suggested })}>
+            use
+          </button>{' '}
+          <span className="opacity-50">·</span>{' '}
+          <button
+            type="button"
+            className="text-muted-foreground hover:text-foreground"
+            disabled={dismissSuggested.isPending}
+            onClick={() => dismissSuggested.mutate({ walkthroughId: walkthrough.id })}>
+            dismiss
+          </button>
+        </p>
+      )}
     </header>
   )
 }

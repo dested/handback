@@ -1,35 +1,44 @@
-// /walkthroughs/:walkthroughId — the review surface. Everything a human needs to judge a
-// recorded walkthrough before an agent touches it: the takes played as one continuous
-// recording with its narration, keyframes and console, and the report.md the agent will
-// actually read.
+// /walkthroughs/:walkthroughId — the review desk. A masthead over three columns:
+// the tab rail (the recording and everything read off it), the work area for the
+// active tab, and the exchange pane where the review thread and sign-off live. A
+// human handback and a split-out child task are simpler surfaces that share the
+// same masthead but not the desk.
 
-import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
 import { CloudEditor } from '~/components/edit/cloud-editor'
 import { Button } from '~/components/ui/button'
-import { AgentAnswer } from '~/components/viewer/agent-answer'
-import { AgentView } from '~/components/viewer/agent-view'
-import { AssistantPanel } from '~/components/viewer/assistant-panel'
+import { BriefTab } from '~/components/viewer/desk/brief-tab'
+import { ConsoleTab } from '~/components/viewer/desk/console-tab'
+import { Exchange } from '~/components/viewer/desk/exchange'
+import { FramesTab } from '~/components/viewer/desk/frames-tab'
+import { Masthead } from '~/components/viewer/desk/masthead'
+import { OverviewTab } from '~/components/viewer/desk/overview-tab'
+import { DeskRail } from '~/components/viewer/desk/rail'
+import { RecordingTab } from '~/components/viewer/desk/recording-tab'
+import { ReportTab } from '~/components/viewer/desk/report-tab'
+import { TasksTab } from '~/components/viewer/desk/tasks-tab'
+import type { DeskTab } from '~/components/viewer/desk/types'
+import { useWalkthroughMedia } from '~/components/viewer/desk/use-walkthrough-media'
 import { FinalCut } from '~/components/viewer/final-cut'
-import { RefinePanel } from '~/components/viewer/refine-panel'
 import { SectionHead } from '~/components/viewer/section-head'
-import { SplitChildren, SplitPanel, TaskBrief } from '~/components/viewer/split-panel'
-import { WalkthroughHeader } from '~/components/viewer/walkthrough-header'
 import { ViewerSkeleton } from '~/components/viewer/skeleton'
+import { TaskBrief } from '~/components/viewer/split-panel'
+import type { Walkthrough } from '~/components/viewer/types'
 import { useTRPC } from '~/lib/trpc'
+import { cn } from '~/lib/utils'
 
 export function WalkthroughPage() {
   const { walkthroughId } = useParams<{ walkthroughId: string }>()
   const trpc = useTRPC()
+  const queryClient = useQueryClient()
   const walkthroughQuery = useQuery({
     ...trpc.walkthroughs.get.queryOptions({ walkthroughId: walkthroughId! }),
     enabled: Boolean(walkthroughId),
   })
   /** The inline edit mode. It replaces the takes while it's up. */
   const [editing, setEditing] = useState(false)
-  /** The split-into-tasks mode — same pattern, replaces the page while it's up. */
-  const [splitting, setSplitting] = useState(false)
 
   const walkthrough = walkthroughQuery.data
 
@@ -40,6 +49,19 @@ export function WalkthroughPage() {
     [walkthrough]
   )
 
+  // Refine runs server-side; while it's going the outcome lands there, not here,
+  // so poll `get` until the status leaves 'running'. Costs nothing once settled.
+  const refineStatus = walkthrough?.refineStatus
+  useEffect(() => {
+    if (refineStatus !== 'running' || !walkthroughId) return
+    const id = setInterval(() => {
+      queryClient.invalidateQueries({
+        queryKey: trpc.walkthroughs.get.queryKey({ walkthroughId }),
+      })
+    }, 5000)
+    return () => clearInterval(id)
+  }, [refineStatus, walkthroughId, queryClient, trpc])
+
   // A disabled query stays pending forever, so the id guard comes first.
   if (walkthroughId && walkthroughQuery.isPending) return <ViewerSkeleton />
 
@@ -48,106 +70,123 @@ export function WalkthroughPage() {
       <div className="bg-card max-w-md space-y-3 rounded-md border p-6">
         <p className="text-sm">Couldn't load this walkthrough.</p>
         <Link to="/app" className="text-cobalt text-sm hover:underline">
-          ← Inbox
+          ← Walkthroughs
         </Link>
       </div>
     )
   }
 
-  // A render is kind-agnostic now, but what it displaces is not: a human
-  // handback's artifact IS the tight cut, so it replaces the take view (one
-  // player, the narration beside it, no filmstrip/report scaffolding — there is
-  // no distill to show). An agent walkthrough's tight cut sits ABOVE the take
-  // view, because the raw material is still what the agent reads. Either kind
-  // falls through to the take view if the render never uploaded.
   const human = walkthrough.kind === 'human'
-  const finalUrl = urlByPath.get('final.mp4')
+  // A split-out task is its brief; there is no recording of its own to review.
+  const isChild = walkthrough.briefMd !== null
   // An extension human handback arrives as raw takes and gets tightened here;
-  // /record's arrives already rendered and has none. Whether the raws are
-  // present is therefore the whole question — it decides both whether there is
-  // an edit to make and whether the render can be re-cut.
+  // /record's arrives already rendered. Whether the raws are present decides both
+  // whether there is an edit to make and whether a render can be re-cut.
   const hasRawTakes =
     walkthrough.takes.length > 0 &&
     walkthrough.takes.every((take) =>
       urlByPath.has(take.videoPath ?? `${take.dir}/walkthrough.webm`)
     )
   const canEdit = hasRawTakes && walkthrough.viewerIsMember
-  // A split-out task is its brief; there is nothing to split further and no
-  // recording of its own to review.
-  const isChild = walkthrough.briefMd !== null
-  const canSplit = walkthrough.viewerIsMember && !human && !isChild
 
-  if (splitting && canSplit) {
-    return (
-      <div className="space-y-8">
-        <div className="space-y-5">
-          <WalkthroughHeader walkthrough={walkthrough} />
-        </div>
-        <div className="rule pt-8">
-          <SplitPanel walkthrough={walkthrough} onClose={() => setSplitting(false)} />
-        </div>
-      </div>
-    )
-  }
-
-  if (editing && canEdit) {
-    return (
-      <div className="space-y-8">
-        <div className="space-y-5">
-          <WalkthroughHeader walkthrough={walkthrough} />
-        </div>
-        <div className="rule pt-8">
-          <CloudEditor
-            walkthroughId={walkthrough.id}
-            recordedAt={walkthrough.recordedAt}
-            takes={walkthrough.takes}
-            urlByPath={urlByPath}
-            onClose={() => setEditing(false)}
-          />
-        </div>
-      </div>
-    )
-  }
-
-  // A split-out task: the brief is the page. No takes, no files, no filmstrip —
-  // just the task, the review thread, and the way back to the recording.
+  // A child is its brief, the exchange, and the way back to the parent recording —
+  // no rail, no tabs.
   if (isChild) {
     return (
-      <div className="space-y-8">
-        <div className="space-y-5">
-          <WalkthroughHeader walkthrough={walkthrough} />
-        </div>
-        <AgentAnswer walkthrough={walkthrough} />
-        <div className="rule pt-8">
+      <div className="space-y-6">
+        <Masthead walkthrough={walkthrough} />
+        <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_396px]">
           <TaskBrief walkthrough={walkthrough} />
+          <Exchange walkthrough={walkthrough} playheadMs={0} onSeek={() => {}} />
         </div>
+      </div>
+    )
+  }
+
+  // Editing takes the whole surface for both kinds — the CloudEditor is the page
+  // while it's up.
+  if (editing && canEdit) {
+    return (
+      <div className="space-y-6">
+        <Masthead walkthrough={walkthrough} />
+        <CloudEditor
+          walkthroughId={walkthrough.id}
+          recordedAt={walkthrough.recordedAt}
+          takes={walkthrough.takes}
+          urlByPath={urlByPath}
+          onClose={() => setEditing(false)}
+        />
+      </div>
+    )
+  }
+
+  if (human) {
+    return (
+      <div className="space-y-6">
+        <Masthead walkthrough={walkthrough} />
+        <HumanBody
+          walkthrough={walkthrough}
+          urlByPath={urlByPath}
+          canEdit={canEdit}
+          onEdit={() => setEditing(true)}
+        />
+      </div>
+    )
+  }
+
+  return (
+    <AgentDesk
+      walkthrough={walkthrough}
+      urlByPath={urlByPath}
+      canEdit={canEdit}
+      onEdit={() => setEditing(true)}
+    />
+  )
+}
+
+/** A human handback: its tight cut if it has one, otherwise the raw recording
+ *  with the one-time CTA to tighten it. No rail, no exchange — it's for a
+ *  person, not an agent. */
+function HumanBody({
+  walkthrough,
+  urlByPath,
+  canEdit,
+  onEdit,
+}: {
+  walkthrough: Walkthrough
+  urlByPath: Map<string, string>
+  canEdit: boolean
+  onEdit: () => void
+}) {
+  const media = useWalkthroughMedia(walkthrough, urlByPath)
+  const finalUrl = urlByPath.get('final.mp4')
+
+  if (finalUrl) {
+    return (
+      <div className="space-y-4">
+        <FinalCut
+          videoUrl={finalUrl}
+          transcriptUrl={urlByPath.get('transcript.json')}
+          downloadUrl={walkthrough.downloadUrl}
+        />
+        {/* The raws survived the render, so the cut is not final. */}
+        {canEdit && (
+          <button
+            type="button"
+            onClick={onEdit}
+            className="text-muted-foreground hover:text-foreground text-sm underline underline-offset-4">
+            re-edit this cut
+          </button>
+        )}
       </div>
     )
   }
 
   return (
     <div className="space-y-8">
-      <div className="space-y-5">
-        <WalkthroughHeader
-          walkthrough={walkthrough}
-          onSplit={canSplit ? () => setSplitting(true) : undefined}
-        />
-      </div>
-
-      {/* The review thread + sign-off, right under the masthead: when an agent
-          has answered, approving or sending back IS the job of this page. */}
-      <AgentAnswer walkthrough={walkthrough} />
-
-      {/* A second, pro-gated read of the recording: summary, capture health,
-          and the spans it would drop. Renders itself away when there's nothing. */}
-      <RefinePanel walkthrough={walkthrough} />
-
-      {/* What was carved out of this recording, when a split has run. */}
-      <SplitChildren walkthrough={walkthrough} />
-
       {/* Recorded for a person, uploaded raw, never tightened: the edit is the
-          only thing anyone wants from this page, so it is the page. */}
-      {human && canEdit && !finalUrl && (
+          one thing anyone wants from this page. */}
+      {canEdit && (
         <div className="border-border bg-muted/20 space-y-3 rounded-md border p-5">
           <SectionHead>for a person</SectionHead>
           <p className="text-sm leading-relaxed">
@@ -155,58 +194,102 @@ export function WalkthroughPage() {
             becomes one MP4 with a share link — the raw takes stay put, so you can re-cut it any
             time.
           </p>
-          <Button type="button" onClick={() => setEditing(true)}>
+          <Button type="button" onClick={onEdit}>
             Tighten &amp; share
           </Button>
         </div>
       )}
+      <RecordingTab walkthrough={walkthrough} media={media} />
+    </div>
+  )
+}
 
-      {finalUrl && !human && (
-        <div className="rule space-y-3 pt-8">
-          <SectionHead>the tight cut</SectionHead>
-          <FinalCut
-            videoUrl={finalUrl}
-            transcriptUrl={urlByPath.get('transcript.json')}
-            downloadUrl={walkthrough.downloadUrl}
-          />
-          {canEdit && (
-            <button
-              type="button"
-              onClick={() => setEditing(true)}
-              className="text-muted-foreground hover:text-foreground text-sm underline underline-offset-4">
-              re-edit this cut
-            </button>
+/** The agent review desk: masthead, then rail · work · exchange. */
+function AgentDesk({
+  walkthrough,
+  urlByPath,
+  canEdit,
+  onEdit,
+}: {
+  walkthrough: Walkthrough
+  urlByPath: Map<string, string>
+  canEdit: boolean
+  onEdit: () => void
+}) {
+  const trpc = useTRPC()
+  const media = useWalkthroughMedia(walkthrough, urlByPath)
+  const [tab, setTab] = useState<DeskTab>('overview')
+  const playerRef = useRef<HTMLDivElement>(null)
+
+  const entitlements = useQuery(trpc.teams.entitlements.queryOptions())
+  const pro = entitlements.data?.pro ?? false
+  const entLoaded = entitlements.isSuccess
+
+  // Leaving the recording for another tab stops the sound playing behind it.
+  const goTab = useCallback(
+    (next: DeskTab) => {
+      if (next !== 'recording' && media.player.playing) media.player.togglePlay()
+      setTab(next)
+    },
+    [media.player]
+  )
+
+  // A timestamp anywhere on the desk seeks the recording and brings it up: the
+  // player is hidden (not unmounted) on other tabs, so switch first, then scroll
+  // on the next frame once it's visible.
+  const onSeek = useCallback(
+    (ms: number) => {
+      setTab('recording')
+      media.player.seekOutput(ms, true)
+      requestAnimationFrame(() =>
+        playerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      )
+    },
+    [media.player]
+  )
+
+  const takesExist = media.takes.length > 0
+
+  return (
+    <div className="space-y-6">
+      <Masthead walkthrough={walkthrough} onTab={goTab} />
+
+      <div className="lg:grid lg:grid-cols-[216px_minmax(0,1fr)_396px]">
+        <DeskRail walkthrough={walkthrough} tab={tab} onTab={goTab} media={media} />
+
+        <div className="min-w-0 px-6 py-6 lg:px-9">
+          {/* Recording is hidden, never unmounted, so playback survives a tab
+              switch and a seek from elsewhere lands on a live player. */}
+          {takesExist && (
+            <div ref={playerRef} className={cn('scroll-mt-4', tab !== 'recording' && 'hidden')}>
+              <RecordingTab walkthrough={walkthrough} media={media} onEdit={canEdit ? onEdit : undefined} />
+            </div>
           )}
-        </div>
-      )}
-
-      {finalUrl && human ? (
-        <div className="rule space-y-4 pt-8">
-          <FinalCut
-            videoUrl={finalUrl}
-            transcriptUrl={urlByPath.get('transcript.json')}
-            downloadUrl={walkthrough.downloadUrl}
-          />
-          {/* The raws survived the render, so the cut is not final. */}
-          {canEdit && (
-            <button
-              type="button"
-              onClick={() => setEditing(true)}
-              className="text-muted-foreground hover:text-foreground text-sm underline underline-offset-4">
-              re-edit this cut
-            </button>
+          {tab === 'recording' && !takesExist && (
+            <p className="text-muted-foreground text-sm">No takes were uploaded.</p>
           )}
-        </div>
-      ) : (
-        <AgentView
-          walkthrough={walkthrough}
-          urlByPath={urlByPath}
-          onEdit={canEdit && !human ? () => setEditing(true) : undefined}
-        />
-      )}
 
-      {/* The assistant is the power tool, below everything the recording is. */}
-      <AssistantPanel walkthrough={walkthrough} />
+          {tab === 'overview' && (
+            <OverviewTab
+              walkthrough={walkthrough}
+              urlByPath={urlByPath}
+              onSeek={onSeek}
+              onTab={goTab}
+              pro={pro}
+              entLoaded={entLoaded}
+            />
+          )}
+          {tab === 'frames' && (
+            <FramesTab walkthrough={walkthrough} media={media} onPlayFrom={onSeek} />
+          )}
+          {tab === 'brief' && <BriefTab walkthrough={walkthrough} urlByPath={urlByPath} />}
+          {tab === 'console' && <ConsoleTab media={media} />}
+          {tab === 'report' && <ReportTab walkthrough={walkthrough} urlByPath={urlByPath} />}
+          {tab === 'tasks' && <TasksTab walkthrough={walkthrough} />}
+        </div>
+
+        <Exchange walkthrough={walkthrough} playheadMs={media.player.outputMs} onSeek={onSeek} />
+      </div>
     </div>
   )
 }

@@ -1080,6 +1080,7 @@ const walkthroughsRouter = router({
         // (empty on a malformed blob), the suggested title awaiting a human's
         // accept/dismiss, and which refine stage last ran.
         digestMd: g.digestMd,
+        refinedBriefMd: g.refinedBriefMd,
         suggestedTitle: g.suggestedTitle,
         refineStage: g.refineStage,
         points: (() => {
