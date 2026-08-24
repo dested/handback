@@ -31,6 +31,11 @@ const ICONS: Record<DeskTab, ReactNode> = {
       <path d="M5.4 8.1l1.8 1.8 3.4-3.6" />
     </svg>
   ),
+  conversation: (
+    <svg {...ICON_PROPS}>
+      <path d="M2.75 3.75h10.5v6.5h-6L4 12.75v-2.5H2.75z" />
+    </svg>
+  ),
   recording: (
     <svg {...ICON_PROPS}>
       <circle cx="8" cy="8" r="6.25" />
@@ -73,6 +78,13 @@ const ICONS: Record<DeskTab, ReactNode> = {
       <path d="M7 8h5.5" />
       <circle cx="3.5" cy="11.5" r="1" />
       <path d="M7 11.5h5.5" />
+    </svg>
+  ),
+  assistant: (
+    <svg {...ICON_PROPS}>
+      <path d="M9.5 4.5l2 2L6 12l-2.5.5L4 10z" />
+      <path d="M11.2 6.8L9.2 4.8" />
+      <path d="M12.5 2l.5 1.3 1.3.5-1.3.5-.5 1.3-.5-1.3L11.2 3l1.3-.5z" />
     </svg>
   ),
 }
@@ -156,6 +168,8 @@ export function DeskRail({
           : { label: 'Overview' }
 
   const showTasks = walkthrough.kind === 'agent' && walkthrough.briefMd === null
+  const showAssistant = walkthrough.kind === 'agent' && walkthrough.briefMd === null
+  const threadCount = walkthrough.notes.length
 
   const pro = entitlements.data?.pro ?? false
   const entLoaded = entitlements.isSuccess
@@ -219,6 +233,17 @@ export function DeskRail({
         active={tab === 'overview'}
         onTab={onTab}
       />
+      <RailItem
+        tab="conversation"
+        label="Conversation"
+        active={tab === 'conversation'}
+        onTab={onTab}
+        trailing={
+          threadCount > 0 ? (
+            <span className={cn(COUNT, 'text-muted-foreground')}>{threadCount}</span>
+          ) : undefined
+        }
+      />
 
       <span className={GROUP}>the source</span>
       <RailItem
@@ -262,6 +287,13 @@ export function DeskRail({
               <span className={cn(COUNT, 'text-muted-foreground')}>{walkthrough.children.length}</span>
             }
           />
+        </>
+      )}
+
+      {showAssistant && (
+        <>
+          <span className={GROUP}>revise</span>
+          <RailItem tab="assistant" label="Edit with AI" active={tab === 'assistant'} onTab={onTab} />
         </>
       )}
 

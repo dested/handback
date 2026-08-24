@@ -91,9 +91,11 @@ Pro-gated surfaces refuse with the exact string `Pro feature`; clients render
 `ProUpsell` (`src/components/pro-upsell.tsx`) linking /upgrade — never a raw
 error. /upload's working screen carries a violet-left-ruled "stay on this page"
 notice — the beforeunload guard can't catch sidebar navigation, the sentence
-has to. The walkthrough viewer's surfaces (the desk, its rail, the exchange)
-are specified in the Viewer section below — RefinePanel / AssistantPanel /
-AgentAnswer / CommentsPanel are DELETED (2026-08-24), absorbed into it.
+has to. The walkthrough viewer's surfaces (the desk, its rail, its tabs) are
+specified in the Viewer section below — RefinePanel / AssistantPanel /
+AgentAnswer / CommentsPanel are DELETED (2026-08-24), and the single "exchange"
+pane that briefly replaced them was itself untangled 2026-08-24pm into the
+Conversation tab + Edit with AI tab + the Overview hero's sign-off/answer.
 
 ## Extension (`extension/`)
 
@@ -186,16 +188,23 @@ container is dropped. Structure: a **masthead bar** (crumb `Walkthroughs /` ·
 Fraunces title + quiet Rename · StatusChip dot+word, popover to change · intent
 pill · quiet project picker · "Copy agent brief" only while open · `⋯`
 OverflowMenu; mono meta line below; a `refine suggests: "…" use · dismiss` mono
-row when refine proposed a title) over three columns:
-**[tab rail 208px | work | exchange 360px]**.
+row when refine proposed a title) over two columns: **[tab rail 208px | work]**.
+The review is tabbed, not a third column (the 360px exchange pane was deleted
+2026-08-24pm — plans/2026-08-24-exchange-untangle.md): the Overview/Verdict hero
+carries the STATE **and its action**, a **Conversation** tab holds the thread,
+and **Edit with AI** is the assistant on its own surface — nothing overloads a
+single pane any more.
 
 - **The rail** (`desk/rail.tsx`): vertical tabs with 16px stroke icons + mono
   counts. Hero tab label follows status (Overview / Verdict / Question / Signed
-  off — violet count pill on verdict/question), then group `the source`
-  (Recording · Frames · Agent brief · Console · report.md) and `carved out`
-  (Tasks). Footer = the refine run/re-run/refining…/failed control (pro only).
+  off — violet count pill on verdict/question); a **Conversation** item sits
+  directly under the hero (muted count = review-note count). Then group
+  `the source` (Recording · Frames · Agent brief · Console · report.md),
+  `carved out` (Tasks), and `revise` (**Edit with AI** — agent-kind non-child
+  only). Footer = the refine run/re-run/refining…/failed control (pro only).
   Below lg the rail is a horizontal scrollable tab bar.
-- **Overview tab** (`desk/overview-tab.tsx`) — the state-driven hero:
+- **Overview tab** (`desk/overview-tab.tsx`) — the state-driven hero, which now
+  carries the reviewer's action inline (not in a side pane):
   *refining* = progress hero ("Reading your walkthrough… / Watching the frames… /
   Writing it up…" from `refineStage`) + skeletons, resolved live by polling;
   *open* = the digest (react-markdown) + **the key-points table** + curated
@@ -203,29 +212,34 @@ row when refine proposed a title) over three columns:
   *in_review* = **THE VERDICT**: violet `handed back` head, the agent's summary
   as a Fraunces statement, rendered body, **what you raised → what came back**
   (per-point outcomes: `✓ fixed` green · `◐ partial` · `— skipped/n-a` muted ·
-  `· unanswered`), evidence thumbs, files touched; *needs_info* = the agent's
-  question as the hero, answered in the exchange; *resolved* = THE `.stamp`
-  (the one stamp on the view — the exchange echoes only a mono line) + archival
-  verdict + expiry + Keep.
+  `· unanswered`), evidence thumbs, files touched, then the **sign-off card**
+  (`SignOff`, violet-left-ruled, Approve & sign off cobalt / Send back arming
+  inline); *needs_info* = the agent's question as the hero with the **answer
+  form** right under it (`AnswerForm`: input, then Answer / Answer by voice /
+  Ask <uploader>); *resolved* = THE `.stamp` (the one stamp on the view) +
+  archival verdict + expiry + Keep. The sign-off/answer controls live in
+  `desk/review-actions.tsx` (`SignOff` self-guards to member·in_review·hasResult).
 - **Key points** (`desk/key-points.tsx`): severity dots (high red · medium ink ·
   low muted), mono cobalt m:ss seek chips — the only interactive elements.
-- **The exchange** (`desk/exchange.tsx`): ONE chronological thread — refine
-  system `·` lines, agent results (white card, PR link, `N/M key points
-  addressed`), questions (ink left rule), answers, send-backs, timestamped
-  comments (initial chips, seek chip, inline-armed delete), assistant turns with
-  quiet `·` action lines — and ONE composer with `comment | assistant` mono
-  pills (+ an `at m:ss` pin chip once the player has moved). Sign-off pinned on
-  top while in_review (violet-left-ruled card, Approve & sign off cobalt / Send
-  back arming inline). needs_info adds the answer form (input row, then
-  Answer / Answer by voice / Ask <uploader>). The pane sizes to its own content
-  (`self-start`) — never to the work area's height.
+- **Conversation tab** (`desk/conversation.tsx`): ONE chronological thread —
+  refine/activity `·` system lines, agent results (white card, PR link, `N/M key
+  points addressed`), questions (ink left rule), answers, send-backs, and
+  timestamped comments (initial chips, seek chip, inline-armed delete) — and ONE
+  single-purpose **comment** box (+ an `at m:ss` pin chip once the player has
+  moved). No mode toggle, no assistant, no sign-off — it's the history and the
+  margin only.
+- **Edit with AI tab** (`desk/assistant.tsx` — `AssistantTab`): the walkthrough
+  assistant on its own surface, labeled so it never reads as a person. `You` /
+  `AI editor` turns with quiet `·` action lines, one message box, Pro-gated
+  (upsell inline). Pulled out of the review thread 2026-08-24pm.
 - **Recording tab**: VideoStage takes the width the aspect leaves; the
   transcript keeps a fixed 300px column with bounded scroll (a portrait phone
   recording must never shred it into one-word lines). Timeline below; console
   and raw report.md live in their own tabs (report stays deliberately
   unrendered).
 - Human kind keeps the edit→share page (masthead + FinalCut/CloudEditor, no
-  rail/exchange); a child task is brief + exchange in the ordinary container.
+  rail/tabs); a child task is brief + `SignOff`/`AnswerForm` + Conversation in a
+  two-column container (no rail).
 
 The bullets below (player, timeline, frames slideshow, transcript, editor,
 watch page) describe components the desk reuses unchanged:

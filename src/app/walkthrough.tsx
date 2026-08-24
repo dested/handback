@@ -1,6 +1,7 @@
-// /walkthroughs/:walkthroughId — the review desk. A masthead over three columns:
-// the tab rail (the recording and everything read off it), the work area for the
-// active tab, and the exchange pane where the review thread and sign-off live. A
+// /walkthroughs/:walkthroughId — the review desk. A masthead over two columns:
+// the tab rail and the work area for the active tab. The review lives in tabs —
+// the Overview/Verdict hero carries the state and its action (sign off, answer),
+// the Conversation tab holds the thread, and Edit with AI is the assistant. A
 // human handback and a split-out child task are simpler surfaces that share the
 // same masthead but not the desk.
 
@@ -9,15 +10,17 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
 import { CloudEditor } from '~/components/edit/cloud-editor'
 import { Button } from '~/components/ui/button'
+import { AssistantTab } from '~/components/viewer/desk/assistant'
 import { BriefTab } from '~/components/viewer/desk/brief-tab'
 import { ConsoleTab } from '~/components/viewer/desk/console-tab'
-import { Exchange } from '~/components/viewer/desk/exchange'
+import { Conversation } from '~/components/viewer/desk/conversation'
 import { FramesTab } from '~/components/viewer/desk/frames-tab'
 import { Masthead } from '~/components/viewer/desk/masthead'
 import { OverviewTab } from '~/components/viewer/desk/overview-tab'
 import { DeskRail } from '~/components/viewer/desk/rail'
 import { RecordingTab } from '~/components/viewer/desk/recording-tab'
 import { ReportTab } from '~/components/viewer/desk/report-tab'
+import { AnswerForm, SignOff } from '~/components/viewer/desk/review-actions'
 import { TasksTab } from '~/components/viewer/desk/tasks-tab'
 import type { DeskTab } from '~/components/viewer/desk/types'
 import { useWalkthroughMedia } from '~/components/viewer/desk/use-walkthrough-media'
@@ -102,15 +105,22 @@ export function WalkthroughPage() {
     )
   const canEdit = hasRawTakes && walkthrough.viewerIsMember
 
-  // A child is its brief, the exchange, and the way back to the parent recording —
-  // no rail, no tabs.
+  // A child is its brief, the conversation, and the way back to the parent
+  // recording — no rail, no tabs. The sign-off / answer controls ride above the
+  // thread since there's no Overview hero to carry them.
   if (isChild) {
     return (
       <div className={cn(CONTAINER, 'space-y-6')}>
         <Masthead walkthrough={walkthrough} />
         <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
           <TaskBrief walkthrough={walkthrough} />
-          <Exchange walkthrough={walkthrough} playheadMs={0} onSeek={() => {}} />
+          <div className="space-y-6">
+            <SignOff walkthrough={walkthrough} />
+            {walkthrough.status === 'needs_info' && walkthrough.viewerIsMember && (
+              <AnswerForm walkthrough={walkthrough} />
+            )}
+            <Conversation walkthrough={walkthrough} playheadMs={0} onSeek={() => {}} />
+          </div>
         </div>
       </div>
     )
@@ -217,7 +227,7 @@ function HumanBody({
   )
 }
 
-/** The agent review desk: masthead, then rail · work · exchange. */
+/** The agent review desk: masthead, then rail · work. */
 function AgentDesk({
   walkthrough,
   urlByPath,
@@ -271,9 +281,7 @@ function AgentDesk({
         <Masthead walkthrough={walkthrough} onTab={goTab} />
       </div>
 
-      {/* The exchange column sizes to its own content (self-start inside the
-          component) — its height must never be set by the work area's. */}
-      <div className="lg:grid lg:grid-cols-[208px_minmax(0,1fr)_360px]">
+      <div className="lg:grid lg:grid-cols-[208px_minmax(0,1fr)]">
         <DeskRail walkthrough={walkthrough} tab={tab} onTab={goTab} media={media} />
 
         <div className="min-w-0 px-6 py-6 lg:px-8">
@@ -298,6 +306,13 @@ function AgentDesk({
               entLoaded={entLoaded}
             />
           )}
+          {tab === 'conversation' && (
+            <Conversation
+              walkthrough={walkthrough}
+              playheadMs={media.player.outputMs}
+              onSeek={onSeek}
+            />
+          )}
           {tab === 'frames' && (
             <FramesTab walkthrough={walkthrough} media={media} onPlayFrom={onSeek} />
           )}
@@ -305,9 +320,10 @@ function AgentDesk({
           {tab === 'console' && <ConsoleTab media={media} />}
           {tab === 'report' && <ReportTab walkthrough={walkthrough} urlByPath={urlByPath} />}
           {tab === 'tasks' && <TasksTab walkthrough={walkthrough} />}
+          {tab === 'assistant' && (
+            <AssistantTab walkthrough={walkthrough} pro={pro} entLoaded={entLoaded} />
+          )}
         </div>
-
-        <Exchange walkthrough={walkthrough} playheadMs={media.player.outputMs} onSeek={onSeek} />
       </div>
     </div>
   )

@@ -1,1 +1,10 @@
-export type DeskTab = 'overview' | 'recording' | 'frames' | 'brief' | 'console' | 'report' | 'tasks'
+export type DeskTab =
+  | 'overview'
+  | 'conversation'
+  | 'recording'
+  | 'frames'
+  | 'brief'
+  | 'console'
+  | 'report'
+  | 'tasks'
+  | 'assistant'

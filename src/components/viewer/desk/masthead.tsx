@@ -256,8 +256,8 @@ export function Masthead({
 
               {/* A human handback is FOR a person — the share link is its point.
                   An agent walkthrough only needs its brief copied while it's
-                  still open work; once it's in review or resolved the exchange
-                  pane owns what happens next. */}
+                  still open work; once it's in review or resolved the
+                  Overview/Verdict hero owns what happens next. */}
               {walkthrough.kind === 'human' ? (
                 <ShareControl walkthrough={walkthrough} />
               ) : walkthrough.status === 'open' ? (

@@ -1,9 +1,9 @@
 // The work area's hero — one tab that reads the walkthrough's whole state back
-// to the reviewer. In review with an agent result it's the verdict (the mock's
-// "what you raised → what came back"); waiting on an answer it's the question;
-// resolved it's the sign-off; otherwise it's the open state — the digest, the
-// key points, the curated frames, and refine's progress while it runs. The
-// sign-off buttons live in the exchange pane, not here.
+// to the reviewer AND carries the action for that state. In review with an agent
+// result it's the verdict ("what you raised → what came back") with the sign-off
+// card; waiting on an answer it's the question with the answer box; resolved it's
+// the stamp; otherwise it's the open state — the digest, the key points, the
+// curated frames, and refine's progress while it runs.
 
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { ProUpsell } from '~/components/pro-upsell'
@@ -15,6 +15,7 @@ import { SectionHead } from '../section-head'
 import type { Walkthrough } from '../types'
 import { KeyPointsTable, type OutcomeByPoint } from './key-points'
 import { Markdown } from './markdown'
+import { AnswerForm, SignOff } from './review-actions'
 import type { DeskTab } from './types'
 
 type Note = Walkthrough['notes'][number]
@@ -356,6 +357,8 @@ export function OverviewTab({
             {latestResult.filesTouched.join(' · ')}
           </p>
         )}
+
+        <SignOff walkthrough={walkthrough} />
       </div>
     )
   }
@@ -391,7 +394,7 @@ export function OverviewTab({
               imgClass="h-20 object-cover"
             />
           )}
-          <p className="text-muted-foreground font-mono text-xs">answer it in the exchange →</p>
+          {walkthrough.viewerIsMember && <AnswerForm walkthrough={walkthrough} />}
         </div>
         <div className="rule space-y-6 pt-6">{openBody}</div>
       </div>
