@@ -18,6 +18,7 @@ import {
   PRO_ASSISTANT_TURNS,
   PRO_CLOUD_TRANSCRIBE_SECONDS,
   PRO_POLISH_CALLS,
+  PRO_WALKTHROUGHS_PER_MONTH,
   monthKey,
 } from './limits'
 import { prisma } from './prisma'
@@ -115,6 +116,34 @@ export async function checkAndReserveAssistantTurn(
       data: { assistantTurns: { increment: 1 } },
     })
     return { allowed: true, remaining: Math.max(0, PRO_ASSISTANT_TURNS - updated.assistantTurns) }
+  })
+}
+
+/**
+ * Reserve one walkthrough creation this month, or refuse. Admins pass unmetered
+ * (remaining null); EVERYONE else — Pro or not, one rule — is capped at
+ * PRO_WALKTHROUGHS_PER_MONTH/mo. Incremented atomically so two concurrent
+ * declares can't both slip past the line. Not part of CloudStatus: the recorder
+ * doesn't self-configure against it — the declare endpoint is the only caller.
+ */
+export async function checkAndReserveWalkthrough(
+  userId: string
+): Promise<{ allowed: boolean; remaining: number | null }> {
+  const { admin } = await tierOf(userId)
+  if (admin) return { allowed: true, remaining: null }
+  const month = monthKey(new Date())
+  return await prisma.$transaction(async (tx) => {
+    const row = await tx.monthlyUsage.upsert({
+      where: { userId_month: { userId, month } },
+      create: { userId, month },
+      update: {},
+    })
+    if (row.walkthroughs >= PRO_WALKTHROUGHS_PER_MONTH) return { allowed: false, remaining: 0 }
+    const updated = await tx.monthlyUsage.update({
+      where: { userId_month: { userId, month } },
+      data: { walkthroughs: { increment: 1 } },
+    })
+    return { allowed: true, remaining: Math.max(0, PRO_WALKTHROUGHS_PER_MONTH - updated.walkthroughs) }
   })
 }
 

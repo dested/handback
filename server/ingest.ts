@@ -54,7 +54,12 @@ import {
   transcriptionConfigured,
 } from './transcribe'
 import { deletePrefix, walkthroughKey, walkthroughPrefix, isSafePath, presignPut } from './storage'
-import { checkAndReservePolish, checkAndReserveTranscribe, cloudStatus } from './usage'
+import {
+  checkAndReservePolish,
+  checkAndReserveTranscribe,
+  checkAndReserveWalkthrough,
+  cloudStatus,
+} from './usage'
 
 const MAX_FILES = 4000
 const GB = 1024 * 1024 * 1024
@@ -352,6 +357,23 @@ ingestRouter.post(DECLARE, declareLimit, async (req, res) => {
       `This space is at its limit of ${SPACE_MAX_WALKTHROUGHS} walkthroughs. Delete some first.`
     )
     return
+  }
+
+  // Monthly walkthrough cap — metered per creating user, not per space, and only
+  // on a genuine create. A re-push of the same slug replaces its predecessor and
+  // must not re-count, so `existing` is exempt. This reserve INCREMENTS, so it
+  // sits after every earlier early-return (project/quota checks) and only on the
+  // path that will actually create.
+  if (!existing) {
+    const reserved = await checkAndReserveWalkthrough(auth.userId)
+    if (!reserved.allowed) {
+      fail(
+        res,
+        429,
+        'Monthly walkthrough limit reached (80). It resets at the start of next month.'
+      )
+      return
+    }
   }
 
   if (existing) {

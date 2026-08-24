@@ -16,7 +16,7 @@ const FEATURES: Array<[string, string]> = [
     'Talk to a walkthrough — fix the transcript, cut a section, rewrite the brief. It does the editing.',
   ],
   ['polish', "Transcript cleanup that spells your product's nouns right."],
-  ['budgets', '15 hours of cloud transcription a month.'],
+  ['budgets', '15 hours of cloud transcription and 80 walkthroughs a month.'],
 ]
 
 export function UpgradePage() {

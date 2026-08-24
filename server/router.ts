@@ -26,7 +26,9 @@ import {
   MAX_REFINE_RUNS_PER_WALKTHROUGH,
   PRO_ASSISTANT_TURNS,
   PRO_CLOUD_TRANSCRIBE_SECONDS,
+  monthKey,
 } from './limits'
+import { LOCKED_PRICING_MODEL, pricingModelSchema } from './pricing'
 import { log } from './logger'
 import { briefFrameLimit, formatWalkthrough } from './mcp-format'
 import { unsubscribeUrl } from './notify'
@@ -2791,6 +2793,129 @@ const adminRouter = router({
       byKind: byKind.map((r) => ({ kind: r.kind, ...shape(r) })),
       last30d: { ...shape(recent), uploaders: recentUploaders.length },
       files: fileCount,
+    }
+  }),
+
+  /**
+   * The pricing PLANNING model /admin/pricing edits. Reads the saved
+   * AdminSetting; falls back to the locked model (and reports isLocked) when
+   * nothing is saved yet or the stored blob no longer parses. Enforcement
+   * constants live in server/limits.ts — this is planning data only.
+   */
+  pricingModel: protectedProcedure.query(async ({ ctx }) => {
+    await requireAdmin(ctx.session.user.id)
+    const row = await prisma.adminSetting.findUnique({ where: { key: 'pricing-model' } })
+    if (row) {
+      const parsed = pricingModelSchema.safeParse(row.valueJson)
+      if (parsed.success) {
+        return { model: parsed.data, savedAt: row.updatedAt.toISOString(), isLocked: false }
+      }
+    }
+    return { model: LOCKED_PRICING_MODEL, savedAt: null, isLocked: true }
+  }),
+
+  /** Persists the validated planning model under AdminSetting 'pricing-model'. */
+  setPricingModel: protectedProcedure
+    .input(pricingModelSchema)
+    .mutation(async ({ ctx, input }) => {
+      await requireAdmin(ctx.session.user.id)
+      await prisma.adminSetting.upsert({
+        where: { key: 'pricing-model' },
+        create: { key: 'pricing-model', valueJson: input },
+        update: { valueJson: input },
+      })
+      return { ok: true }
+    }),
+
+  /**
+   * Monthly cost-trend series for /admin/costs: the last six calendar months
+   * (current one included, oldest first). Per month it blends the metered
+   * counters (MonthlyUsage) with what actually landed (Walkthrough by upload
+   * month), plus a single current head-count of Pro accounts. All numbers.
+   */
+  costTrend: protectedProcedure.query(async ({ ctx }) => {
+    await requireAdmin(ctx.session.user.id)
+    const now = new Date()
+    const keys: string[] = []
+    for (let i = 5; i >= 0; i--) {
+      keys.push(monthKey(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1))))
+    }
+    const oldestStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 5, 1))
+
+    const [usageRows, walkthroughs, users] = await Promise.all([
+      prisma.monthlyUsage.findMany({ where: { month: { in: keys } } }),
+      prisma.walkthrough.findMany({
+        where: { uploadedAt: { gte: oldestStart } },
+        select: { uploadedAt: true, refineRuns: true, kind: true, durationMs: true, bytes: true },
+        take: 20000,
+      }),
+      prisma.user.findMany({ select: { email: true, isAdmin: true, features: true } }),
+    ])
+
+    type Bucket = {
+      walkthroughsUploaded: number
+      refineRuns: number
+      durationMs: number
+      bytes: number
+      transcribeSeconds: number
+      polishCalls: number
+      assistantTurns: number
+      meteredWalkthroughs: number
+      meteredUsers: Set<string>
+    }
+    const buckets = new Map<string, Bucket>()
+    for (const k of keys) {
+      buckets.set(k, {
+        walkthroughsUploaded: 0,
+        refineRuns: 0,
+        durationMs: 0,
+        bytes: 0,
+        transcribeSeconds: 0,
+        polishCalls: 0,
+        assistantTurns: 0,
+        meteredWalkthroughs: 0,
+        meteredUsers: new Set<string>(),
+      })
+    }
+
+    for (const r of usageRows) {
+      const b = buckets.get(r.month)
+      if (!b) continue
+      b.transcribeSeconds += r.transcribeSeconds
+      b.polishCalls += r.polishCalls
+      b.assistantTurns += r.assistantTurns
+      b.meteredWalkthroughs += r.walkthroughs
+      b.meteredUsers.add(r.userId)
+    }
+
+    for (const w of walkthroughs) {
+      const b = buckets.get(monthKey(w.uploadedAt))
+      if (!b) continue
+      b.walkthroughsUploaded += 1
+      b.refineRuns += w.refineRuns
+      b.durationMs += w.durationMs
+      b.bytes += Number(w.bytes)
+    }
+
+    const proUsers = users.filter((u) => userHasFeature(u, 'pro')).length
+
+    return {
+      months: keys.map((month) => {
+        const b = buckets.get(month)
+        return {
+          month,
+          walkthroughsUploaded: b?.walkthroughsUploaded ?? 0,
+          refineRuns: b?.refineRuns ?? 0,
+          durationMs: b?.durationMs ?? 0,
+          bytes: b?.bytes ?? 0,
+          transcribeSeconds: b?.transcribeSeconds ?? 0,
+          polishCalls: b?.polishCalls ?? 0,
+          assistantTurns: b?.assistantTurns ?? 0,
+          meteredWalkthroughs: b?.meteredWalkthroughs ?? 0,
+          meteredUsers: b?.meteredUsers.size ?? 0,
+        }
+      }),
+      proUsers,
     }
   }),
 

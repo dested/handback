@@ -15,7 +15,10 @@ export const PRO_CLOUD_TRANSCRIBE_SECONDS = 54_000
 export const PRO_POLISH_CALLS = 1_000
 
 /** Pro assistant-turn quota per user per month — a real margin guard, not an abuse bound. */
-export const PRO_ASSISTANT_TURNS = 100
+export const PRO_ASSISTANT_TURNS = 30
+
+/** Walkthroughs a non-admin account may create per month (the locked plan's Pro cap). */
+export const PRO_WALKTHROUGHS_PER_MONTH = 80
 
 /** Total refine passes one walkthrough may consume (the automatic first run + re-runs). */
 export const MAX_REFINE_RUNS_PER_WALKTHROUGH = 4

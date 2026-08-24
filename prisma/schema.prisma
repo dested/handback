@@ -458,7 +458,20 @@ model MonthlyUsage {
   transcribeSeconds Int    @default(0) @map("transcribe_seconds")
   polishCalls       Int    @default(0) @map("polish_calls")
   assistantTurns    Int    @default(0) @map("assistant_turns")
+  walkthroughs      Int    @default(0)
 
   @@unique([userId, month])
   @@map("monthly_usage")
+}
+
+// Admin-editable singletons persisted as JSON, keyed by a stable string. Today
+// it holds only the pricing PLANNING model ('pricing-model'), edited from
+// /admin/pricing and trended against by /admin/costs (server/pricing.ts). This
+// is planning data — enforcement constants live in server/limits.ts.
+model AdminSetting {
+  key       String   @id
+  valueJson Json     @map("value_json")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("admin_settings")
 }

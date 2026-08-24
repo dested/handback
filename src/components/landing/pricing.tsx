@@ -26,9 +26,9 @@ type Tier = {
 const tiers: Tier[] = [
   {
     name: 'Pro',
-    price: '$20',
+    price: '$29',
     unit: 'per seat / mo, when billing opens',
-    quota: 'Up to 15 hours of walkthroughs / mo',
+    quota: 'Up to 15 hours and 80 walkthroughs / mo',
     blurb: 'Your agent over MCP, the refine pass, and the walkthrough assistant',
     cta: 'Request access',
     href: 'mailto:sal@dested.com?subject=Handback%20Alpha',
@@ -38,9 +38,9 @@ const tiers: Tier[] = [
   },
   {
     name: 'Business',
-    price: '$40',
+    price: '$49',
     unit: 'per seat / mo, when billing opens',
-    quota: 'Up to 30 hours / mo',
+    quota: 'Up to 30 hours and 130 walkthroughs / mo',
     blurb: 'Teams — invite reviewers, roles, projects',
     cta: 'Request access',
     href: 'mailto:sal@dested.com?subject=Handback%20Alpha',
