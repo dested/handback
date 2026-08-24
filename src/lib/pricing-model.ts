@@ -81,14 +81,33 @@ export function verdictFor(t: TierEcon): Verdict {
   return { text: 'barely clears the ceiling — one assumption from a loss.', tone: 'thin' }
 }
 
-/** At-scale roll-up for the model's user count / tier mix / fixed costs. */
+/** What one ACTIVE free account burns in a month: refine on its full walkthrough
+ *  allowance plus that allowance's share of media hours. */
+export function freeCostPerActive(m: PricingModel): number {
+  return m.freeCap * m.refineCost * m.rerun + ((m.freeCap * m.avgLen) / 60) * m.mediaCost
+}
+
+/** At-scale roll-up for the model's user count / tier mix / free tier / fixed costs. */
 export function scaleEcon(m: PricingModel) {
   const pro = proEcon(m)
   const biz = bizEcon(m)
   const nBiz = Math.round((m.users * m.bizShare) / 100)
   const nPro = m.users - nBiz
+  const freeActive = Math.round((m.freeUsers * m.freeActive) / 100)
+  const freeCost = freeActive * freeCostPerActive(m)
   const mrr = nPro * m.proPrice + nBiz * m.bizPrice
-  const cogs = nPro * pro.exp + nBiz * biz.exp + m.fixed
+  const cogs = nPro * pro.exp + nBiz * biz.exp + freeCost + m.fixed
   const gross = mrr - cogs
-  return { pro, biz, nPro, nBiz, mrr, cogs, gross, grossMargin: mrr > 0 ? gross / mrr : 0 }
+  return {
+    pro,
+    biz,
+    nPro,
+    nBiz,
+    freeActive,
+    freeCost,
+    mrr,
+    cogs,
+    gross,
+    grossMargin: mrr > 0 ? gross / mrr : 0,
+  }
 }

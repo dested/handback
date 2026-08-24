@@ -4,6 +4,10 @@
 // passes live in server/limits.ts and must be changed there deliberately, never
 // synced from here. Persisted as an AdminSetting ('pricing-model') when the
 // owner saves; LOCKED_PRICING_MODEL below is the fallback until they do.
+//
+// The free tier is a modeled cost center: freeCap/freeUsers/freeActive let the
+// bench reason about what the free allowance (each walkthrough gets the full
+// cloud treatment) costs at scale.
 
 import { z } from 'zod'
 
@@ -25,6 +29,9 @@ export const pricingModelSchema = z.object({
   users: z.number().min(0).max(1000000),
   bizShare: z.number().min(0).max(100),
   fixed: z.number().min(0).max(100000),
+  freeCap: z.number().min(0).max(20).default(2), // walkthroughs/mo per free user
+  freeUsers: z.number().min(0).max(1000000).default(500), // free accounts at scale
+  freeActive: z.number().min(0).max(100).default(25), // % of free accounts active in a month
 })
 
 export type PricingModel = z.infer<typeof pricingModelSchema>
@@ -48,4 +55,7 @@ export const LOCKED_PRICING_MODEL: PricingModel = {
   users: 2000,
   bizShare: 20,
   fixed: 175,
+  freeCap: 2,
+  freeUsers: 500,
+  freeActive: 25,
 }

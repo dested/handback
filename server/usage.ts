@@ -7,14 +7,18 @@
 // Two states decide the answer, checked in this order:
 //   1. Platform admin — unmetered (a trusted operator; the context endpoint
 //      reports `null` remaining).
-//   2. Tier — Pro gets the cloud quota (server/limits.ts); without a plan the
-//      transcribe budget is 0 and polish is off, so both cloud passes are
-//      refused and the recorder falls back on-device. There is no free cloud
-//      tier — the old first-walkthrough-unmetered magic is gone.
+//   2. Tier — both Pro and free get a real cloud budget (server/limits.ts),
+//      just at different ceilings. A free account gets a small monthly
+//      walkthrough allowance, each with the full cloud treatment: 1 hour of
+//      transcription and a refine/polish budget. Pro gets the higher quotas.
+//      Assistant turns stay Pro-only. (2026-08-24 owner reversal — the free
+//      cloud tier is back, tiny counts, full treatment.)
 
 import { isPlatformAdmin, userHasFeature } from './features'
 import {
   FREE_CLOUD_TRANSCRIBE_SECONDS,
+  FREE_POLISH_CALLS,
+  FREE_WALKTHROUGHS_PER_MONTH,
   PRO_ASSISTANT_TURNS,
   PRO_CLOUD_TRANSCRIBE_SECONDS,
   PRO_POLISH_CALLS,
@@ -69,13 +73,14 @@ export async function checkAndReserveTranscribe(
 }
 
 /**
- * Reserve one polish call this month, or refuse. Admins pass; without a Pro plan
- * there is no polish at all; Pro is capped at PRO_POLISH_CALLS/mo.
+ * Reserve one polish call this month, or refuse. Admins pass; everyone else is
+ * capped at their tier's polish budget (FREE_POLISH_CALLS without a plan,
+ * PRO_POLISH_CALLS with Pro).
  */
 export async function checkAndReservePolish(userId: string): Promise<{ allowed: boolean }> {
   const { admin, pro } = await tierOf(userId)
   if (admin) return { allowed: true }
-  if (!pro) return { allowed: false }
+  const limit = pro ? PRO_POLISH_CALLS : FREE_POLISH_CALLS
   const month = monthKey(new Date())
   return await prisma.$transaction(async (tx) => {
     const row = await tx.monthlyUsage.upsert({
@@ -83,7 +88,7 @@ export async function checkAndReservePolish(userId: string): Promise<{ allowed: 
       create: { userId, month },
       update: {},
     })
-    if (row.polishCalls >= PRO_POLISH_CALLS) return { allowed: false }
+    if (row.polishCalls >= limit) return { allowed: false }
     await tx.monthlyUsage.update({
       where: { userId_month: { userId, month } },
       data: { polishCalls: { increment: 1 } },
@@ -121,16 +126,19 @@ export async function checkAndReserveAssistantTurn(
 
 /**
  * Reserve one walkthrough creation this month, or refuse. Admins pass unmetered
- * (remaining null); EVERYONE else — Pro or not, one rule — is capped at
- * PRO_WALKTHROUGHS_PER_MONTH/mo. Incremented atomically so two concurrent
- * declares can't both slip past the line. Not part of CloudStatus: the recorder
- * doesn't self-configure against it — the declare endpoint is the only caller.
+ * (remaining and limit null); everyone else is capped at their tier's ceiling —
+ * FREE_WALKTHROUGHS_PER_MONTH without a plan, PRO_WALKTHROUGHS_PER_MONTH with
+ * Pro. The limit used is returned so the caller can quote it in a refusal.
+ * Incremented atomically so two concurrent declares can't both slip past the
+ * line. Not part of CloudStatus: the recorder doesn't self-configure against
+ * it — the declare endpoint is the only caller.
  */
 export async function checkAndReserveWalkthrough(
   userId: string
-): Promise<{ allowed: boolean; remaining: number | null }> {
-  const { admin } = await tierOf(userId)
-  if (admin) return { allowed: true, remaining: null }
+): Promise<{ allowed: boolean; remaining: number | null; limit: number | null }> {
+  const { admin, pro } = await tierOf(userId)
+  if (admin) return { allowed: true, remaining: null, limit: null }
+  const limit = pro ? PRO_WALKTHROUGHS_PER_MONTH : FREE_WALKTHROUGHS_PER_MONTH
   const month = monthKey(new Date())
   return await prisma.$transaction(async (tx) => {
     const row = await tx.monthlyUsage.upsert({
@@ -138,12 +146,12 @@ export async function checkAndReserveWalkthrough(
       create: { userId, month },
       update: {},
     })
-    if (row.walkthroughs >= PRO_WALKTHROUGHS_PER_MONTH) return { allowed: false, remaining: 0 }
+    if (row.walkthroughs >= limit) return { allowed: false, remaining: 0, limit }
     const updated = await tx.monthlyUsage.update({
       where: { userId_month: { userId, month } },
       data: { walkthroughs: { increment: 1 } },
     })
-    return { allowed: true, remaining: Math.max(0, PRO_WALKTHROUGHS_PER_MONTH - updated.walkthroughs) }
+    return { allowed: true, remaining: Math.max(0, limit - updated.walkthroughs), limit }
   })
 }
 
@@ -160,7 +168,8 @@ export type CloudStatus = {
 /**
  * A read-only snapshot of the caller's cloud budget for GET /api/ingest/context,
  * so a recorder can self-configure. Reserves nothing — it never increments.
- * Without a plan the remaining budget is 0 (transcription runs on-device).
+ * Free and Pro both carry real budgets (at different ceilings); polishAllowed is
+ * true while any polish budget for the tier remains this month.
  */
 export async function cloudStatus(userId: string): Promise<CloudStatus> {
   const { admin, pro } = await tierOf(userId)
@@ -173,6 +182,7 @@ export async function cloudStatus(userId: string): Promise<CloudStatus> {
     }
   }
   const limit = pro ? PRO_CLOUD_TRANSCRIBE_SECONDS : FREE_CLOUD_TRANSCRIBE_SECONDS
+  const polishLimit = pro ? PRO_POLISH_CALLS : FREE_POLISH_CALLS
   const month = monthKey(new Date())
   const row = await prisma.monthlyUsage.findUnique({
     where: { userId_month: { userId, month } },
@@ -180,7 +190,7 @@ export async function cloudStatus(userId: string): Promise<CloudStatus> {
   const used = row?.transcribeSeconds ?? 0
   return {
     transcribeRemainingSeconds: Math.max(0, limit - used),
-    polishAllowed: pro,
+    polishAllowed: (row?.polishCalls ?? 0) < polishLimit,
     assistantTurnsRemaining: pro ? Math.max(0, PRO_ASSISTANT_TURNS - (row?.assistantTurns ?? 0)) : 0,
     firstWalkthroughMagic: false,
   }

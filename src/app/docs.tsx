@@ -140,8 +140,9 @@ export function DocsPage() {
               term: 'pricing',
               detail: (
                 <>
-                  Billing hasn't opened yet — the paid plans are coming soon and the alpha is
-                  invite-only. Priced per reviewer, not per walkthrough.{' '}
+                  The free tier is live — 2 walkthroughs a month, each with cloud transcription
+                  and the refine pass. Billing on the paid plans hasn't opened yet; they're coming
+                  soon, priced per reviewer, not per walkthrough.{' '}
                   <Link to="/#pricing">See pricing</Link>.
                 </>
               ),

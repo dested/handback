@@ -2,6 +2,17 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-08-24 — Locked plan + refine cost cut + the free tier returns
+Asked: lock the bench levers ($29/$49, 15h+80 / 30h+130, 30 turns); cut refine cost (downscale yes,
+never lose a click frame, cache narration); then "wait we need a free tier — 1 or 2 walkthroughs".
+Done: refine vision 800px + click-safe dHash dedup + cached narration (~$0.15→$0.06-0.10); tiered
+walkthrough ceiling (free 2 / pro 80, 429 at declare) + assistant 30/mo; AdminSetting-persisted
+pricing model + admin.pricingModel/setPricingModel/costTrend; free tier 2 wt + 1h transcription +
+auto-refine (polish budget 20, assistant stays Pro); landing 4th Free card, /usage walkthrough
+meter, docs FAQ; bench artifact grew breakdown/free levers. Per decisions.md ×2 entries.
+Touched: server/{refine,limits,usage,ingest,pricing,router}.ts, prisma/schema.prisma,
+src/lib/pricing-model.ts, src/app/{usage,docs,upgrade}.tsx, src/components/landing/pricing.tsx
+
 ## 2026-08-24 — Pricing work: Sonnet everywhere, real AI quotas, terms de-freed
 Asked: "work out pricing… nothing can be a loss leader"; owner: Sonnet straight away, quotas yes,
 $25/$50 lean pending a lever board. Done: refine synth + assistant + split Opus→Sonnet 5 (~65% off

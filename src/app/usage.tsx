@@ -14,7 +14,7 @@ const GB = 1024 * 1024 * 1024
 const TIER_META: Record<'admin' | 'pro' | 'free', string> = {
   admin: 'platform admin · unmetered',
   pro: 'pro plan · resets monthly',
-  free: 'no plan yet',
+  free: 'free plan',
 }
 
 /** A hairline-ruled row: a label on the left, the value flush right. */
@@ -73,20 +73,19 @@ export function UsagePage() {
       <section className="space-y-2">
         <SectionHead>cloud passes</SectionHead>
         <div>
+          <Row label="walkthroughs">
+            <span className="text-muted-foreground font-mono text-xs">
+              {cloud.walkthroughsRemaining === null || cloud.walkthroughsLimit === null
+                ? 'unmetered'
+                : `${cloud.walkthroughsRemaining} of ${cloud.walkthroughsLimit} left this month`}
+            </span>
+          </Row>
           <Row label="transcription">
-            {data.tier === 'free' ? (
-              <Link
-                to="/upgrade"
-                className="text-muted-foreground font-mono text-xs hover:underline">
-                cloud transcription comes with a plan — coming soon
-              </Link>
-            ) : (
-              <span className="text-muted-foreground font-mono text-xs">
-                {cloud.transcribeRemainingSeconds === null
-                  ? 'unmetered'
-                  : `${Math.round(cloud.transcribeRemainingSeconds / 60)}m left this month`}
-              </span>
-            )}
+            <span className="text-muted-foreground font-mono text-xs">
+              {cloud.transcribeRemainingSeconds === null
+                ? 'unmetered'
+                : `${Math.round(cloud.transcribeRemainingSeconds / 60)}m left this month`}
+            </span>
           </Row>
           <Row label="transcript polish">
             {cloud.polishAllowed ? (

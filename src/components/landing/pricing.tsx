@@ -25,6 +25,15 @@ type Tier = {
 // plans are coming soon and the alpha is invite-only.
 const tiers: Tier[] = [
   {
+    name: 'Free',
+    price: '$0',
+    unit: 'no card, live today',
+    quota: '2 walkthroughs and 1 hour of transcription / mo',
+    blurb: 'The full treatment on every walkthrough — cloud transcription and the refine pass',
+    cta: 'Start free',
+    to: '/sign-up',
+  },
+  {
     name: 'Pro',
     price: '$29',
     unit: 'per seat / mo, when billing opens',
@@ -63,10 +72,10 @@ export function Pricing() {
       <SectionLabel>Pricing</SectionLabel>
       <SectionHeading>Priced per reviewer, not per walkthrough.</SectionHeading>
       <p className="text-muted-foreground mt-4 max-w-xl text-sm leading-relaxed">
-        Billing hasn't opened yet — these plans are coming soon. The alpha is invite-only; write us
-        for access.
+        The free tier is live today — record, and every walkthrough comes back refined. Billing on
+        the paid plans hasn't opened yet; they're coming soon, and the alpha is invite-only.
       </p>
-      <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {tiers.map((tier) => {
           const ctaClass = cn(
             buttonVariants({ variant: tier.featured ? 'default' : 'outline' }),

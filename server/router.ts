@@ -22,10 +22,12 @@ import {
 } from './ingest'
 import {
   FREE_CLOUD_TRANSCRIBE_SECONDS,
+  FREE_WALKTHROUGHS_PER_MONTH,
   MAX_ACTIVE_TOKENS,
   MAX_REFINE_RUNS_PER_WALKTHROUGH,
   PRO_ASSISTANT_TURNS,
   PRO_CLOUD_TRANSCRIBE_SECONDS,
+  PRO_WALKTHROUGHS_PER_MONTH,
   monthKey,
 } from './limits'
 import { LOCKED_PRICING_MODEL, pricingModelSchema } from './pricing'
@@ -3259,6 +3261,20 @@ const usageRouter = router({
     const assistantTurnsLimit =
       tier === 'admin' ? null : tier === 'pro' ? PRO_ASSISTANT_TURNS : 0
 
+    // The monthly walkthrough meter: admin is unmetered (both null); everyone
+    // else counts this month's creates against their tier ceiling. Read-only —
+    // this reserves nothing.
+    const walkthroughsLimit =
+      tier === 'admin' ? null : tier === 'pro' ? PRO_WALKTHROUGHS_PER_MONTH : FREE_WALKTHROUGHS_PER_MONTH
+    let walkthroughsRemaining: number | null = null
+    if (walkthroughsLimit !== null) {
+      const usage = await prisma.monthlyUsage.findUnique({
+        where: { userId_month: { userId: me, month: monthKey(new Date()) } },
+        select: { walkthroughs: true },
+      })
+      walkthroughsRemaining = Math.max(0, walkthroughsLimit - (usage?.walkthroughs ?? 0))
+    }
+
     const active = await prisma.apiToken.count({ where: { userId: me, revokedAt: null } })
 
     const expiring = await prisma.walkthrough.findMany({
@@ -3280,6 +3296,8 @@ const usageRouter = router({
         polishAllowed: cloud.polishAllowed,
         assistantTurnsRemaining: cloud.assistantTurnsRemaining,
         assistantTurnsLimit,
+        walkthroughsRemaining,
+        walkthroughsLimit,
         firstWalkthroughMagic: cloud.firstWalkthroughMagic,
       },
       tokens: { active, max: MAX_ACTIVE_TOKENS },

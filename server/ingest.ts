@@ -370,7 +370,7 @@ ingestRouter.post(DECLARE, declareLimit, async (req, res) => {
       fail(
         res,
         429,
-        'Monthly walkthrough limit reached (80). It resets at the start of next month.'
+        `Monthly walkthrough limit reached (${reserved.limit ?? 0}). It resets at the start of next month.`
       )
       return
     }

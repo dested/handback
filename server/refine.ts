@@ -1,4 +1,4 @@
-// The refine pass: a pro-gated second read of a finalized walkthrough that turns
+// The refine pass: a budget-gated (free tier included) second read of a finalized walkthrough that turns
 // the recorder's raw report + takes into the two documents a coding agent and its
 // human actually read — a complete ledger (summaryMd) and an intent-aware working
 // brief (refinedBriefMd) — plus capture-health notes and a vision curation of the
@@ -24,7 +24,6 @@ import sharp from 'sharp'
 import { z } from 'zod'
 import { spaceId } from './access'
 import { env } from './env'
-import { userIsPro } from './features'
 import { log } from './logger'
 import { prisma } from './prisma'
 import { indexWalkthrough } from './search'
@@ -487,10 +486,12 @@ export async function runRefine(
   if (walkthrough.refineStatus === 'running') return
 
   const payerId = opts.byUserId ?? walkthrough.uploadedById
-  if (payerId === null || !(await userIsPro(payerId))) return
+  if (payerId === null) return
 
   // Refine spends one metered Anthropic call, on the same per-user budget polish
-  // uses. A refused reservation ends the pass before any provider is touched.
+  // uses. A refused reservation ends the pass before any provider is touched —
+  // this reserve is the budget gate for everyone now (free and Pro alike); the
+  // ingest walkthrough ceiling bounds free volume upstream.
   const budget = await checkAndReservePolish(payerId)
   if (!budget.allowed) return
 

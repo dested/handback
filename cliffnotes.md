@@ -117,14 +117,21 @@ server/
   features.ts           entitlements: isPlatformAdmin (User.isAdmin OR ADMIN_EMAILS env),
                         teamHasFeature('team') checked at Team.owner, userIsPro ('pro' feature or
                         admin), requireAdmin
-  limits.ts             tier ceilings (2026-08-24: NO free cloud tier — owner's order): free
-                        transcribe budget 0 (recorders fall back on-device), pro 54 000s (15h)/mo
-                        + 1 000 polish (abuse bound) + PRO_ASSISTANT_TURNS=100/mo (real quota) +
+  limits.ts             tier ceilings (2026-08-24 final: free tier BACK — tiny counts, full
+                        treatment): free 2 walkthroughs + 3 600s transcribe + 20 polish; pro
+                        54 000s (15h) + 80 walkthroughs + 1 000 polish (abuse bound) +
+                        PRO_ASSISTANT_TURNS=30/mo (real quota, Pro-only);
                         MAX_REFINE_RUNS_PER_WALKTHROUGH=4, MAX_ACTIVE_TOKENS=10, monthKey()
-  usage.ts              MonthlyUsage metering: checkAndReserveTranscribe/Polish/AssistantTurn
-                        (atomic upsert+increment; refused outright without pro), cloudStatus for
-                        GET /context (incl. assistantTurnsRemaining). Admins fully unmetered. The
-                        first-walkthrough magic was REMOVED 2026-08-24 with the free tier
+  pricing.ts            the pricing PLANNING model: zod schema + LOCKED_PRICING_MODEL (owner's
+                        2026-08-24 bench lock: $29/$49, 15h+80/30h+130, free 2, cost assumptions).
+                        Saved edits live in AdminSetting 'pricing-model' (admin.pricingModel/
+                        setPricingModel; admin.costTrend feeds /admin/costs). Planning only —
+                        enforcement constants stay in limits.ts
+  usage.ts              MonthlyUsage metering: checkAndReserveTranscribe/Polish/AssistantTurn/
+                        Walkthrough (atomic upsert+increment; tiered free/pro ceilings — assistant
+                        is the one Pro-only pass), cloudStatus for GET /context. Admins fully
+                        unmetered. Walkthrough creates 429 at ingest declare past the tier cap
+                        (re-push of a slug exempt). First-walkthrough magic stays dead
                         (decisions.md)
   router.ts             THE tRPC API: teams (incl. get/transferOwnership), invites (seat-capped),
                         tokens (user-scoped, no team input), projects (incl. `instructions`),
@@ -132,9 +139,11 @@ server/
                         chatHistory, sharedAddComment), usage.mine — space inputs are
                         `teamId: string | null` (null = the caller's personal space). Pro gates
                         throw FORBIDDEN with the LITERAL message 'Pro feature' (client contract)
-  refine.ts             THE Refine pass (pro-gated, fire-and-forget from finalize + manual
-                        walkthroughs.refine): deterministic capture-health checks → Haiku vision
-                        frame curation w/ captions (batches of 12, ≤84 sampled, ≤20 keepers) →
+  refine.ts             THE Refine pass (budget-gated, free tier included; manual re-run
+                        walkthroughs.refine stays Pro): capture-health checks → Haiku vision
+                        curation (frames downscaled 800px JPEG, dHash near-dup dedup with
+                        click/nav/start immune, narration prompt-cached; batches of 12, ≤84,
+                        ≤20 keepers) →
                         Sonnet 5 synthesis (Opus→Sonnet 2026-08-24, decisions.md): digestMd
                         (2–4 human sentences) + pointsJson KeyPoint[]
                         (kpN ids, severity, atMs — THE structured spine) + summaryMd ledger +

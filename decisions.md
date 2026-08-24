@@ -2,6 +2,21 @@
 
 > ADR-lite: what was decided, why, what was rejected. Append-only.
 
+## 2026-08-24 — The free tier is back: tiny counts, full treatment (supersedes "free tier dead")
+**Why:** owner reversal same day ("wait wait shit, we need a free tier… real small usage, like 1
+or 2 walkthroughs"). The funnel needs a taste of the product, and the taste must include the magic:
+2 walkthroughs/mo with cloud transcription (1h/mo) AND the automatic refine pass — a free tier
+without refine shows dead AI panels, which the viewer brief bans. Cost is bounded by the count cap
+(~$0.35/mo worst per free user at tuned refine). Assistant chat, manual refine re-runs, and split
+stay Pro-only ('Pro feature' contract untouched). Enforcement: FREE_WALKTHROUGHS_PER_MONTH=2,
+FREE_CLOUD_TRANSCRIBE_SECONDS=3600, FREE_POLISH_CALLS=20; runRefine's pro gate removed (the polish
+reserve is the budget gate for all tiers). The pricing model gains freeCap/freeUsers/freeActive so
+the free tier is a modeled cost center, not an invisible leak.
+**Rejected:** free without refine (no magic, dead panels); first-walkthrough magic (stays dead —
+a monthly allowance is legible, magic wasn't); free assistant turns (the differentiator stays paid).
+**Supersedes** the free-tier half of 2026-08-24 "free tier dead + 15h/30h" — the 15h/30h part
+evolved separately into the locked $29/$49 plan.
+
 ## 2026-08-24 — Sonnet 5 for all AI passes; assistant turns and refine runs get real quotas
 **Why:** pricing has to carry itself ("nothing can be a loss leader"). Refine was ~90% of marginal
 cost at ~$0.35/walkthrough on Opus 5; Sonnet 5 on the synthesis leg (and the assistant + split
