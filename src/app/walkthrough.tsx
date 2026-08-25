@@ -111,7 +111,7 @@ export function WalkthroughPage() {
   if (isChild) {
     return (
       <div className={cn(CONTAINER, 'space-y-6')}>
-        <Masthead walkthrough={walkthrough} />
+        <Masthead walkthrough={walkthrough} urlByPath={urlByPath} />
         <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
           <TaskBrief walkthrough={walkthrough} />
           <div className="space-y-6">
@@ -131,7 +131,7 @@ export function WalkthroughPage() {
   if (editing && canEdit) {
     return (
       <div className={cn(CONTAINER, 'space-y-6')}>
-        <Masthead walkthrough={walkthrough} />
+        <Masthead walkthrough={walkthrough} urlByPath={urlByPath} />
         <CloudEditor
           walkthroughId={walkthrough.id}
           recordedAt={walkthrough.recordedAt}
@@ -146,7 +146,7 @@ export function WalkthroughPage() {
   if (human) {
     return (
       <div className={cn(CONTAINER, 'space-y-6')}>
-        <Masthead walkthrough={walkthrough} />
+        <Masthead walkthrough={walkthrough} urlByPath={urlByPath} />
         <HumanBody
           walkthrough={walkthrough}
           urlByPath={urlByPath}
@@ -278,7 +278,7 @@ function AgentDesk({
       {/* Full-bleed: the masthead is a bar across the desk, not a block in a
           centered column. */}
       <div className="px-6 pt-5">
-        <Masthead walkthrough={walkthrough} onTab={goTab} />
+        <Masthead walkthrough={walkthrough} onTab={goTab} urlByPath={urlByPath} />
       </div>
 
       <div className="lg:grid lg:grid-cols-[208px_minmax(0,1fr)]">

@@ -6,7 +6,7 @@
  * tokens, which is why the report leads with them.
  */
 
-import { GRID_COLS as COLS, GRID_ROWS as ROWS, GRID_PER_SHEET } from '../lib/types';
+import { GRID_COLS as COLS, GRID_ROWS as ROWS, GRID_PER_SHEET } from './types';
 
 const CELL_W = 480;
 const LABEL_H = 22;

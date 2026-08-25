@@ -30,6 +30,8 @@ export interface TranscriptSegment {
   /** Position on the gripe's unified axis, ms. Set only when a human moved it; absent = computed from t. */
   tl?: number;
   text: string;
+  /** 1-based speaker rank AFTER normalization (rank 1 = most talk time); absent when diarization didn't run. */
+  speaker?: number;
 }
 
 /** The live dictation engine's state, as the panel reports it. */
@@ -194,6 +196,45 @@ export interface SessionSummary {
   durationMs: number;
   frames: number;
   lines: number;
+}
+
+/** How far one outbox upload has got — mirrors upload.ts's UploadProgress. */
+export interface OutboxProgress {
+  phase: 'declare' | 'upload' | 'finalize';
+  done: number;
+  total: number;
+  bytesDone: number;
+  bytesTotal: number;
+}
+
+/**
+ * One walkthrough queued for upload. "send to Handback" writes one of these and
+ * returns; the offscreen document drains the queue oldest-first, so a slow push
+ * never holds the panel hostage. The `target` is snapshotted at enqueue time —
+ * the human may re-link or switch spaces while a big video is still going up.
+ */
+export interface OutboxEntry {
+  id: string;
+  sessionId: string;
+  /** session.name at enqueue time — the session may be renamed or discarded mid-flight. */
+  title: string;
+  createdAt: number;
+  state: 'queued' | 'uploading' | 'done' | 'failed';
+  /** failed only — the raw pushGripe message, for explainUpload to turn into a sentence. */
+  error?: string;
+  /** Live while uploading. */
+  progress?: OutboxProgress;
+  /** done only — the walkthrough's page in the workspace. */
+  url?: string;
+  /** done only, agent kind — the agentPrompt naming the URL, for the copy button. */
+  brief?: string;
+  /** Keyframes whose blob had gone missing at bundle time. */
+  missing?: number;
+  /** Snapshot of where it uploads — settings may change while it's in flight. */
+  target: { serverUrl: string; apiToken: string };
+  projectId?: string;
+  teamId?: string;
+  kind: SessionKind;
 }
 
 /** One thing sitting on the gripe's timeline, addressed the way the store finds it again. */

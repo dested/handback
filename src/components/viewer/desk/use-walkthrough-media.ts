@@ -15,7 +15,7 @@ import type { TimelineTake, TimelineVoiceBar } from '../timeline'
 import type { TakeEvent, TakeRecording, Walkthrough } from '../types'
 import { useSegmentPlayer } from '../use-segment-player'
 
-type Line = { tMs: number; endMs: number; text: string }
+type Line = { tMs: number; endMs: number; text: string; speaker?: number }
 
 export function useWalkthroughMedia(walkthrough: Walkthrough, urlByPath: Map<string, string>) {
   const takes = useMemo(
@@ -133,7 +133,12 @@ export function useWalkthroughMedia(walkthrough: Walkthrough, urlByPath: Map<str
         frames.push({ atMs, url, label: mmss(atMs), path })
       }
       for (const line of detail.transcript) {
-        lines.push({ tMs: offset + line.tMs, endMs: offset + line.endMs, text: line.text })
+        lines.push({
+          tMs: offset + line.tMs,
+          endMs: offset + line.endMs,
+          text: line.text,
+          speaker: line.speaker,
+        })
         spoken.push({ startMs: offset + line.tMs, endMs: offset + line.endMs })
       }
       // `event.at` is a preformatted clock string the recorder wrote, not a
@@ -178,6 +183,9 @@ export function useWalkthroughMedia(walkthrough: Walkthrough, urlByPath: Map<str
     lines,
     events,
     voice,
+    // The webm per take, keyed by take id — the re-transcribe flow fetches
+    // these to decode the audio in the browser.
+    videoUrls,
     totalMs: offsets.totalMs,
     timelineTakes,
     noRecordings,

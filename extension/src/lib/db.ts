@@ -1,4 +1,4 @@
-import type { Recording, Session } from './types';
+import type { OutboxEntry, Recording, Session } from './types';
 
 /**
  * The single source of truth, shared by the service worker and the side panel.
@@ -7,13 +7,14 @@ import type { Recording, Session } from './types';
  */
 
 const DB_NAME = 'handback-recorder';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 export const STORE = {
   sessions: 'sessions',
   recordings: 'recordings',
   blobs: 'blobs',
   kv: 'kv',
+  outbox: 'outbox',
 } as const;
 
 let dbPromise: Promise<IDBDatabase> | null = null;
@@ -36,6 +37,9 @@ export function openDb(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(STORE.kv)) {
         db.createObjectStore(STORE.kv);
+      }
+      if (!db.objectStoreNames.contains(STORE.outbox)) {
+        db.createObjectStore(STORE.outbox, { keyPath: 'id' });
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -107,6 +111,28 @@ export async function listRecordings(sessionId: string): Promise<Recording[]> {
     .index('bySession');
   const all = await wrap<Recording[]>(index.getAll(sessionId));
   return all.sort((a, b) => a.index - b.index);
+}
+
+/**
+ * The upload outbox. A finished walkthrough is enqueued here and pushed by the
+ * offscreen document, so "send to Handback" returns the instant it's queued and
+ * the next walkthrough can start. Entries keyed by their own id, oldest first.
+ */
+export async function putOutbox(entry: OutboxEntry) {
+  await tx(STORE.outbox, 'readwrite', (s) => s.put(entry));
+}
+
+export async function getOutbox(id: string) {
+  return tx<OutboxEntry | undefined>(STORE.outbox, 'readonly', (s) => s.get(id));
+}
+
+export async function listOutbox(): Promise<OutboxEntry[]> {
+  const all = await tx<OutboxEntry[]>(STORE.outbox, 'readonly', (s) => s.getAll());
+  return all.sort((a, b) => a.createdAt - b.createdAt);
+}
+
+export async function deleteOutbox(id: string) {
+  await tx(STORE.outbox, 'readwrite', (s) => s.delete(id));
 }
 
 export async function deleteRecording(id: string) {

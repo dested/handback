@@ -10,7 +10,8 @@
 > chat with real mutation tools) · **needs_info** status + `ask_reviewer` ·
 > evidence screenshots on `post_result` · notify-on-result/question/health ·
 > watch-page comments · /usage · /upgrade (pro is admin-granted) · extension
-> 1.9.0 intent chips (**publish pending — Sal**, zip step is Windows-only).
+> 1.9.0 intent chips — superseded by **1.10.0, PUBLISHED 2026-08-25** (outbox background
+> upload + JPEG 0.8 + speaker plumbing; zipped on macOS with `zip -r`, see the publish gotcha).
 >
 > **Naming:** the product noun is **walkthrough** (renamed from "gripe" 2026-08-01, owner's
 > directive on record). Older log entries below say "gripe" historically — same object. The word
@@ -105,7 +106,8 @@ server.ts               Express entry: /healthz, auth, ingest, tRPC, vite/SSR, 4
 server/
   env.ts                zod env: DATABASE_URL, BETTER_AUTH_*, AWS_REGION, S3_BUCKET, AWS keys,
                         optional S3_ENDPOINT (point at R2 without code changes),
-                        GROQ_API_KEY / ANTHROPIC_API_KEY / RESEND_API_KEY + EMAIL_FROM (all
+                        GROQ_API_KEY / DEEPGRAM_API_KEY (preferred for transcribe when set —
+                        it diarizes) / ANTHROPIC_API_KEY / RESEND_API_KEY + EMAIL_FROM (all
                         optional — each unset one disables its feature, nothing crashes),
                         ADMIN_EMAILS (comma-separated bootstrap platform admins),
                         STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET / STRIPE_PRICE_PRO / STRIPE_PRICE_BIZ
@@ -203,7 +205,9 @@ server/
   retention.ts          THE deletion clocks: RETENTION_DAYS=30 (resolved auto-expire via
                         expiryFor), RAW_TTL_DAYS=14 (human raw takes post-render), 7d unfinalized
                         reap; hourly S3-first sweep (startRetentionSweep in server.ts)
-  transcribe.ts         speech-to-text via Groq whisper-large-v3-turbo; segments in ms
+  transcribe.ts         speech-to-text: Deepgram nova-3 (diarize → segments carry `speaker`,
+                        provider-local per chunk) when DEEPGRAM_API_KEY set, else Groq
+                        whisper-large-v3-turbo; segments in ms
   polish.ts             transcript cleanup via claude-haiku-4-5 — text only, timings untouched
   structure.ts          the split pass: report.md + comments → 1–10 proposed tasks via
                         claude-sonnet-5 structured outputs (no prefill); every
@@ -344,7 +348,11 @@ src/
                         on the Overview hero; self-guarding) · assistant (AssistantTab — the
                         "Edit with AI" tab, Pro-gated, pulled out of the thread) · markdown
                         (react-markdown+gfm) ·
-                        recording-tab (stage + fixed 300px transcript col + Timeline) · frames-tab
+                        recording-tab (stage + fixed 300px transcript col + Timeline +
+                        the re-transcribe control: use-retranscribe.ts decodes take audio
+                        in-browser → /transcribe(+polish) → walkthroughs.applyTranscript
+                        rewrites recording.json; report.md untouched, re-run Refine after) ·
+                        frames-tab
                         (slideshow + staged deletes) · console-tab · report-tab (raw on purpose) ·
                         brief-tab (refined brief rendered; report.md fallback) · tasks-tab
                         (SplitChildren + gated SplitPanel) · use-walkthrough-media (recordings/
@@ -354,7 +362,10 @@ src/
                         exchange (the single merged pane) DELETED 2026-08-24pm — split into
                         conversation + review-actions + assistant.
                         Still live beside desk/: overflow-menu (usePopover +
-                        kind/move/share/delete, inline arming, no window.confirm) ·
+                        kind/move/share/delete, inline arming, no window.confirm; also
+                        "Export video (MP4)" for agent kind — export-video.ts fetches the
+                        take webms and re-encodes via renderEdit, dynamic import, state
+                        survives the popover closing) ·
                         timeline (THE scrubber: source-global axis, cut tags are the only cut
                         toggle, one-gesture drag, empty→one muted line) · use-segment-player
                         (multi-take playback, rAF playhead) · slideshow (shot-by-shot
@@ -436,11 +447,18 @@ drydock.yaml            DRYDOCK-OWNED — the deploy manifest (portal is source 
 extension/              Handback Recorder — the Chrome MV3 extension (own npm workspace)
   public/manifest.json  MV3: sidePanel + activeTab/scripting/storage/tabs; hotkey Alt+Shift+D
   src/lib/              Shared contracts: types, messages (worker protocol), timeline math,
-                        db (IndexedDB 'handback-recorder'), report.md builder, upload (to /api/ingest
+                        db (IndexedDB 'handback-recorder', v2 adds the `outbox` store),
+                        bundle (buildFileSet — the in-memory gripe file set, moved out of
+                        App.tsx for the offscreen uploader), grids (contact sheets, moved
+                        from sidepanel/), report.md builder, upload (to /api/ingest
                         — XHR PUTs: live byte progress + 3-try retry, mirrors src/lib/capture/upload.ts),
                         context (GET /api/ingest/context), walkthroughs (GET /api/ingest/walkthroughs
                         — the workspace's queue, read back into the panel's home screen)
-  src/background/       Service worker: hotkeys, dock routing, IndexedDB writes, strip docking
+  src/background/       Service worker: hotkeys, dock routing, IndexedDB writes, strip docking,
+                        offscreen-doc lifecycle (ensureOffscreen/kickDrain + onStartup resume)
+  src/offscreen/        THE UPLOADER (1.10.0): drains the outbox oldest-first — buildFileSet
+                        → pushGripe — so "send to Handback" enqueues and returns; panel
+                        follows along via `outbox:changed` broadcasts (sidepanel/Outbox.tsx)
   src/content/          On-page dock (d/c/s keys), ink drawing, click ripples, telemetry;
                         injected.js relay
   src/sidepanel/        Panel app: Home.tsx (the nothing-open screen = the workspace: destination
@@ -746,6 +764,16 @@ reaches the container on a plain push.
   record with, and the local session list is drawn either way. Session takes/durations come from
   the **`sessions:summary`** message, deliberately *not* a `state:get` field: `state:get` answers
   every broadcast and this walks every take's frame metadata.
+- **"send to Handback" is an enqueue; the offscreen document is the only uploader** (1.10.0,
+  decisions.md 2026-08-25). finish() writes an `OutboxEntry` (IDB `outbox`, target
+  server+token SNAPSHOTTED), closes the session, and returns — the offscreen doc drains the
+  queue sequentially (buildFileSet in lib/bundle.ts → pushGripe) and the panel's OutboxStrip
+  renders queued/uploading/failed(retry)/done(link + copy-brief) off `outbox:changed`
+  broadcasts. Blobs delete never — the session outlives the upload; a failed entry retries
+  safely because re-declaring a slug replaces wholesale. A fresh offscreen doc re-queues
+  entries stuck 'uploading' (the old uploader died); `onStartup` resumes a queue a browser
+  restart interrupted. Don't put an upload back in the panel, and don't let two uploads run
+  at once — they fight for the same wifi.
 - **The keyframe cap is length-scaled, and it lives in two places.** `frameBudget(durationMs)`
   (`extension/src/sidepanel/recorder.ts`) is 40 frames/min clamped to **[150, 600]** per *take* —
   applied once in `finish()`, after dedup, as a **uniform** thin with nothing carved out of it
@@ -753,7 +781,8 @@ reaches the container on a plain push.
   renumbered ascending (`t` survives, so transcript citations stay valid). It was a flat 150 until 2026-07-31. Server-side, `briefFrameLimit()`
   (`server/mcp-format.ts`) caps how many frame URLs the agent's brief *inlines* — 8/min clamped to
   [30, 120] — which is a display cap only: `gripes.get` presigns every frame regardless. Raising
-  either has real cost: a frame is ~200–400 KB, against 2 GB/gripe and 20 GB/org.
+  either has real cost: a frame is ~150–300 KB (JPEG quality 0.8 since 2026-08-25 — was 0.9;
+  mirrored in capture/frames.ts and video-to-prompt), against 2 GB/gripe and 20 GB/org.
 - **Renaming a column is a SQL job, not a `db push` job.** Predeploy runs `bunx prisma db push`
   **without** `--accept-data-loss` on purpose, so any drop stalls the deploy. Rename in place first
   (`ALTER TABLE "gripe" RENAME COLUMN "old" TO "new"`), then push — it sees no drift. Remember
@@ -942,7 +971,9 @@ reaches the container on a plain push.
   recorder reaches users through `releases/recorder/` in the bucket. So before (or right after) any
   push that touched `extension/`: bump the version if behavior changed, then
   `bun run publish:extension` (build → zip → upload; the zip step shells out to `pwsh`
-  `Compress-Archive`, so it's Windows-only — see the Bun gotcha). Skipping
+  `Compress-Archive`, so it's Windows-only — on macOS zip by hand instead:
+  `cd extension/dist && zip -r ../handback-recorder.zip .` then `bun cli/publish-recorder.ts`;
+  the publish script's checks make either path safe). Skipping
   this leaves every install nagged as outdated — or worse, a server expecting a handshake the
   shipped recorder doesn't speak.
 - **The bucket is the release channel.** `/recorder` links `/download/recorder`, not GitHub — the

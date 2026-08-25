@@ -144,6 +144,11 @@ export function PrivacyPage() {
                 'Speech-to-text with the whisper-large-v3-turbo model, only when server-side transcription is enabled. Receives the audio track; receives nothing else.',
             },
             {
+              term: 'Deepgram',
+              detail:
+                'Speech-to-text with speaker separation using the nova-3 model, only when server-side transcription is enabled. Receives the audio track; receives nothing else.',
+            },
+            {
               term: 'Anthropic',
               detail:
                 'Transcript cleanup with the claude-haiku-4-5 model. Receives the transcript text, the recorded page address, and its console errors. Never receives audio, video, or images.',

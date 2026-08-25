@@ -374,6 +374,7 @@ async function curateFrames(
 // --- synthesis ------------------------------------------------------------
 
 const SYNTH_SYSTEM = `You are Handback's refine pass. You read one narrated screen walkthrough — its report, transcript, keyframe captions and capture-health notes — and write the documents a coding agent and its human will actually read.
+Transcript lines may be prefixed S1:/S2: — those mark distinct people speaking; when the conversation reveals who a speaker is (an introduction, a name used in address), use the real name in the digest and key points, otherwise say Speaker 1 / Speaker 2.
 Rules:
 - digest is what the human sees first: 2–4 plain sentences — what this recording is, what the narrator wants, how urgent it reads. Written like a person, never a machine.
 - key_points is the structured spine: one entry per distinct thing raised — title in the narrator's own nouns, one-sentence detail, severity from the narrator's framing (high only when real damage is said or shown), at = the m:ss where it is raised (empty string when there is no moment). Complete but never padded; never invent.

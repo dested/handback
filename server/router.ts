@@ -57,6 +57,7 @@ import {
   deleteKeys,
   deletePrefix,
   getObjectText,
+  putObjectText,
   spacePrefix,
   walkthroughKey,
   walkthroughPrefix,
@@ -912,6 +913,47 @@ const pointOutcomesSchema = z.array(
   })
 )
 
+// The recorder's frozen spoken-window contract, duplicated from
+// src/lib/capture/report.ts — these four are the recorder's own constants, and
+// walkthroughs.applyTranscript rebuilds each take's recording.json transcript
+// with exactly this math so a re-transcribed take reads identically to a fresh
+// upload. Keep them in step with report.ts if that contract ever moves.
+const RETRANSCRIBE_SPEECH_LEAD_MS = 2000
+const RETRANSCRIBE_SPEECH_TAIL_MS = 2500
+const RETRANSCRIBE_WORD_MS = 380
+const RETRANSCRIBE_MIN_LINE_MS = 1200
+
+/** m:ss for a transcript line's `at`, matching the recorder's format.ts `mmss`
+ *  (round to the nearest second, not floor — commentStamp floors). */
+const retranscribeMmss = (ms: number): string => {
+  const total = Math.max(0, Math.round(ms / 1000))
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`
+}
+
+const applyTranscriptSegmentSchema = z
+  .object({
+    t: z.number().int().min(0),
+    d: z.number().int().positive().optional(),
+    text: z.string().min(1).max(2000),
+    speaker: z.number().int().min(1).max(32).optional(),
+  })
+  .strict()
+
+const applyTranscriptTakeSchema = z
+  .object({
+    takeId: z.string(),
+    segments: z.array(applyTranscriptSegmentSchema).max(2000),
+  })
+  .strict()
+
+/**
+ * JSON.parse hands back `unknown`; recording.json is an object carrying an
+ * object `recording` field. Narrow to a mutable record so the transcript can be
+ * replaced in place without an `any`.
+ */
+const isJsonRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v)
+
 const walkthroughsRouter = router({
   list: protectedProcedure
     .input(
@@ -1699,6 +1741,119 @@ const walkthroughsRouter = router({
       })
       await deleteKeys(files.map((f) => walkthroughKey(spaceId(g), input.walkthroughId, f.path)))
       return { ok: true, deleted: files.length }
+    }),
+
+  /**
+   * Re-run speech-to-text on selected takes and write the fresh transcript back
+   * into each take's recording.json. The server never decodes audio (no
+   * ffmpeg) — the browser decodes the webm, calls /api/ingest/transcribe (and
+   * polish), and hands the segments here. report.md is ground truth and is left
+   * untouched; the uploader re-runs Refine to fold the new words into the brief.
+   */
+  applyTranscript: protectedProcedure
+    .input(
+      z.object({
+        walkthroughId: z.string(),
+        takes: z.array(applyTranscriptTakeSchema).min(1).max(40),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const g = await prisma.walkthrough.findUnique({
+        where: { id: input.walkthroughId },
+        select: {
+          teamId: true,
+          userId: true,
+          kind: true,
+          parentId: true,
+          finalizedAt: true,
+          takes: { select: { id: true, dir: true } },
+        },
+      })
+      if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
+      await requireSpaceAccess(ctx.session.user.id, g)
+      if (g.kind === 'human') {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'only agent walkthroughs re-transcribe' })
+      }
+      // A split-out task is metadata only — no takes, no recording.json to rewrite.
+      if (g.parentId) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'A split-out task has no recording to re-transcribe',
+        })
+      }
+      if (!g.finalizedAt) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'This walkthrough never finished uploading',
+        })
+      }
+
+      // Every input take must be one of this walkthrough's own — checked before a
+      // single object is written, so a foreign id fails the whole call rather
+      // than leaving some takes rewritten and others not.
+      const dirByTakeId = new Map(g.takes.map((t) => [t.id, t.dir]))
+      for (const take of input.takes) {
+        if (!dirByTakeId.has(take.takeId)) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: `Take ${take.takeId} does not belong to this walkthrough`,
+          })
+        }
+      }
+
+      const space = spaceId(g)
+      for (const take of input.takes) {
+        const dir = dirByTakeId.get(take.takeId)
+        if (dir === undefined) continue // unreachable — validated above
+        const key = walkthroughKey(space, input.walkthroughId, `${dir}/recording.json`)
+
+        let parsed: unknown
+        try {
+          parsed = JSON.parse(await getObjectText(key))
+        } catch {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: `Couldn't read recording.json for take ${take.takeId}`,
+          })
+        }
+        if (!isJsonRecord(parsed) || !isJsonRecord(parsed.recording)) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: `recording.json for take ${take.takeId} is malformed`,
+          })
+        }
+
+        // Rebuild the entries with the recorder's own window math (the constants
+        // above), so a re-transcribed take reads exactly like a fresh upload.
+        const entries = [...take.segments]
+          .sort((a, b) => a.t - b.t)
+          .map((seg) => {
+            const spoken =
+              seg.d ??
+              Math.max(RETRANSCRIBE_MIN_LINE_MS, seg.text.split(/\s+/).length * RETRANSCRIBE_WORD_MS)
+            const end = seg.t + spoken
+            return {
+              at: retranscribeMmss(seg.t),
+              tMs: seg.t,
+              endMs: end,
+              aboutFromMs: Math.max(0, seg.t - RETRANSCRIBE_SPEECH_LEAD_MS),
+              aboutToMs: end + RETRANSCRIBE_SPEECH_TAIL_MS,
+              text: seg.text,
+              ...(seg.speaker !== undefined ? { speaker: seg.speaker } : {}),
+            }
+          })
+
+        parsed.recording.transcript = entries
+        parsed.recording.transcriber = 'cloud'
+        parsed.recording.transcriptReviewed = false
+        await putObjectText(key, JSON.stringify(parsed, null, 2), 'application/json')
+      }
+
+      // report.md is untouched, so the corpus barely moves — but keep the
+      // refresh on the same fire-and-forget path finalize uses, so a
+      // re-transcribe never blocks or throws into the response.
+      void indexWalkthrough(input.walkthroughId)
+      return { ok: true, takes: input.takes.length }
     }),
 
   assignProject: protectedProcedure

@@ -87,7 +87,17 @@ export type Request =
   | { type: 'recording:force'; why: 'click' | 'nav'; origin: string }
   // The on-page toolbar's stop button. The panel owns the recorder, so it acts;
   // the background just answers ok.
-  | { type: 'recording:stop' };
+  | { type: 'recording:stop' }
+  // panel→background after enqueue: ensure the offscreen doc exists, then broadcast
+  // upload:drain so the uploader picks up the freshly queued entry.
+  | { type: 'upload:kick' }
+  // background→offscreen (plain runtime broadcast; the panel ignores it). Tells the
+  // uploader to walk the queue.
+  | { type: 'upload:drain' }
+  // panel→background: flip a failed entry back to queued, ensure offscreen, drain.
+  | { type: 'outbox:retry'; id: string }
+  // panel→background: forget a finished entry (done/failed only; other states ignored).
+  | { type: 'outbox:dismiss'; id: string };
 
 /** Background → content script. */
 export type ContentCommand =
@@ -99,7 +109,7 @@ export type ContentCommand =
   | { type: 'ping' };
 
 /** Background → side panel broadcast. */
-export type Broadcast = { type: 'state:changed' };
+export type Broadcast = { type: 'state:changed' } | { type: 'outbox:changed' };
 
 /**
  * What a Handback web page may send via chrome.runtime.sendMessage(EXTENSION_ID, …).

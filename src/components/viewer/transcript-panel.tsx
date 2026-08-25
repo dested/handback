@@ -12,11 +12,18 @@ export function TranscriptPanel({
   onSeek,
   activeMs,
 }: {
-  lines: { tMs: number; endMs: number; text: string }[]
+  lines: { tMs: number; endMs: number; text: string; speaker?: number }[]
   onSeek: (tMs: number) => void
   activeMs?: number
 }) {
   const listRef = useRef<HTMLUListElement>(null)
+
+  // Label voices only when more than one was heard, so S1 stays meaningful.
+  const showSpeakers = useMemo(() => {
+    const set = new Set<number>()
+    for (const line of lines) if (line.speaker !== undefined) set.add(line.speaker)
+    return set.size >= 2
+  }, [lines])
 
   // The line whose window the playhead is inside — -1 in the gaps between lines,
   // where we hold position rather than snapping back to the top.
@@ -60,6 +67,11 @@ export function TranscriptPanel({
                 active && 'bg-cobalt-wash'
               )}>
               <span className="text-cobalt shrink-0 pt-px font-mono text-xs">{mmss(line.tMs)}</span>
+              {showSpeakers && line.speaker !== undefined && (
+                <span className="text-muted-foreground shrink-0 pt-px font-mono text-[10px]">
+                  S{line.speaker}
+                </span>
+              )}
               <span className="text-sm leading-relaxed">{line.text}</span>
             </button>
           </li>

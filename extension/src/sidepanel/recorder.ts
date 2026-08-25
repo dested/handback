@@ -51,12 +51,12 @@ const CLICK_FORCE_MS = 1200; // floor between click-forced keyframes — a doubl
 // wrong at both ends: a 90-second walkthrough never came near the old 150, while
 // a twenty-minute one lost real detail to it. The floor keeps short takes exactly
 // as generous as they were; the ceiling keeps a marathon take inside the per-gripe
-// upload budget (a frame is ~200-400 KB at MAX_FRAME_W/JPEG_QUALITY).
+// upload budget (a frame is ~150-300 KB at MAX_FRAME_W/JPEG_QUALITY).
 const FRAMES_PER_MIN = 40;
 const MIN_FRAME_BUDGET = 150;
 const MAX_FRAME_BUDGET = 600;
 const MAX_FRAME_W = 1920;
-const JPEG_QUALITY = 0.9;
+const JPEG_QUALITY = 0.8; // 0.9 until 1.10.0 — frames were half the upload; UI text stays legible
 const MAX_EVENTS = 200;
 const POINTER_STALE_MS = 2500; // a pointer older than this says nothing about this frame
 const MAP_TOLERANCE = 0.02; // aspect-ratio match required before we believe a coordinate mapping

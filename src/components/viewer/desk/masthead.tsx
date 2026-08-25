@@ -142,10 +142,13 @@ function ProjectPicker({ walkthrough }: { walkthrough: Walkthrough }) {
 export function Masthead({
   walkthrough,
   onTab,
+  urlByPath,
 }: {
   walkthrough: Walkthrough
   /** Lets a masthead control jump the desk to a tab (Split → Tasks). */
   onTab?: (tab: DeskTab) => void
+  /** Presigned urls by path, handed to the ⋯ menu for MP4 export. */
+  urlByPath?: Map<string, string>
 }) {
   const trpc = useTRPC()
   const invalidate = useInvalidateWalkthrough(walkthrough.id)
@@ -269,6 +272,7 @@ export function Masthead({
               <OverflowMenu
                 walkthrough={walkthrough}
                 onSplit={splittable ? () => onTab?.('tasks') : undefined}
+                urlByPath={urlByPath}
               />
             </>
           ) : (

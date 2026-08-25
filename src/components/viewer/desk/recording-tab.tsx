@@ -3,12 +3,117 @@
 // own tab now, and the report and comments are elsewhere — this tab is only the
 // video and what was said over it.
 
+import { useState } from 'react'
 import { SectionHead } from '../section-head'
 import { Timeline } from '../timeline'
 import { TranscriptPanel } from '../transcript-panel'
 import type { Walkthrough } from '../types'
 import { VideoStage } from '../video-stage'
+import { useRetranscribe } from './use-retranscribe'
 import type { WalkthroughMedia } from './use-walkthrough-media'
+
+const STAGE_WORD = {
+  decode: 'decoding',
+  transcribe: 'transcribing',
+  polish: 'cleaning up',
+  save: 'saving',
+} as const
+
+/**
+ * Re-run speech-to-text on this walkthrough's takes from the browser, writing
+ * the fresh transcript back into each recording.json. Quiet by default; arms
+ * inline (no confirm dialog, no layout jump) before it spends the transcribe
+ * budget. Members only, agent kind only, and only when there's audio to decode.
+ */
+function RetranscribeControl({
+  walkthrough,
+  media,
+}: {
+  walkthrough: Walkthrough
+  media: WalkthroughMedia
+}) {
+  const [armed, setArmed] = useState(false)
+  const [done, setDone] = useState(false)
+  const n = media.videoUrls.size
+  const { state, start } = useRetranscribe({
+    walkthrough,
+    takes: media.takes,
+    videoUrls: media.videoUrls,
+    onDone: () => {
+      setArmed(false)
+      setDone(true)
+    },
+  })
+
+  if (walkthrough.viewerIsMember === false || walkthrough.kind === 'human' || n === 0) return null
+
+  const progress = state !== null && 'stage' in state ? state : null
+  const error = state !== null && 'error' in state ? state.error : null
+
+  const run = () => {
+    setDone(false)
+    start()
+  }
+
+  return (
+    // Reserve height so arming (or a wrapped prompt) never shoves the timeline
+    // mid-decision — ui.md's no-jump law.
+    <div className="min-h-[3.5rem] pt-3 font-mono text-xs leading-relaxed">
+      {progress ? (
+        <span className="text-muted-foreground">
+          take {progress.takeIndex} of {progress.takeCount} — {STAGE_WORD[progress.stage]}…
+        </span>
+      ) : error ? (
+        <span className="text-muted-foreground">
+          {error}{' '}
+          <button
+            type="button"
+            onClick={run}
+            className="text-primary underline underline-offset-4">
+            try again
+          </button>
+        </span>
+      ) : armed ? (
+        <span className="text-muted-foreground">
+          replaces the transcript for {n} take{n === 1 ? '' : 's'} using the recording's mixed audio
+          — spends your transcribe budget{' '}
+          <button
+            type="button"
+            onClick={run}
+            className="text-primary underline underline-offset-4">
+            go
+          </button>{' '}
+          <button
+            type="button"
+            onClick={() => setArmed(false)}
+            className="hover:text-foreground underline underline-offset-4">
+            cancel
+          </button>
+        </span>
+      ) : done ? (
+        <span className="text-muted-foreground">
+          transcript replaced — re-run Refine to update the brief{' '}
+          <button
+            type="button"
+            onClick={() => {
+              setDone(false)
+              setArmed(true)
+            }}
+            className="text-primary underline underline-offset-4">
+            re-transcribe
+          </button>
+        </span>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setArmed(true)}
+          className="text-muted-foreground hover:text-foreground underline underline-offset-4">
+          re-transcribe
+        </button>
+      )}
+    </div>
+  )
+}
 
 export function RecordingTab({
   walkthrough,
@@ -56,6 +161,7 @@ export function RecordingTab({
               />
             </div>
           )}
+          <RetranscribeControl walkthrough={walkthrough} media={media} />
         </section>
       </div>
 

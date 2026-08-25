@@ -29,6 +29,8 @@ export type TranscriptLine = {
   tMs: number
   endMs: number
   text: string
+  /** 1-based speaker rank (1 = most talk time); absent when diarization didn't run. */
+  speaker?: number
 }
 
 export type TakeEvent = {

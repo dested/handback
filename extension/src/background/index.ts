@@ -16,13 +16,17 @@ import type {
 import { COBALT, DEFAULT_SERVER, DEFAULT_SETTINGS, activeLink, linkId } from '../lib/types';
 import {
   blobs,
+  deleteOutbox,
   deleteRecording,
   deleteSession,
+  getOutbox,
   getRecording,
   getSession,
   kv,
+  listOutbox,
   listRecordings,
   listSessions,
+  putOutbox,
   putRecording,
   putSession,
 } from '../lib/db';
@@ -47,6 +51,18 @@ chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason === 'install') {
     chrome.tabs.create({ url: `${DEFAULT_SERVER}/recorder` }).catch(() => {});
   }
+});
+
+// A browser restart leaves any half-sent walkthrough sitting in the outbox — the
+// offscreen document doesn't survive the restart. Bring the uploader back up and
+// let it finish what was queued or interrupted.
+chrome.runtime.onStartup.addListener(() => {
+  void (async () => {
+    const pending = (await listOutbox()).some(
+      (e) => e.state === 'queued' || e.state === 'uploading',
+    );
+    if (pending) await kickDrain();
+  })();
 });
 
 /** A 1.2.x row: one link per workspace, `${serverUrl}::${orgId}`. */
@@ -135,6 +151,42 @@ async function broadcast() {
   chrome.runtime.sendMessage({ type: 'state:changed' }).catch(() => {
     /* no side panel listening — fine */
   });
+}
+
+async function broadcastOutbox() {
+  chrome.runtime.sendMessage({ type: 'outbox:changed' }).catch(() => {
+    /* no side panel listening — fine */
+  });
+}
+
+/**
+ * The uploader lives in an offscreen document — it needs a DOM (canvas for the
+ * contact sheets) and a lifetime the panel doesn't have. This makes sure one
+ * exists. A create that throws means it already does (or a create race), which is
+ * the same "it's there" from the caller's side. A create that *succeeds* means the
+ * document is fresh — so the previous uploader died mid-flight, and any entry it
+ * left marked 'uploading' belongs to a run that will never finish. Put those back
+ * in the queue for the new document to pick up.
+ */
+async function ensureOffscreen(): Promise<void> {
+  try {
+    await chrome.offscreen.createDocument({
+      url: 'offscreen.html',
+      reasons: [chrome.offscreen.Reason.BLOBS],
+      justification: 'Assemble and upload finished walkthroughs without blocking the panel',
+    });
+    const stuck = (await listOutbox()).filter((e) => e.state === 'uploading');
+    for (const entry of stuck) await putOutbox({ ...entry, state: 'queued', progress: undefined });
+    if (stuck.length) await broadcastOutbox();
+  } catch {
+    /* already exists / create race — the document is there, which is all we need */
+  }
+}
+
+/** Wake the uploader: make sure the offscreen doc is up, then tell it to drain. */
+async function kickDrain(): Promise<void> {
+  await ensureOffscreen();
+  chrome.runtime.sendMessage({ type: 'upload:drain' }).catch(() => {});
 }
 
 /** The toolbar icon is the only surface a closed panel has: it says a gripe is open and how full it is. */
@@ -535,6 +587,34 @@ chrome.runtime.onMessage.addListener((message: Request, _sender, sendResponse) =
         await broadcast();
         return { ok: true };
       }
+      case 'upload:kick': {
+        // The panel just enqueued a walkthrough — spin up the uploader and drain.
+        await kickDrain();
+        return { ok: true };
+      }
+      case 'outbox:retry': {
+        const entry = await getOutbox(message.id);
+        if (entry && entry.state === 'failed') {
+          await putOutbox({ ...entry, state: 'queued', error: undefined, progress: undefined });
+          await broadcastOutbox();
+        }
+        await kickDrain();
+        return { ok: true };
+      }
+      case 'outbox:dismiss': {
+        const entry = await getOutbox(message.id);
+        // Only a settled entry can be dismissed — a queued or in-flight one is
+        // still the uploader's to finish.
+        if (entry && (entry.state === 'done' || entry.state === 'failed')) {
+          await deleteOutbox(message.id);
+          await broadcastOutbox();
+        }
+        return { ok: true };
+      }
+      case 'upload:drain':
+        // Meant for the offscreen document; the background only needs to not
+        // treat it as unknown.
+        return { ok: true };
       case 'recording:event':
       case 'recording:pointer':
       case 'recording:force':

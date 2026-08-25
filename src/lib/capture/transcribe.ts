@@ -36,11 +36,42 @@ const responseShape = (value: unknown): TranscriptSegment[] | null => {
   const out: TranscriptSegment[] = []
   for (const raw of segments) {
     if (typeof raw !== 'object' || raw === null) return null
-    const { t, d, text } = raw as { t?: unknown; d?: unknown; text?: unknown }
+    const { t, d, text, speaker } = raw as {
+      t?: unknown
+      d?: unknown
+      text?: unknown
+      speaker?: unknown
+    }
     if (typeof t !== 'number' || typeof text !== 'string') return null
-    out.push(typeof d === 'number' ? { t, d, text } : { t, text })
+    const base = typeof d === 'number' ? { t, d, text } : { t, text }
+    out.push(typeof speaker === 'number' ? { ...base, speaker } : base)
   }
   return out
+}
+
+/**
+ * Speaker numbers arrive per-request and are NOT stable across chunks — chunk 2
+ * may call the narrator "1" where chunk 1 called them "0". We can't carry the
+ * provider's labels, but talk time is: in a walkthrough the narrator dominates
+ * every chunk, so ranking a chunk's speakers by total speech (most first) and
+ * relabelling to that rank makes "S1" mean the same voice across chunks. Ranks
+ * are 1-based (1 = most talk time). A segment the provider left unlabelled stays
+ * unlabelled; a chunk with no speakers at all comes back unchanged. Keep this
+ * identical across the transcribe clients (the pipeline mirror rule).
+ */
+function normalizeSpeakers(segments: TranscriptSegment[]): TranscriptSegment[] {
+  if (!segments.some((s) => s.speaker !== undefined)) return segments
+  const talk = new Map<number, number>()
+  for (const seg of segments) {
+    if (seg.speaker === undefined) continue
+    talk.set(seg.speaker, (talk.get(seg.speaker) ?? 0) + (seg.d ?? 3000))
+  }
+  const ranked = [...talk.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])
+  const rank = new Map<number, number>()
+  ranked.forEach(([raw], i) => rank.set(raw, i + 1))
+  return segments.map((seg) =>
+    seg.speaker === undefined ? seg : { ...seg, speaker: rank.get(seg.speaker) ?? seg.speaker }
+  )
 }
 
 export async function transcribeInCloud(

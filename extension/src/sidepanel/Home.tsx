@@ -1,9 +1,11 @@
-import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { ServerLink, Session, SessionKind, SessionSummary, Settings } from '../lib/types';
+import { DEFAULT_SERVER } from '../lib/types';
 import { spaceName, spaceProjects, type ServerContext } from '../lib/context';
 import { send } from '../lib/messages';
 import { ago, hostOf, mmss, plural } from '../lib/format';
 import { saveSession } from './save';
+import { OutboxStrip } from './Outbox';
 import {
   fetchWalkthroughs,
   inboxUrl,
@@ -46,8 +48,6 @@ interface HomeProps {
   link: ServerLink | null;
   ctx: ServerContext | null;
   ctxFailed: boolean;
-  /** The just-handed-over card, when a session closed a moment ago. */
-  shipped: ReactNode;
   /** Who the next take is for — the fork that decides how it is captured. */
   kind: SessionKind;
   /**
@@ -74,7 +74,6 @@ export function Home({
   link,
   ctx,
   ctxFailed,
-  shipped,
   kind,
   kindLocked,
   onPickKind,
@@ -194,7 +193,7 @@ export function Home({
 
   return (
     <div className="home">
-      {shipped}
+      <OutboxStrip serverHost={hostOf(serverUrl || DEFAULT_SERVER)} />
 
       <section className="hero">
         {/* Who it's for decides everything downstream — frame rate, whether

@@ -159,5 +159,8 @@ see the go-live doc, which already flags the privacy policy as a blocker for oth
       real mangled speech — "handbag" → "Handback", "cores" → "CORS", "you are ell" → "URL",
       "use effect" → "useEffect". The report names it, because a model touched the words.
 - [ ] *(optional)* Mic-only opus track, if the WAV upload turns out to be the slow part.
-- [ ] *(optional)* Deepgram, if keyterm biasing beats the cleanup pass.
+- [x] **Deepgram** — adopted 2026-08-25, but for *diarization*, not keyterm biasing:
+      `DEEPGRAM_API_KEY` set → `/transcribe` routes to nova-3 with `diarize=true&utterances=true`
+      and segments carry `speaker` (clients rank-normalize per chunk by talk time). Unset →
+      Groq, then on-device, exactly as before. Named on /privacy. decisions.md 2026-08-25.
 - [ ] *(optional)* Streaming for a live line that's actually accurate.

@@ -2,6 +2,30 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-08-25 — upload UX wave: outbox + compression + speakers + export + re-transcribe
+Asked: "upload is slow… i can't be stuck on this screen… what about compression? · a better way
+to know there are multiple people talking and defining who's who · download the mp4 on the
+website (and extension) — shit must be bulletproof" + (mid-task) "regenerate the audio for old
+handbacks using deepgram, not all but some". Built fable-opus (5 Opus agents + gate).
+Done (decisions.md ×4): **① Non-blocking upload** — extension 1.10.0: "send to Handback"
+enqueues an OutboxEntry (IDB v2 `outbox`, target snapshotted) and returns; a chrome.offscreen
+document assembles (lib/bundle.ts, moved from App.tsx) + pushes sequentially; OutboxStrip on
+home/editor shows queued/uploading(bar)/failed(retry)/done(link + copy-brief); restart resume
++ panel-open watchdog. **② Compression** — keyframe JPEG 0.9→0.8 in all three mirrors
+(extension/capture/video-to-prompt), ~35–45%% off the frame half of an upload. **③ Speakers** —
+Deepgram nova-3 diarize when DEEPGRAM_API_KEY set (Groq fallback untouched; /privacy names it);
+`Segment.speaker` → clients rank-normalize per chunk by talk time (S1 = dominant voice);
+render-time S1:/S2: prefixes in report.md/transcript.txt (≥2 voices only, text never mutated),
+`speaker` in recording.json, viewer transcript chips, refine told to infer real names.
+**④ Export** — viewer ⋯ "Export video (MP4)": in-browser mediabunny re-encode of the takes
+(dynamic import, progress+cancel, survives popover close); extension raw-webm ↓ saves already
+existed. **⑤ Re-transcribe** — Recording-tab control: browser decodes take audio → metered
+/transcribe(+polish) → `walkthroughs.applyTranscript` rewrites recording.json (report.md
+immutable; re-run Refine). Verified: root+extension+library typecheck, web+extension builds,
+Opus quality gate all-pass. **Published `handback-recorder-1.10.0.zip`** to releases/recorder/
+(zipped on macOS with `zip -r`). Prod still needs DEEPGRAM_API_KEY in SSM; Web Store build not
+resubmitted.
+
 ## 2026-08-24 — wire Stripe billing, fully + bulletproof
 Asked: "start setting up stripe… wire this fully… make sure it's bulletproof… also give me a way
 to have like 100% off coupons." (Test keys pasted in chat → `.env` only.)

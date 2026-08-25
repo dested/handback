@@ -1002,3 +1002,60 @@ structured error codes (tRPC data plumbing for one bit).
 absence of a tag must stay neutral. Values are bug | feature | idea, chosen by the human,
 never inferred server-side.
 **Rejected:** defaulting to bug, inferring intent in the refine pass.
+
+## 2026-08-25 — "send to Handback" is an enqueue, not a wait
+**Why:** a slow wifi upload held the panel hostage — you couldn't start the next walkthrough
+until the last one finished uploading. Sends now write an `OutboxEntry` (IDB store `outbox`,
+DB v2) and return; a chrome.offscreen document (permission added, `offscreen.html`) assembles
+the file set (`lib/bundle.ts`, moved out of App.tsx) and pushes sequentially, surviving panel
+close and browser restart (stuck 'uploading' entries re-queue on fresh doc). The home-screen
+OutboxStrip is the accounting: progress bar, retry on failure, link + copy-brief when done.
+The `target` (server+token) is snapshotted at enqueue. Keyframe JPEG quality also dropped
+0.9 → 0.8 in the same release (frames were half the upload; mirrored to capture/ and
+video-to-prompt).
+**Rejected:** uploading in the service worker (no DOM for contact-sheet canvas, 30s idle
+kills), keeping the upload in the panel with a non-modal UI (dies with the panel), parallel
+uploads (they fight for the same wifi).
+
+## 2026-08-25 — Deepgram (nova-3, diarize) is the transcribe provider when its key is set
+**Why:** "multiple people talking" needs real diarization and Whisper/Groq cannot do it.
+`DEEPGRAM_API_KEY` optional like every other key — unset, Groq (then on-device) exactly as
+before. Segments gain `speaker?: number`: 0-based provider-local from the server, then
+clients rank-normalize per chunk by talk time (S1 = the dominant voice, i.e. the narrator)
+so numbering agrees across 8-min chunks. Prefixes (`S1:`) are applied at RENDER time only
+(report.md / transcript.txt / viewer chips, and only when a take has ≥2 speakers) — never
+baked into segment text, so the polish contract holds. Refine is told to infer real names
+from context. Deepgram is named on /privacy. ~$0.30–0.45/audio-hr vs Groq's ~$0.04 — noise
+next to refine's ~$1.50/hr.
+**Rejected:** LLM speaker attribution from text alone (unreliable), pyannote (Python),
+cross-chunk speaker stitching by voice (no embeddings available server-side; rank-by-talk-time
+is deterministic and right in practice).
+
+## 2026-08-25 — Export video: website re-encodes to MP4, extension hands out the raw webm
+**Why:** "bulletproof — I need to get the video out, always." Agent-kind takes are VP8/VP9
+webm; a real MP4 needs a re-encode, and the web app already ships mediabunny — so the
+viewer's ⋯ menu gained "Export video (MP4)" (fetch takes via presigns → `renderEdit` with
+one full-length segment per take → one H.264/AAC file, dynamic-imported so mediabunny stays
+out of the initial bundle; survives the popover closing). The extension already had the
+insurance copy (`save.ts` ↓ buttons, raw webm, instant). Human-kind keeps its existing
+final.mp4 Download.
+**Rejected:** mediabunny inside the extension bundle (minutes of CPU in a side panel),
+server-side transcode ("fuck ffmpeg" is on record), webm-only export (won't open in
+QuickTime/iMessage — fails the "just in case" purpose).
+
+## 2026-08-25 — Re-transcribe is browser-decoded, server-written, report.md-immutable
+**Why:** "regenerate the audio for old handbacks using deepgram… not all of them but some."
+The server never decodes webm (no ffmpeg), so the viewer's Recording tab does the work:
+fetch each take's webm → `decodeMono` → the same metered `/transcribe` (+best-effort polish)
+path the recorders use → ONE `walkthroughs.applyTranscript` mutation rewrites each
+`rec-NN/recording.json` transcript server-side (recorder's frozen window math duplicated in
+router.ts; `transcriber: 'cloud'`, `transcriptReviewed: false`), then fire-and-forget
+searchText refresh. report.md stays ground truth — the human re-runs Refine to fold the new
+words/speakers into the brief. Gated: member, agent kind, finalized, not a child; foreign
+takeIds fail the whole call before any write. Nothing persists client-side until the final
+mutation — a reload abandons harmlessly.
+**Rejected:** server-side audio decode (ffmpeg), widening presignEdit's allowlist to let the
+client PUT recording.json (those strings become S3 keys — the allowlist stays exactly
+final.mp4|transcript.json|edit.json), rewriting report.md (immutability law), a bulk
+"re-transcribe everything" sweep (owner asked for selected walkthroughs; the per-walkthrough
+control is the scope).

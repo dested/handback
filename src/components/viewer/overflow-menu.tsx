@@ -60,10 +60,13 @@ export function usePopover(): {
 export function OverflowMenu({
   walkthrough,
   onSplit,
+  urlByPath,
 }: {
   walkthrough: Walkthrough
   /** Opens the split-into-tasks mode; absent when this walkthrough can't split. */
   onSplit?: () => void
+  /** Presigned urls by file path — needed to fetch the takes for MP4 export. */
+  urlByPath?: Map<string, string>
 }) {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
@@ -72,6 +75,50 @@ export function OverflowMenu({
   const { copied, copy } = useCopy()
   const { open, setOpen, ref } = usePopover()
   const [armed, setArmed] = useState<Armed>(null)
+
+  // Export runs off the raw take webms, re-encoding them in the tab. It lives at
+  // component level (not inside the popover) so it keeps going after the menu is
+  // closed and reopened. `null` idle · a progress object while running · the
+  // 'failed' string after a non-cancel error.
+  const [exportState, setExportState] = useState<
+    { stage: 'download' | 'render'; fraction: number } | 'failed' | null
+  >(null)
+  const exportAbort = useRef<AbortController | null>(null)
+
+  async function runExport() {
+    if (!urlByPath) return
+    const controller = new AbortController()
+    exportAbort.current = controller
+    setExportState({ stage: 'download', fraction: 0 })
+    try {
+      // Dynamic import keeps mediabunny (via export-video → render) out of the
+      // viewer's initial bundle.
+      const { exportWalkthroughMp4, saveBlob } = await import('./export-video')
+      const blob = await exportWalkthroughMp4({
+        takes: walkthrough.takes,
+        urlByPath,
+        onProgress: (p) => setExportState({ stage: p.stage, fraction: p.fraction }),
+        signal: controller.signal,
+      })
+      saveBlob(blob, `${walkthrough.slug || 'walkthrough'}.mp4`)
+      setExportState(null)
+    } catch {
+      // A cancel is a choice, not a failure — clear silently; anything else stays
+      // up as a retryable error.
+      setExportState(controller.signal.aborted ? null : 'failed')
+    } finally {
+      if (exportAbort.current === controller) exportAbort.current = null
+    }
+  }
+
+  // Export is for agent walkthroughs (a human's Download lives on its cut), and
+  // only when at least one take actually resolves a video url to fetch.
+  const canExport =
+    walkthrough.kind !== 'human' &&
+    urlByPath !== undefined &&
+    walkthrough.takes.some((take) =>
+      urlByPath.has(take.videoPath ?? `${take.dir}/walkthrough.webm`)
+    )
 
   // Closing is a decision not to act: nothing stays armed behind a shut menu.
   useEffect(() => {
@@ -261,6 +308,35 @@ export function OverflowMenu({
                     disabled={unshare.isPending}
                     onClick={() => unshare.mutate({ walkthroughId: walkthrough.id })}>
                     {unshare.isPending ? 'revoking…' : 'Revoke share link'}
+                  </button>
+                </>
+              )}
+            </>
+          )}
+
+          {/* Pull the raw takes down and re-encode them into one MP4 in the tab.
+              Survives the menu closing — reopen to see where it's at. */}
+          {canExport && (
+            <>
+              <div className={DIVIDER} />
+              {exportState === null ? (
+                <button type="button" className={ITEM} onClick={() => void runExport()}>
+                  Export video (MP4)
+                </button>
+              ) : exportState === 'failed' ? (
+                <button type="button" className={ITEM} onClick={() => void runExport()}>
+                  export failed — try again
+                </button>
+              ) : (
+                <>
+                  <button type="button" className={ITEM} disabled>
+                    exporting — {Math.round(exportState.fraction * 100)}%
+                  </button>
+                  <button
+                    type="button"
+                    className={ITEM}
+                    onClick={() => exportAbort.current?.abort()}>
+                    cancel export
                   </button>
                 </>
               )}

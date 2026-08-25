@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
+  OutboxEntry,
   PageEvent,
   PointerSample,
   Recording,
-  RecordingFrame,
   ServerLink,
   Session,
   SessionIntent,
@@ -13,25 +13,17 @@ import type {
 import { DEFAULT_SERVER, DEFAULT_SETTINGS, activeLink, linkId, sessionKind } from '../lib/types';
 import { fetchContext, spaceProjects, type ServerContext } from '../lib/context';
 import { send } from '../lib/messages';
-import { blobs } from '../lib/db';
-import { hostOf, mmss, plural, recDirName } from '../lib/format';
+import { blobs, putOutbox } from '../lib/db';
+import { hostOf, mmss, plural } from '../lib/format';
 import { partSpans, totalMs } from '../lib/timeline';
-import {
-  agentPrompt,
-  buildManifestTxt,
-  buildRecordingJson,
-  buildReport,
-  buildTranscriptTxt,
-  sheetFile,
-} from '../lib/report';
-import { contentTypeFor, pushGripe, type GripeFile, type UploadProgress } from '../lib/upload';
+import { agentPrompt } from '../lib/report';
 import { Recorder, type RecorderUpdate } from './recorder';
 import { Dictation } from '../content/speech';
-import { makeGrids, type GridFrame } from './grids';
 import { polishTranscript } from './polish';
 import { transcribeRecording, type TranscribeProgress } from './transcribe';
 import { Parts } from './Parts';
 import { Home } from './Home';
+import { OutboxStrip } from './Outbox';
 import './panel.css';
 
 /**
@@ -188,14 +180,15 @@ function DestinationPicker({
 /**
  * The side panel is the remote: Record, a live readout while it runs, the editor,
  * and the one button that hands the gripe over. It is a pure view over the worker's
- * state — it re-pulls on every `state:changed` and mutates nothing directly. Two
- * things it owns because the worker can't: the `MediaRecorder` (the display-media
- * grant belongs to the document that asked for it) and, at `done`, the upload.
+ * state — it re-pulls on every `state:changed` and mutates nothing directly. The
+ * one thing it owns because the worker can't is the `MediaRecorder` (the
+ * display-media grant belongs to the document that asked for it).
  *
- * There is no folder. Where the original wrote a gripe through to disk as each take
- * finished, this builds the same file set in memory at `done` and pushes it to the
- * Handback server — so nothing lands anywhere until the human says the gripe is
- * finished, and what lands is exactly what the timeline showed them.
+ * There is no folder, and the upload no longer happens here: "send to Handback"
+ * drops the walkthrough into an outbox and returns, and the offscreen document
+ * assembles the same file set the recorder used to write to disk and pushes it
+ * (see lib/bundle.ts and offscreen/index.ts). The panel watches that queue through
+ * `<OutboxStrip>`, so a slow push never keeps the human from the next walkthrough.
  */
 
 interface PanelState {
@@ -213,25 +206,6 @@ const EMPTY: PanelState = {
   settings: DEFAULT_SETTINGS,
 };
 
-/** The upload, and the takes exactly as it describes them. */
-interface Bundle {
-  files: GripeFile[];
-  /** Takes whose frame lists hold only the frames that are really in `files`. */
-  takes: Recording[];
-  /** Keyframes whose blob had gone missing — evidence we no longer have. */
-  missing: number;
-}
-
-/** What a finished handoff leaves on screen, after the gripe itself is closed. */
-interface Shipped {
-  url: string;
-  title: string;
-  /** Empty for a human handback: the brief is written for an agent, and this one never meets one. */
-  brief: string;
-  /** Whether the brief naming the URL made it onto the clipboard without a fresh click. */
-  copied: boolean;
-}
-
 /** format.ts is frozen and has no URL helper; the panel needs exactly this much. */
 function originOf(url: string): string {
   try {
@@ -240,56 +214,6 @@ function originOf(url: string): string {
     return url;
   }
 }
-
-function reason(error: unknown): string {
-  const text = error instanceof Error ? error.message : String(error);
-  return text.replace(/\s+/g, ' ').trim().slice(0, 300) || 'something went wrong';
-}
-
-/** An upload failure as a sentence, plus the raw server words for whoever wants them. */
-interface UploadExplanation {
-  line: string;
-  detail?: string;
-  /** The token itself is the problem — the panel offers the recorder page, not a retry. */
-  relink?: boolean;
-}
-
-/**
- * `upload.ts` throws `declare failed (500): <body…>`, and the body is whatever the
- * server felt like sending — often an HTML error page. The status is the only part
- * worth trusting, so it picks the sentence and the body is demoted to a detail the
- * reader can open if the sentence isn't enough.
- */
-function explainUpload(raw: string, host: string): UploadExplanation {
-  const status = Number(/\((\d{3})\)/.exec(raw)?.[1] ?? 0);
-  const stripped = raw
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 300);
-  const says = (line: string) => (stripped && stripped !== line ? stripped : undefined);
-
-  if (status === 401 || status === 403) {
-    return { line: 'the server turned the token away — re-link and try again', relink: true };
-  }
-  if (status === 413 || /quota|too large|limit/i.test(raw)) {
-    const line = "the server refused the upload — it's over a size limit";
-    return { line, detail: says(line) };
-  }
-  if (status >= 500) {
-    const line = `the server hit an error (${status}). nothing is lost — the walkthrough is still here`;
-    return { line, detail: says(line) };
-  }
-  if (status >= 400) {
-    const line = `the server said no (${status})`;
-    return { line, detail: says(line) };
-  }
-  return { line: `couldn't reach ${host} — check the connection and try again` };
-}
-
-/** `41.2 of 180.5 MB` — the unit once, so the two numbers can be read against each other. */
-const mbPair = (done: number, total: number) =>
-  `${(done / 1024 / 1024).toFixed(1)} of ${(total / 1024 / 1024).toFixed(1)} MB`;
 
 export function App() {
   const [state, setState] = useState<PanelState>(EMPTY);
@@ -329,11 +253,6 @@ export function App() {
   // The queue, mirrored into state so the panel can say `queued` / `transcribing…`.
   // A single-slot guard silently dropped the second of a back-to-back pair.
   const [whisperIds, setWhisperIds] = useState<string[]>([]);
-  const [progress, setProgress] = useState<UploadProgress | null>(null);
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  /** The server's own words, folded away until someone asks for them. */
-  const [showErrDetail, setShowErrDetail] = useState(false);
-  const [shipped, setShipped] = useState<Shipped | null>(null);
   /** What the active token can see — the spaces it reaches and their projects. Null until fetched, or when it failed. */
   const [ctx, setCtx] = useState<ServerContext | null>(null);
   /** The context fetch failed. The picker stays on screen and offers a retry — a
@@ -633,8 +552,6 @@ export function App() {
     if (recorderRef.current) return;
     if (!skipMic && !(await ensureMic())) return;
     setMicGate(false);
-    setShipped(null);
-    setUploadError(null);
     // A take lands in the open walkthrough, so pressing Record from the home
     // screen is also a request to go back into it.
     setBrowsing(false);
@@ -749,89 +666,20 @@ export function App() {
 
   // ── handing the gripe over ────────────────────────────────────────────
   /**
-   * The gripe's whole file set, built in memory at exactly the paths the original
-   * wrote to disk: `report.md` and `MANIFEST.txt` at the root, one `rec-NN/` per
-   * take. Those paths are the keys in the cloud, so a downloaded gripe is a
-   * folder `cli/push.ts` can push straight back up.
+   * Closing a gripe: enqueue it into the outbox, close the session, and drop the
+   * human back on the home screen where the outbox strip shows the push going up.
+   * The offscreen document does the assembling and uploading (see lib/bundle.ts
+   * and offscreen/index.ts), so this returns at once and the next recording opens
+   * a fresh session — takes only ever accumulate in the open gripe, so this is
+   * the only way to start clean.
    *
-   * The frame blobs are resolved *before* any prose is written, and the takes handed
-   * back carry only the frames that resolved. Everything downstream then describes
-   * what is actually in the upload: the report's citations, its frame-to-sheet map,
-   * the contact sheets, and the declared counts. This matters more here than it did
-   * on disk — a report citing a file that never made it was a dangling relative path
-   * you could go hunting for, and is now a 404 inside the reading agent's brief.
-   */
-  const buildFileSet = useCallback(
-    async (target: Session, recorded: Recording[]): Promise<Bundle> => {
-      // A human handback ships the raw takes and nothing written for a reader:
-      // no frames (there are none), no contact sheets, no report.md, no
-      // MANIFEST. The editing happens in Handback — see the cloud editor — and
-      // it needs exactly the video, the machine-readable take, and the words.
-      const human = sessionKind(target) === 'human';
-      const files: GripeFile[] = [];
-      const takes: Recording[] = [];
-      let missing = 0;
-      const text = (path: string, body: string) => {
-        const contentType = contentTypeFor(path);
-        files.push({ path, blob: new Blob([body], { type: contentType }), contentType });
-      };
-      for (const rec of recorded) {
-        const dir = recDirName(rec.index);
-        const kept: RecordingFrame[] = [];
-        const gridFrames: GridFrame[] = [];
-        for (const f of human ? [] : rec.meta.frames) {
-          const blob = await blobs.get(`${rec.id}:frame:${f.index}`);
-          if (!blob) {
-            missing++;
-            continue;
-          }
-          // f.file is take-relative (frames/03-0125.jpg) — the take dir goes in front.
-          files.push({ path: `${dir}/${f.file}`, blob, contentType: contentTypeFor(f.file) });
-          kept.push(f);
-          gridFrames.push({ blob, label: f.file.split('/').pop()! });
-        }
-        // The sheets batch these kept frames nine at a time, which is exactly how the
-        // report maps a frame to its sheet — one list, one batching, one set of paths.
-        for (const [i, sheet] of (await makeGrids(gridFrames)).entries()) {
-          const path = sheetFile(i + 1, `${dir}/`);
-          files.push({ path, blob: sheet, contentType: contentTypeFor(path) });
-        }
-        const take: Recording = { ...rec, meta: { ...rec.meta, frames: kept } };
-        takes.push(take);
-        text(`${dir}/transcript.txt`, buildTranscriptTxt(take.meta));
-        text(`${dir}/recording.json`, buildRecordingJson(target, take));
-        const video = await blobs.get(`${rec.id}:video`);
-        if (video) {
-          const path = `${dir}/${take.meta.videoFile}`;
-          files.push({ path, blob: video, contentType: contentTypeFor(path) });
-        }
-      }
-      // The summaries describe the whole set, so they go last — written from the takes
-      // as shipped, not as recorded.
-      if (!human) {
-        text('report.md', buildReport(target, takes));
-        text('MANIFEST.txt', buildManifestTxt(target, takes));
-      }
-      return { files, takes, missing };
-    },
-    [],
-  );
-
-  /**
-   * Closing a gripe: build every byte, push it to the active space, hand over the
-   * brief, then let go of the session. The next recording opens a fresh one — takes
-   * only ever accumulate in the open gripe, so this is the only way to start clean.
-   *
-   * The clipboard write goes first: it needs this click's user activation and the
-   * upload burns straight through it. That first copy can't name the gripe's URL —
-   * the server mints the id during the declare — so a second copy is attempted
-   * once there is an address, and the card offers it again if that was refused.
-   *
-   * Any failure leaves the gripe open and says what broke. Re-declaring the same
-   * slug replaces the previous attempt wholesale, so retrying is always safe.
+   * The first clipboard write still goes here: it needs this click's user
+   * activation, and the brief that names the walkthrough's URL isn't known until
+   * the server mints the id during the declare — so this copies the URL-less brief
+   * now, and the outbox strip's "copy brief" hands over the addressed one later.
    */
   const finish = async () => {
-    if (!session || progress) return;
+    if (!session) return;
     const target = session;
     const takes = state.recordings.filter((r) => r.state === 'done');
     if (!takes.length) {
@@ -857,43 +705,25 @@ export function App() {
         .writeText(agentPrompt(target, undefined, takes.length))
         .catch(() => {});
     }
-    setUploadError(null);
-    setShowErrDetail(false);
-    setProgress({ phase: 'declare', done: 0, total: 0, bytesDone: 0, bytesTotal: 0 });
-    try {
-      const bundle = await buildFileSet(target, takes);
-      // Say it out loud rather than quietly shipping a thinner gripe than the
-      // timeline showed. The report already describes only what is really here.
-      if (bundle.missing) {
-        say(`${bundle.missing} keyframe${bundle.missing === 1 ? '' : 's'} had gone missing`);
-      }
-      const { url } = await pushGripe(
-        { serverUrl: link.serverUrl, apiToken: link.apiToken },
-        target,
-        bundle.takes,
-        bundle.files,
-        {
-          projectId,
-          teamId: teamId || undefined,
-          kind: human ? 'human' : 'agent',
-          onProgress: setProgress,
-        },
-      );
-      const brief = human ? '' : agentPrompt(target, url, bundle.takes.length);
-      const copied = brief
-        ? await navigator.clipboard
-            .writeText(brief)
-            .then(() => true)
-            .catch(() => false)
-        : false;
-      await send({ type: 'session:close', id: target.id, uploadedUrl: url });
-      await refresh();
-      setShipped({ url, title: target.name, brief, copied });
-    } catch (error) {
-      setUploadError(reason(error));
-    } finally {
-      setProgress(null);
-    }
+    const entry: OutboxEntry = {
+      id: crypto.randomUUID(),
+      sessionId: target.id,
+      title: target.name,
+      createdAt: Date.now(),
+      state: 'queued',
+      // Snapshot the destination now — settings may change while it's in flight.
+      target: { serverUrl: link.serverUrl, apiToken: link.apiToken },
+      projectId,
+      teamId: teamId || undefined,
+      kind: human ? 'human' : 'agent',
+    };
+    await putOutbox(entry);
+    await send({ type: 'session:close', id: target.id });
+    await send({ type: 'upload:kick' });
+    await refresh();
+    // Land on the home screen, where the outbox strip accounts for the push.
+    setBrowsing(true);
+    say(human ? 'sending — see the strip on home' : 'sending — the brief is on your clipboard');
   };
 
   /** Open one from the home screen — which is also the way back into the one you left. */
@@ -901,7 +731,6 @@ export function App() {
     await send({ type: 'session:activate', id });
     setBrowsing(false);
     setConfirmDiscard(false);
-    setShipped(null);
     await refresh();
   };
 
@@ -911,11 +740,10 @@ export function App() {
    * to lose. Anything already uploaded stays in Handback — this is local.
    */
   const discardSession = async () => {
-    if (!session || recording || uploading) return;
+    if (!session || recording) return;
     await send({ type: 'session:delete', id: session.id });
     setConfirmDiscard(false);
     setBrowsing(false);
-    setShipped(null);
     const next = await refresh();
     // The worker falls back to the newest walkthrough still open, which would drop
     // the human straight into somebody else's work. Land on the home screen instead.
@@ -950,7 +778,6 @@ export function App() {
   const takes = state.recordings.filter((r) => r.state === 'done');
   const hasContent = takes.length > 0;
   const recording = Boolean(recUpdate);
-  const uploading = Boolean(progress);
   /**
    * The editor is on screen when there is a walkthrough open and the human hasn't
    * stepped back out of it. Recording overrides both — the live readout is the
@@ -1007,101 +834,11 @@ export function App() {
     .join(' · ');
 
   /**
-   * Bytes, not files. The last file of a walkthrough is the video and it is most
-   * of the upload, so counting files parked the bar at "97 of 100" for minutes.
+   * The one thing still worth saying at the footer while a walkthrough is open:
+   * the transcript isn't in yet, so sending now ships the live dictation. The
+   * upload's own progress moved to the outbox strip.
    */
-  const uploadPct =
-    progress && progress.bytesTotal
-      ? Math.min(100, (progress.bytesDone / progress.bytesTotal) * 100)
-      : 0;
-  const uploadLine = progress
-    ? progress.phase === 'declare'
-      ? 'opening the walkthrough in Handback…'
-      : progress.phase === 'finalize'
-        ? 'finishing up…'
-        : `uploading — ${Math.floor(uploadPct)}%`
-    : null;
-  /** The scale the percent is a percent of; absent before the server names the files. */
-  const uploadDetail =
-    progress && progress.phase !== 'declare' && progress.bytesTotal
-      ? mbPair(progress.bytesDone, progress.bytesTotal)
-      : null;
-
-  const explained = uploadError ? explainUpload(uploadError, serverHost) : null;
-
-  /** What the handoff is doing, or why it stopped. Shown in the panel and the strip. */
-  const statusRow = (
-    <>
-      {uploadLine && (
-        <div className="prog">
-          <div className="prog-line">
-            <span>{uploadLine}</span>
-            {uploadDetail && <span className="prog-bytes">{uploadDetail}</span>}
-          </div>
-          <div className="bar">
-            <i style={{ width: `${uploadPct}%` }} />
-          </div>
-        </div>
-      )}
-      {explained && (
-        <div className="err">
-          <div className="err-head">upload failed</div>
-          <p>{explained.line}</p>
-          <div className="err-actions">
-            <button className="link" onClick={() => void finish()}>
-              try again
-            </button>
-            {explained.relink && (
-              <button className="link" onClick={openRecorderUrl}>
-                re-link
-              </button>
-            )}
-            {explained.detail && (
-              <button className="link" onClick={() => setShowErrDetail((v) => !v)}>
-                details
-              </button>
-            )}
-          </div>
-          {showErrDetail && explained.detail && (
-            <pre className="err-detail">{explained.detail}</pre>
-          )}
-        </div>
-      )}
-      {!uploading && !uploadError && hasContent && whisperLabel && (
-        <div className="note">
-          still transcribing — hand it over now and it ships the live dictation instead
-        </div>
-      )}
-    </>
-  );
-
-  /** The footer is the handoff. With nothing to hand over and nothing to say, it isn't there. */
-  const hasStatus = Boolean(uploadLine || uploadError || (hasContent && whisperLabel));
-
-  const shippedCard = shipped && (
-    <div className="shipped">
-      <div className="shipped-head">handed over</div>
-      <a className="shipped-link" href={shipped.url} target="_blank" rel="noreferrer">
-        {shipped.title || 'the walkthrough'} →
-      </a>
-      {!shipped.brief ? (
-        // A human handback lands raw. Tightening it into the video you send is
-        // the next step, and it happens on the web — the panel doesn't edit.
-        <div className="note">open it in Handback to tighten it up and get a share link</div>
-      ) : shipped.copied ? (
-        <div className="note">the brief is on your clipboard — paste it into Claude Code</div>
-      ) : (
-        <button
-          className="link"
-          onClick={() =>
-            void navigator.clipboard.writeText(shipped.brief).then(() => say('copied'))
-          }
-        >
-          copy the brief for Claude Code
-        </button>
-      )}
-    </div>
-  );
+  const stillTranscribing = hasContent && Boolean(whisperLabel);
 
   return (
     <div className="app">
@@ -1216,7 +953,6 @@ export function App() {
           link={link}
           ctx={ctx}
           ctxFailed={ctxFailed}
-          shipped={shippedCard}
           kind={kind}
           kindLocked={kindLocked}
           onPickKind={pickKind}
@@ -1271,7 +1007,7 @@ export function App() {
               ) : (
                 <button
                   className="link"
-                  disabled={recording || uploading}
+                  disabled={recording}
                   title="Delete this walkthrough and its parts from this machine"
                   onClick={() => setConfirmDiscard(true)}
                 >
@@ -1291,10 +1027,11 @@ export function App() {
               />
             </div>
           </section>
+          <OutboxStrip serverHost={serverHost} />
           <Parts
             session={session}
             recordings={state.recordings}
-            busy={recording || uploading}
+            busy={recording}
             transcribing={whisperIds}
             onAdd={() => void startRecording()}
             onSay={say}
@@ -1302,9 +1039,13 @@ export function App() {
         </>
       )}
 
-      {!overlay && editing && (hasContent || !linked || hasStatus || recording) && (
+      {!overlay && editing && (hasContent || !linked || stillTranscribing || recording) && (
         <footer className="foot">
-          {statusRow}
+          {stillTranscribing && (
+            <div className="note">
+              still transcribing — hand it over now and it ships the live dictation instead
+            </div>
+          )}
           {/* What this walkthrough is — one line above where it lands. Hidden on the
               empty review screen; present once a part exists or one is recording. */}
           {(recording || hasContent) && session && (
@@ -1333,7 +1074,7 @@ export function App() {
                 ctxFailed={ctxFailed}
                 teamId={teamId}
                 currentProjectId={currentProjectId}
-                disabled={recording || uploading}
+                disabled={recording}
                 onRetry={() => setCtxReloads((n) => n + 1)}
                 onOpenRecorder={openRecorderUrl}
                 onOpenProjects={openProjectsUrl}
@@ -1341,11 +1082,11 @@ export function App() {
               />
               <button
                 className="primary send"
-                disabled={recording || uploading}
-                title="Upload this walkthrough, copy the brief, and close it"
+                disabled={recording}
+                title="Queue this walkthrough for upload, copy the brief, and close it"
                 onClick={() => void finish()}
               >
-                {uploading ? 'sending…' : 'send to Handback'}
+                send to Handback
               </button>
               {/*<p className="send-sub">copies a brief for your agent</p>*/}
             </>

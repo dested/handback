@@ -20,6 +20,9 @@ const schema = z.object({
   // recorder falls back to its on-device Whisper pass. A dev without a Groq key
   // gets the slow path, not a boot crash.
   GROQ_API_KEY: z.string().min(1).optional(),
+  // Preferred over Groq when set: nova-3 with diarization, so segments carry
+  // speaker numbers. Unset = Groq (or on-device) exactly as before.
+  DEEPGRAM_API_KEY: z.string().min(1).optional(),
   // Same rule for email: unset means transactional mail is logged instead of
   // sent, so a dev can click a reset link out of their terminal.
   RESEND_API_KEY: z.string().min(1).optional(),
