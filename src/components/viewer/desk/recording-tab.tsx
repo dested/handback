@@ -4,6 +4,7 @@
 // video and what was said over it.
 
 import { useState } from 'react'
+import { TokenLimitNotice, isTokenLimitError } from '~/components/token-manager'
 import { SectionHead } from '../section-head'
 import { Timeline } from '../timeline'
 import { TranscriptPanel } from '../transcript-panel'
@@ -64,19 +65,33 @@ function RetranscribeControl({
           take {progress.takeIndex} of {progress.takeCount} — {STAGE_WORD[progress.stage]}…
         </span>
       ) : error ? (
-        <span className="text-muted-foreground">
-          {error}{' '}
-          <button
-            type="button"
-            onClick={run}
-            className="text-primary underline underline-offset-4">
-            try again
-          </button>
-        </span>
+        isTokenLimitError(error) ? (
+          // The mint hit the active-token cap. Same recovery as /upload and
+          // /record: revoke where you are, then go again — never a dead end.
+          <div className="max-w-md space-y-2 font-sans">
+            <TokenLimitNotice />
+            <button
+              type="button"
+              onClick={run}
+              className="text-primary font-mono underline underline-offset-4">
+              try again
+            </button>
+          </div>
+        ) : (
+          <span className="text-muted-foreground">
+            {error}{' '}
+            <button
+              type="button"
+              onClick={run}
+              className="text-primary underline underline-offset-4">
+              try again
+            </button>
+          </span>
+        )
       ) : armed ? (
         <span className="text-muted-foreground">
-          replaces the transcript for {n} take{n === 1 ? '' : 's'} using the recording's mixed audio
-          — spends your transcribe budget{' '}
+          replaces the transcript for {n} take{n === 1 ? '' : 's'} using the recording's mixed
+          audio{' '}
           <button
             type="button"
             onClick={run}

@@ -315,6 +315,7 @@ src/
                         TokenLimitNotice (the inline "revoke one to continue" panel) and
                         `isTokenLimitError(err|string)`. The cap error ("Too many active tokens")
                         renders TokenLimitNotice inline on /connect·/recorder·/phone·/record·/upload
+                        AND the viewer's re-transcribe control (recording-tab.tsx)
                         so a stuck user can revoke where they are, not on a buried settings page
     legal.tsx           LegalPage/Section/Terms/Notice — shared chrome for /privacy + /terms
     inbox/              card.tsx — THE /app walkthrough card (WalkthroughCard + InboxCard type):
