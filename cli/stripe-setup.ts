@@ -49,6 +49,13 @@ const PLANS: PlanSpec[] = [
 const COUPON_ID = 'handback-comp-100'
 const PROMO_CODE = 'HANDBACK100'
 
+// Stripe requires a product tax code when Managed Payments is enabled on the
+// account (it's on by default). Handback is SaaS, so both products carry the
+// SaaS code. Alternatives if this one is rejected: 'txcd_10000000' (General —
+// Electronically Supplied Services). You can instead disable Managed Payments in
+// the Stripe dashboard, which drops the requirement entirely.
+const TAX_CODE = 'txcd_10103000' // Software as a service (SaaS)
+
 async function ensureProduct(spec: PlanSpec): Promise<string> {
   const found = await stripe.products.search({
     query: `active:'true' AND metadata['handback_plan']:'${spec.plan}'`,
@@ -56,13 +63,18 @@ async function ensureProduct(spec: PlanSpec): Promise<string> {
   })
   const existing = found.data[0]
   if (existing) {
-    // Keep the human-readable fields in sync without churning ids.
-    await stripe.products.update(existing.id, { name: spec.name, description: spec.description })
+    // Keep the human-readable fields + tax code in sync without churning ids.
+    await stripe.products.update(existing.id, {
+      name: spec.name,
+      description: spec.description,
+      tax_code: TAX_CODE,
+    })
     return existing.id
   }
   const created = await stripe.products.create({
     name: spec.name,
     description: spec.description,
+    tax_code: TAX_CODE,
     metadata: { handback_plan: spec.plan },
   })
   return created.id
