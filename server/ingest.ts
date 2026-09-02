@@ -43,6 +43,7 @@ import { memberTeamIds, spaceId } from './access'
 import { log } from './logger'
 import { notifyUpload } from './notify'
 import { runRefine } from './refine'
+import { detectReferencedFiles } from './references'
 import { indexWalkthrough } from './search'
 import { polishConfigured, polishTranscript } from './polish'
 import { prisma } from './prisma'
@@ -468,6 +469,9 @@ ingestRouter.post(FINALIZE, finalizeLimit, async (req, res) => {
   // Same null→set gate for the pro-gated refine pass: it runs once per upload,
   // reads its own eligibility, and never throws.
   if (!walkthrough.finalizedAt && walkthrough.kind === 'agent') void runRefine(walkthrough.id)
+  // Same transition guard: read the report once for "you mentioned a file"
+  // suggestions (server/references.ts; agent kind only, degrades to nothing).
+  if (!walkthrough.finalizedAt) void detectReferencedFiles(walkthrough.id)
   // Fill the search corpus from the uploaded report/transcript. Every finalize
   // (re-push included) — the files may have changed.
   void indexWalkthrough(walkthrough.id)
@@ -662,9 +666,10 @@ ingestRouter.post(
     const estSeconds = Math.max(1, Math.round(audio.length / 32000))
     const budget = await checkAndReserveTranscribe(auth.userId, estSeconds)
     if (!budget.allowed) {
-      res
-        .status(429)
-        .json({ error: 'cloud transcription budget exhausted', remainingSeconds: budget.remaining ?? 0 })
+      res.status(429).json({
+        error: 'cloud transcription budget exhausted',
+        remainingSeconds: budget.remaining ?? 0,
+      })
       return
     }
     // A two-letter hint helps Whisper; anything else is noise, so drop it.

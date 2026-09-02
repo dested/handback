@@ -11,6 +11,7 @@ import { Button } from '~/components/ui/button'
 import { useTRPC } from '~/lib/trpc'
 import { cn } from '~/lib/utils'
 import { mmss } from '../format'
+import { AttachmentsPanel } from '../attachments-panel'
 import { SectionHead } from '../section-head'
 import type { Walkthrough } from '../types'
 import { KeyPointsTable, type OutcomeByPoint } from './key-points'
@@ -129,7 +130,9 @@ function OpenStateBody({
               )
             ) : null
           ) : refineStatus === 'failed' ? (
-            <p className="text-destructive font-mono text-xs">refine failed — retry from the rail.</p>
+            <p className="text-destructive font-mono text-xs">
+              refine failed — retry from the rail.
+            </p>
           ) : null}
 
           {points.length > 0 && (
@@ -206,7 +209,10 @@ function OpenStateBody({
                       [{mmss(atMs)}]
                     </button>
                   )}
-                  <span className="text-foreground/80">{atMs !== null ? ' ' : ''}{note.text}</span>
+                  <span className="text-foreground/80">
+                    {atMs !== null ? ' ' : ''}
+                    {note.text}
+                  </span>
                 </li>
               )
             })}
@@ -223,6 +229,10 @@ function OpenStateBody({
           ))}
         </ul>
       )}
+
+      {/* Files the narration referenced (the detection pass's nudges) and
+          anything else worth handing the agent — rides the brief. */}
+      <AttachmentsPanel framed walkthroughId={walkthrough.id} onSeek={onSeek} />
 
       {summaryMd && (
         <details className="group">
@@ -321,7 +331,9 @@ export function OverviewTab({
           {latestResult.summary}
         </h2>
 
-        {latestResult.bodyMd && <Markdown className="max-w-[680px]">{latestResult.bodyMd}</Markdown>}
+        {latestResult.bodyMd && (
+          <Markdown className="max-w-[680px]">{latestResult.bodyMd}</Markdown>
+        )}
 
         {points.length > 0 && (
           <section className="space-y-2.5">
@@ -330,9 +342,7 @@ export function OverviewTab({
               <span
                 className={cn(
                   'font-mono text-[11px]',
-                  nFixed === points.length && nFixed > 0
-                    ? 'text-approve'
-                    : 'text-muted-foreground'
+                  nFixed === points.length && nFixed > 0 ? 'text-approve' : 'text-muted-foreground'
                 )}>
                 {nFixed} of {points.length} addressed
               </span>

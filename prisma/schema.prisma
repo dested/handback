@@ -290,15 +290,41 @@ model Walkthrough {
   refineStage    String?   @map("refine_stage")
   refineRuns     Int       @default(0) @map("refine_runs")
 
-  takes     Take[]
-  files     WalkthroughFile[]
-  notes     WalkthroughNote[]
-  access    WalkthroughAccess[]
-  comments  WalkthroughComment[]
-  chats     WalkthroughChat[]
-  revisions WalkthroughRevision[]
+  takes       Take[]
+  files       WalkthroughFile[]
+  notes       WalkthroughNote[]
+  access      WalkthroughAccess[]
+  comments    WalkthroughComment[]
+  chats       WalkthroughChat[]
+  revisions   WalkthroughRevision[]
+  suggestions WalkthroughFileSuggestion[]
 
   @@map("walkthrough")
+}
+
+// "You mentioned a file — attach it?" One row per digital artifact the
+// narration referenced but the walkthrough doesn't carry, written by the
+// detection pass at finalize (server/references.ts, agent kind only). The
+// viewer renders open rows as attach nudges; unresolved ones also ride into
+// the agent brief as "mentioned but not attached". `attachedPath` set = an
+// attachment satisfied it; `dismissedAt` set = a human said no.
+model WalkthroughFileSuggestion {
+  id            String      @id @default(uuid())
+  walkthroughId String      @map("walkthrough_id")
+  walkthrough   Walkthrough @relation(fields: [walkthroughId], references: [id], onDelete: Cascade)
+  // What the speaker called it: "the pricing spreadsheet", "settings.json".
+  label         String
+  // The transcript line that mentioned it, for the nudge to quote.
+  quote         String?
+  // Where in the recording it was said (walkthrough-wide clock), when known.
+  atMs          Int?        @map("at_ms")
+  dismissedAt   DateTime?   @map("dismissed_at")
+  // The attachments/<name> path that fulfilled this suggestion.
+  attachedPath  String?     @map("attached_path")
+  createdAt     DateTime    @default(now()) @map("created_at")
+
+  @@index([walkthroughId])
+  @@map("walkthrough_file_suggestion")
 }
 
 // A reviewer's margin note, optionally pinned to a moment of the recording

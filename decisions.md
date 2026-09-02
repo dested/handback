@@ -1059,3 +1059,15 @@ client PUT recording.json (those strings become S3 keys — the allowlist stays 
 final.mp4|transcript.json|edit.json), rewriting report.md (immutability law), a bulk
 "re-transcribe everything" sweep (owner asked for selected walkthroughs; the per-walkthrough
 control is the scope).
+## 2026-08-31 — Attachments are agent-kind only, and intake uploads them AFTER finalize over tRPC
+**Why:** an attachment exists to ride the agent brief (a spec, a CSV the narration referenced),
+so it lives where the brief lives — `attachments/*` WalkthroughFile rows, one frozen prefix, one
+mechanism for viewer and intake alike. /upload and /record attach by calling the same
+`presignAttachments`/`finalizeAttachments` tRPC pair the viewer uses *after* `distillAndUpload`
+returns, which keeps `src/lib/capture/` byte-identical to its mirrors — no change to the
+extension or video-to-prompt. The "you mentioned a file" pass (`server/references.ts`) is
+**unmetered**: one Haiku call per walkthrough, guarded by the finalize null→set transition and
+the declare rate limit, degrade-to-nothing like polish.
+**Rejected:** attachments in the declare file list (would fork the mirrored pipeline four ways);
+human-kind attachments (the watch page has no surface for them — reopen if wanted); metering the
+detection pass (cost is noise next to transcription).

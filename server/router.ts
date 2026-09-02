@@ -790,6 +790,75 @@ const EDIT_PATHS = ['final.mp4', 'transcript.json', 'edit.json'] as const
 
 const editPathSchema = z.enum(EDIT_PATHS)
 
+/**
+ * The third door into a walkthrough's file set: reviewer-attached files, all
+ * under one frozen prefix so nothing here can collide with what the recorder
+ * uploads (report.md, rec-NN/…) or the editor writes (EDIT_PATHS). Attachments
+ * are part of the agent's brief — a spec, a CSV, the spreadsheet the narration
+ * referenced — so they exist on agent-kind walkthroughs only.
+ */
+const ATTACHMENTS_PREFIX = 'attachments/'
+// A brief's supporting document, not a recording: 100 MB covers any real spec,
+// export or archive without opening a second video-sized upload path.
+const ATTACHMENT_MAX_BYTES = 100 * 1024 * 1024
+const MAX_ATTACHMENTS = 20
+
+/**
+ * A user-picked filename, made safe enough to become an S3 key segment. Keeps
+ * the extension (the agent routes on it), replaces everything isSafePath would
+ * refuse, and never returns an empty name.
+ */
+function attachmentName(raw: string): string {
+  const base = raw.split(/[/\\]/).pop() ?? ''
+  const clean = base
+    .replace(/[^\w.\- ()]+/g, '_')
+    .replace(/^[^\w]+/, '')
+    .trim()
+    .slice(0, 120)
+  return clean.length > 0 ? clean : 'file'
+}
+
+/**
+ * A walkthrough the caller may attach files to: agent kind (attachments ride
+ * the brief), finalized, not a split-out child (children are metadata-only by
+ * construction), and in a space they belong to.
+ */
+async function requireAttachable(userId: string, walkthroughId: string) {
+  const g = await prisma.walkthrough.findUnique({
+    where: { id: walkthroughId },
+    select: {
+      id: true,
+      teamId: true,
+      userId: true,
+      kind: true,
+      finalizedAt: true,
+      parentId: true,
+      bytes: true,
+    },
+  })
+  if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
+  await requireSpaceAccess(userId, g)
+  if (g.kind !== 'agent') {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: 'Files attach to agent walkthroughs — they ride the agent brief',
+    })
+  }
+  if (!g.finalizedAt) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: 'This walkthrough never finished uploading',
+    })
+  }
+  if (g.parentId) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: 'A split-out task carries no files — attach to its parent',
+    })
+  }
+  return g
+}
+
 /** Sizes in a refusal are for a person to read, so they are gigabytes. */
 const gbLabel = (bytes: number | bigint) =>
   `${(Number(bytes) / (1024 * 1024 * 1024)).toFixed(1)} GB`
@@ -1028,7 +1097,11 @@ const walkthroughsRouter = router({
     const framedIds = rows.filter((g) => g.kind !== 'human').map((g) => g.id)
     const thumbFiles = framedIds.length
       ? await prisma.walkthroughFile.findMany({
-          where: { walkthroughId: { in: framedIds }, status: 'uploaded', path: { contains: '/frames/' } },
+          where: {
+            walkthroughId: { in: framedIds },
+            status: 'uploaded',
+            path: { contains: '/frames/' },
+          },
           orderBy: [{ walkthroughId: 'asc' }, { path: 'asc' }],
           distinct: ['walkthroughId'],
           select: { walkthroughId: true, path: true },
@@ -1061,7 +1134,9 @@ const walkthroughsRouter = router({
           // Presigning is local HMAC signing — no S3 round trip — so one per
           // card at ≤200 items is cheap. Human kind or no frames → null.
           thumbUrl: thumbPath
-            ? await presignGet(walkthroughKey(spaceId({ teamId: g.teamId, userId: g.userId }), g.id, thumbPath))
+            ? await presignGet(
+                walkthroughKey(spaceId({ teamId: g.teamId, userId: g.userId }), g.id, thumbPath)
+              )
             : null,
         }
       })
@@ -1437,9 +1512,9 @@ const walkthroughsRouter = router({
         })
       }
       const space: SpaceOwner = { teamId: g.teamId, userId: g.userId }
-      const reportMd = await getObjectText(
-        walkthroughKey(spaceId(space), g.id, 'report.md')
-      ).catch(() => null)
+      const reportMd = await getObjectText(walkthroughKey(spaceId(space), g.id, 'report.md')).catch(
+        () => null
+      )
       if (!reportMd) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
@@ -1455,8 +1530,7 @@ const walkthroughsRouter = router({
         durationMs: g.durationMs,
         reportMd,
         comments: comments.map(
-          (c) =>
-            `${c.atMs === null ? '' : `[${commentStamp(c.atMs)}] `}${c.authorName}: ${c.text}`
+          (c) => `${c.atMs === null ? '' : `[${commentStamp(c.atMs)}] `}${c.authorName}: ${c.text}`
         ),
       })
       if (!tasks) {
@@ -1713,7 +1787,11 @@ const walkthroughsRouter = router({
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'Only keyframes can be deleted' })
       }
       const files = await prisma.walkthroughFile.findMany({
-        where: { walkthroughId: input.walkthroughId, path: { in: input.paths }, status: 'uploaded' },
+        where: {
+          walkthroughId: input.walkthroughId,
+          path: { in: input.paths },
+          status: 'uploaded',
+        },
       })
       if (files.length === 0) return { ok: true, deleted: 0 }
       await prisma.walkthroughFile.deleteMany({ where: { id: { in: files.map((f) => f.id) } } })
@@ -1772,7 +1850,10 @@ const walkthroughsRouter = router({
       if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
       await requireSpaceAccess(ctx.session.user.id, g)
       if (g.kind === 'human') {
-        throw new TRPCError({ code: 'BAD_REQUEST', message: 'only agent walkthroughs re-transcribe' })
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'only agent walkthroughs re-transcribe',
+        })
       }
       // A split-out task is metadata only — no takes, no recording.json to rewrite.
       if (g.parentId) {
@@ -1830,7 +1911,10 @@ const walkthroughsRouter = router({
           .map((seg) => {
             const spoken =
               seg.d ??
-              Math.max(RETRANSCRIBE_MIN_LINE_MS, seg.text.split(/\s+/).length * RETRANSCRIBE_WORD_MS)
+              Math.max(
+                RETRANSCRIBE_MIN_LINE_MS,
+                seg.text.split(/\s+/).length * RETRANSCRIBE_WORD_MS
+              )
             const end = seg.t + spoken
             return {
               at: retranscribeMmss(seg.t),
@@ -1854,6 +1938,286 @@ const walkthroughsRouter = router({
       // re-transcribe never blocks or throws into the response.
       void indexWalkthrough(input.walkthroughId)
       return { ok: true, takes: input.takes.length }
+    }),
+
+  /**
+   * Everything the attachments panel needs in one read: the attached files
+   * (presigned, named for download) and the detection pass's suggestions.
+   * View access, so the admin read-only path still renders the list —
+   * `canEdit` is the server's word on whether the controls should exist.
+   */
+  attachments: protectedProcedure
+    .input(z.object({ walkthroughId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      const g = await prisma.walkthrough.findUnique({
+        where: { id: input.walkthroughId },
+        select: {
+          id: true,
+          teamId: true,
+          userId: true,
+          kind: true,
+          finalizedAt: true,
+          parentId: true,
+          files: {
+            where: { status: 'uploaded', path: { startsWith: ATTACHMENTS_PREFIX } },
+            orderBy: { path: 'asc' },
+          },
+          suggestions: { orderBy: { createdAt: 'asc' } },
+        },
+      })
+      if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
+      const { isMember } = await requireViewAccess(ctx.session.user.id, g)
+      return {
+        canEdit: isMember && g.kind === 'agent' && g.finalizedAt !== null && g.parentId === null,
+        files: await Promise.all(
+          g.files.map(async (f) => {
+            const name = f.path.slice(ATTACHMENTS_PREFIX.length)
+            return {
+              path: f.path,
+              name,
+              size: f.size,
+              contentType: f.contentType,
+              // Signed as an attachment so following the link saves the file
+              // under its own name instead of rendering in the tab.
+              url: await presignGet(walkthroughKey(spaceId(g), g.id, f.path), {
+                downloadAs: name,
+              }),
+            }
+          })
+        ),
+        suggestions: g.suggestions.map((s) => ({
+          id: s.id,
+          label: s.label,
+          quote: s.quote,
+          atMs: s.atMs,
+          dismissed: s.dismissedAt !== null,
+          attachedPath: s.attachedPath,
+        })),
+      }
+    }),
+
+  /**
+   * Presigned PUTs for reviewer attachments — the same two-phase shape as
+   * presignEdit, under the attachments/ prefix. Re-using a name replaces that
+   * attachment (upsert to pending, object overwritten in place); distinct
+   * picks in one call that sanitize to the same name get suffixed apart.
+   */
+  presignAttachments: protectedProcedure
+    .input(
+      z.object({
+        walkthroughId: z.string(),
+        files: z
+          .array(
+            z.object({
+              name: z.string().trim().min(1).max(200),
+              size: z.number().int().min(1).max(ATTACHMENT_MAX_BYTES),
+              contentType: z.string().min(1).max(120),
+            })
+          )
+          .min(1)
+          .max(10),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const g = await requireAttachable(ctx.session.user.id, input.walkthroughId)
+      const space: SpaceOwner = { teamId: g.teamId, userId: g.userId }
+
+      // Sanitize, then keep this call's paths distinct: "Q3 report.pdf" and
+      // "q3/report.pdf" both sanitize to the same key, and two PUTs racing one
+      // object is nobody's intent.
+      const taken = new Set<string>()
+      const files = input.files.map((f) => {
+        let name = attachmentName(f.name)
+        if (taken.has(name)) {
+          const dot = name.lastIndexOf('.')
+          const stem = dot > 0 ? name.slice(0, dot) : name
+          const ext = dot > 0 ? name.slice(dot) : ''
+          let n = 2
+          while (taken.has(`${stem}-${n}${ext}`)) n++
+          name = `${stem}-${n}${ext}`
+        }
+        taken.add(name)
+        return { ...f, name, path: `${ATTACHMENTS_PREFIX}${name}` }
+      })
+
+      const existing = await prisma.walkthroughFile.findMany({
+        where: { walkthroughId: g.id, status: 'uploaded' },
+        select: { path: true, size: true },
+      })
+      const attachedCount = existing.filter(
+        (f) =>
+          f.path.startsWith(ATTACHMENTS_PREFIX) &&
+          !taken.has(f.path.slice(ATTACHMENTS_PREFIX.length))
+      ).length
+      if (attachedCount + files.length > MAX_ATTACHMENTS) {
+        throw new TRPCError({
+          code: 'PAYLOAD_TOO_LARGE',
+          message: `A walkthrough carries at most ${MAX_ATTACHMENTS} attachments`,
+        })
+      }
+
+      // Same cap arithmetic as presignEdit: what the walkthrough will weigh
+      // once these land, replaced paths counted once.
+      const replacing = new Set(files.map((f) => f.path))
+      const keptBytes = existing
+        .filter((f) => !replacing.has(f.path))
+        .reduce((sum, f) => sum + f.size, 0)
+      const nextBytes = keptBytes + files.reduce((sum, f) => sum + f.size, 0)
+      if (nextBytes > MAX_WALKTHROUGH_BYTES) {
+        throw new TRPCError({
+          code: 'PAYLOAD_TOO_LARGE',
+          message: `This walkthrough would be ${gbLabel(nextBytes)}; the limit is ${gbLabel(MAX_WALKTHROUGH_BYTES)}`,
+        })
+      }
+      const stored = await prisma.walkthrough.aggregate({
+        where: spaceWhere(space),
+        _sum: { bytes: true },
+      })
+      const otherBytes = (stored._sum.bytes ?? 0n) - g.bytes
+      if (otherBytes + BigInt(nextBytes) > BigInt(SPACE_QUOTA_BYTES)) {
+        throw new TRPCError({
+          code: 'PAYLOAD_TOO_LARGE',
+          message: `Storage quota reached: this space holds ${gbLabel(otherBytes)} of ${gbLabel(SPACE_QUOTA_BYTES)}.`,
+        })
+      }
+
+      const uploads: Array<{ path: string; name: string; contentType: string; url: string }> = []
+      for (const f of files) {
+        await prisma.walkthroughFile.upsert({
+          where: { walkthroughId_path: { walkthroughId: g.id, path: f.path } },
+          create: {
+            walkthroughId: g.id,
+            path: f.path,
+            size: f.size,
+            contentType: f.contentType,
+            status: 'pending',
+          },
+          update: { size: f.size, contentType: f.contentType, status: 'pending' },
+        })
+        uploads.push({
+          path: f.path,
+          name: f.name,
+          contentType: f.contentType,
+          url: await presignPut(
+            walkthroughKey(spaceId(space), g.id, f.path),
+            f.contentType,
+            f.size
+          ),
+        })
+      }
+      return { walkthroughId: g.id, uploads }
+    }),
+
+  /**
+   * The PUTs landed: rows flip to uploaded, `bytes` is recomputed from what is
+   * actually uploaded (finalizeEdit's discipline), and any suggestion this
+   * upload was answering gets its `attachedPath` stamped so the nudge retires.
+   */
+  finalizeAttachments: protectedProcedure
+    .input(
+      z.object({
+        walkthroughId: z.string(),
+        paths: z
+          .array(
+            z
+              .string()
+              .min(1)
+              .max(512)
+              .refine((p) => p.startsWith(ATTACHMENTS_PREFIX))
+          )
+          .min(1)
+          .max(10),
+        fulfils: z
+          .array(z.object({ suggestionId: z.string(), path: z.string().max(512) }))
+          .max(10)
+          .optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const g = await requireAttachable(ctx.session.user.id, input.walkthroughId)
+      await prisma.walkthroughFile.updateMany({
+        where: { walkthroughId: g.id, path: { in: input.paths } },
+        data: { status: 'uploaded' },
+      })
+      const uploaded = await prisma.walkthroughFile.aggregate({
+        where: { walkthroughId: g.id, status: 'uploaded' },
+        _sum: { size: true },
+      })
+      const bytes = BigInt(uploaded._sum.size ?? 0)
+      await prisma.walkthrough.update({ where: { id: g.id }, data: { bytes } })
+      for (const f of input.fulfils ?? []) {
+        if (!input.paths.includes(f.path)) continue
+        await prisma.walkthroughFileSuggestion.updateMany({
+          where: { id: f.suggestionId, walkthroughId: g.id },
+          data: { attachedPath: f.path },
+        })
+      }
+      log.info(`[attachments] ${input.paths.length} attached to walkthrough ${g.id}`)
+      return { ok: true, bytes: Number(bytes) }
+    }),
+
+  /**
+   * Remove one attachment. Row first, S3 second (deleteFrames' rationale: a
+   * crash in between orphans an object, never a row presigning a dead key).
+   * A suggestion this file had satisfied gets its nudge back.
+   */
+  deleteAttachment: protectedProcedure
+    .input(
+      z.object({
+        walkthroughId: z.string(),
+        path: z
+          .string()
+          .min(1)
+          .max(512)
+          .refine((p) => p.startsWith(ATTACHMENTS_PREFIX)),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      // The row lookup already gates the delete, but this string becomes an S3
+      // key — keep the standing rule that every client path passes isSafePath.
+      if (!isSafePath(input.path)) throw new TRPCError({ code: 'BAD_REQUEST' })
+      const g = await prisma.walkthrough.findUnique({
+        where: { id: input.walkthroughId },
+        select: { teamId: true, userId: true },
+      })
+      if (!g) throw new TRPCError({ code: 'NOT_FOUND' })
+      await requireSpaceAccess(ctx.session.user.id, g)
+      const file = await prisma.walkthroughFile.findUnique({
+        where: { walkthroughId_path: { walkthroughId: input.walkthroughId, path: input.path } },
+      })
+      if (!file) return { ok: true }
+      await prisma.walkthroughFile.delete({ where: { id: file.id } })
+      const uploaded = await prisma.walkthroughFile.aggregate({
+        where: { walkthroughId: input.walkthroughId, status: 'uploaded' },
+        _sum: { size: true },
+      })
+      await prisma.walkthrough.update({
+        where: { id: input.walkthroughId },
+        data: { bytes: BigInt(uploaded._sum.size ?? 0) },
+      })
+      await prisma.walkthroughFileSuggestion.updateMany({
+        where: { walkthroughId: input.walkthroughId, attachedPath: input.path },
+        data: { attachedPath: null },
+      })
+      await deleteKeys([walkthroughKey(spaceId(g), input.walkthroughId, input.path)])
+      return { ok: true }
+    }),
+
+  /** A human said no to a nudge. The row stays — the brief must not resurface it. */
+  dismissSuggestion: protectedProcedure
+    .input(z.object({ suggestionId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const s = await prisma.walkthroughFileSuggestion.findUnique({
+        where: { id: input.suggestionId },
+        select: { id: true, walkthrough: { select: { teamId: true, userId: true } } },
+      })
+      if (!s) throw new TRPCError({ code: 'NOT_FOUND' })
+      await requireSpaceAccess(ctx.session.user.id, s.walkthrough)
+      await prisma.walkthroughFileSuggestion.update({
+        where: { id: s.id },
+        data: { dismissedAt: new Date() },
+      })
+      return { ok: true }
     }),
 
   assignProject: protectedProcedure
@@ -2148,7 +2512,10 @@ const walkthroughsRouter = router({
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'Refine is already running' })
       }
       if (g.refineRuns >= MAX_REFINE_RUNS_PER_WALKTHROUGH) {
-        throw new TRPCError({ code: 'FORBIDDEN', message: 'Refine limit reached for this walkthrough' })
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Refine limit reached for this walkthrough',
+        })
       }
       if (!refineConfigured()) {
         throw new TRPCError({
@@ -2952,7 +3319,10 @@ const adminRouter = router({
       }),
       prisma.walkthroughFile.count(),
     ])
-    const shape = (r: { _count: number; _sum: { bytes: bigint | null; durationMs: number | null } }) => ({
+    const shape = (r: {
+      _count: number
+      _sum: { bytes: bigint | null; durationMs: number | null }
+    }) => ({
       walkthroughs: r._count,
       bytes: Number(r._sum.bytes ?? 0),
       durationMs: r._sum.durationMs ?? 0,
@@ -2984,17 +3354,15 @@ const adminRouter = router({
   }),
 
   /** Persists the validated planning model under AdminSetting 'pricing-model'. */
-  setPricingModel: protectedProcedure
-    .input(pricingModelSchema)
-    .mutation(async ({ ctx, input }) => {
-      await requireAdmin(ctx.session.user.id)
-      await prisma.adminSetting.upsert({
-        where: { key: 'pricing-model' },
-        create: { key: 'pricing-model', valueJson: input },
-        update: { valueJson: input },
-      })
-      return { ok: true }
-    }),
+  setPricingModel: protectedProcedure.input(pricingModelSchema).mutation(async ({ ctx, input }) => {
+    await requireAdmin(ctx.session.user.id)
+    await prisma.adminSetting.upsert({
+      where: { key: 'pricing-model' },
+      create: { key: 'pricing-model', valueJson: input },
+      update: { valueJson: input },
+    })
+    return { ok: true }
+  }),
 
   /**
    * Monthly cost-trend series for /admin/costs: the last six calendar months
@@ -3296,7 +3664,13 @@ const adminRouter = router({
     // 'pro'/'biz' here are a hand comp — a full-access grant with no Stripe
     // subscription. reconcile never touches an account without a Stripe customer,
     // so a comp sticks until an admin flips it back.
-    .input(z.object({ userId: z.string(), feature: z.enum(['team', 'pro', 'biz']), enabled: z.boolean() }))
+    .input(
+      z.object({
+        userId: z.string(),
+        feature: z.enum(['team', 'pro', 'biz']),
+        enabled: z.boolean(),
+      })
+    )
     .mutation(async ({ ctx, input }) => {
       await requireAdmin(ctx.session.user.id)
       const u = await prisma.user.findUnique({
@@ -3353,7 +3727,9 @@ const prefsRouter = router({
     }
   }),
   set: protectedProcedure
-    .input(z.object({ notifyUploads: z.boolean().optional(), notifyDigest: z.boolean().optional() }))
+    .input(
+      z.object({ notifyUploads: z.boolean().optional(), notifyDigest: z.boolean().optional() })
+    )
     .mutation(async ({ ctx, input }) => {
       await prisma.user.update({
         where: { id: ctx.session.user.id },
@@ -3393,23 +3769,24 @@ const usageRouter = router({
         })
       : []
     const spaces = await Promise.all(
-      [{ teamId: null as string | null, name: 'Personal' }, ...teams.map((t) => ({ teamId: t.id, name: t.name }))].map(
-        async (s) => {
-          const totals = await prisma.walkthrough.aggregate({
-            where: spaceWhere(toSpace(s.teamId, me)),
-            _sum: { bytes: true },
-            _count: true,
-          })
-          return {
-            teamId: s.teamId,
-            name: s.name,
-            bytes: Number(totals._sum.bytes ?? 0n),
-            walkthroughs: totals._count,
-            quotaBytes: SPACE_QUOTA_BYTES,
-            maxWalkthroughs: SPACE_MAX_WALKTHROUGHS,
-          }
+      [
+        { teamId: null as string | null, name: 'Personal' },
+        ...teams.map((t) => ({ teamId: t.id, name: t.name })),
+      ].map(async (s) => {
+        const totals = await prisma.walkthrough.aggregate({
+          where: spaceWhere(toSpace(s.teamId, me)),
+          _sum: { bytes: true },
+          _count: true,
+        })
+        return {
+          teamId: s.teamId,
+          name: s.name,
+          bytes: Number(totals._sum.bytes ?? 0n),
+          walkthroughs: totals._count,
+          quotaBytes: SPACE_QUOTA_BYTES,
+          maxWalkthroughs: SPACE_MAX_WALKTHROUGHS,
         }
-      )
+      })
     )
 
     const cloud = await cloudStatus(me)
@@ -3543,7 +3920,10 @@ const billingRouter = router({
         cancel_url: `${origin}/upgrade?checkout=cancel`,
       })
       if (!session.url) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Stripe returned no checkout URL.' })
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Stripe returned no checkout URL.',
+        })
       }
       return { url: session.url }
     }),

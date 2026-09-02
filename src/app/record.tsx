@@ -29,6 +29,7 @@ import { TakeList } from '~/components/record/takes'
 import { Button, buttonVariants } from '~/components/ui/button'
 import { Input } from '~/components/ui/input'
 import { Label } from '~/components/ui/label'
+import { AttachmentsPanel } from '~/components/viewer/attachments-panel'
 import { useCopy } from '~/components/viewer/use-copy'
 import { TokenLimitNotice, isTokenLimitError } from '~/components/token-manager'
 import { useCaptureToken } from '~/lib/capture-token'
@@ -357,7 +358,7 @@ export function RecordPage() {
         setVoiceMs(Date.now() - entry.startedAt)
         setVoiceBlob(blob.size > 0 ? blob : null)
         setPhase(blob.size > 0 ? 'review' : 'idle')
-        if (blob.size === 0) setRecordError("nothing was recorded — check the mic and try again")
+        if (blob.size === 0) setRecordError('nothing was recorded — check the mic and try again')
       }
       recorder.start(1000)
       voiceRec.current = entry
@@ -1252,7 +1253,10 @@ export function RecordPage() {
               to {destinationName} · {sendTitle}
             </p>
           </div>
-          <StageList progress={progress} rows={kind === 'voice' ? VOICE_RECORD_ROWS : RECORD_ROWS} />
+          <StageList
+            progress={progress}
+            rows={kind === 'voice' ? VOICE_RECORD_ROWS : RECORD_ROWS}
+          />
           <p className="text-muted-foreground font-mono text-xs">
             keep this tab open — the work happens here, not on the server
           </p>
@@ -1284,6 +1288,17 @@ export function RecordPage() {
               shipped without a transcript — either nothing was said, or the server's transcription
               is off right now
             </p>
+          )}
+
+          {/* Agent-bound walkthroughs (voice notes included) can carry files —
+              attach anything the narration referenced before walking away. */}
+          {kind !== 'human' && (
+            <div className="space-y-2">
+              <p className="text-muted-foreground font-mono text-xs tracking-widest uppercase">
+                Attachments
+              </p>
+              <AttachmentsPanel walkthroughId={result.walkthroughId} poll />
+            </div>
           )}
 
           <div className="flex flex-wrap items-center gap-3">

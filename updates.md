@@ -200,6 +200,16 @@ mint surfaces (/connect, /recorder, /phone, /record, /upload) — revoke right w
 `{token,id}` (back-comptible with the old bare-`hb_` value) and best-effort revokes the dead token
 on 401 re-mint. Per-browser id tracking, so it only ever revokes a token THIS machine minted, never
 another device's. Typecheck + prod build green. No server changes (revoke/create/limits untouched).
+## 2026-08-31 — Attachments + "you mentioned a file" nudges
+Asked: attach files to a walkthrough; ideally it notices a referenced file and asks for it.
+Built: `WalkthroughFileSuggestion` + Haiku detection at finalize (`server/references.ts`),
+attachments as `attachments/*` WalkthroughFile rows over new tRPC
+(attachments/presignAttachments/finalizeAttachments/deleteAttachment/dismissSuggestion),
+`--- attachments ---` + MISSING lines in the agent brief, AttachmentsPanel in the desk (overview +
+brief tabs) and /upload + /record done screens (per plans/2026-08-31-attachments.md). Typecheck + build green;
+schema pushed nowhere (.env→prod hazard) — dev/`handback_test` need `db push` by hand.
+Touched: prisma/schema.prisma, server/{references,router,ingest,walkthroughs-api,mcp-format}.ts,
+src/components/viewer/{attachments-panel,desk/overview-tab,desk/brief-tab}.tsx, src/app/{upload,record}.tsx
 
 ## 2026-08-19 — Fix: human upload died client-side on "the report is missing"
 Asked: /upload for-a-person run failed with "the report is missing" despite 200s (those were

@@ -12,6 +12,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { AttachmentsPanel } from '~/components/viewer/attachments-panel'
 import { CLIP_ACCEPT, ClipList, type Clip } from '~/components/phone/clip-list'
 import { DestinationControl, type Destination } from '~/components/phone/destination'
 import { IntentControl, type Intent } from '~/components/phone/intent'
@@ -433,6 +434,17 @@ export function UploadPage() {
               shipped without keyframes — this browser couldn't decode the video, so the clip itself
               carries the picture
             </p>
+          )}
+
+          {/* Mentioned a spec, a sheet, a log? Attach it now, while it's in
+              hand — the panel polls briefly for the server's own nudges. */}
+          {kind === 'agent' && (
+            <div className="space-y-2">
+              <p className="text-muted-foreground font-mono text-xs tracking-widest uppercase">
+                Attachments
+              </p>
+              <AttachmentsPanel walkthroughId={result.walkthroughId} poll />
+            </div>
           )}
 
           <div className="flex flex-wrap items-center gap-3">

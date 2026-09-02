@@ -4,6 +4,7 @@
 // one is live — rendered, because here it's for a human to check, not to copy.
 
 import { useQuery } from '@tanstack/react-query'
+import { AttachmentsPanel } from '../attachments-panel'
 import { Markdown } from './markdown'
 import type { Walkthrough } from '../types'
 
@@ -34,6 +35,7 @@ export function BriefTab({
           the working brief — written by refine; agents read this instead of the raw report
         </p>
         <Markdown className="max-w-[720px]">{walkthrough.refinedBriefMd}</Markdown>
+        <AttachmentsPanel framed walkthroughId={walkthrough.id} />
       </div>
     )
   }
@@ -55,6 +57,7 @@ export function BriefTab({
           <div className="bg-muted h-4 w-[80%] animate-pulse rounded" />
         </div>
       )}
+      <AttachmentsPanel framed walkthroughId={walkthrough.id} />
     </div>
   )
 }

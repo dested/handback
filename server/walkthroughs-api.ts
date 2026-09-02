@@ -295,6 +295,9 @@ export type WalkthroughDetail = {
   notes: WalkthroughNoteRef[]
   // Margin notes from humans, oldest first — part of the brief.
   comments: WalkthroughCommentRef[]
+  // Files the narration referenced that nobody attached (open suggestions from
+  // server/references.ts) — the brief tells the agent the evidence is missing.
+  missingFiles: Array<{ label: string; quote: string | null; atMs: number | null }>
 }
 
 /** Parses `Walkthrough.pointsJson` leniently — a bad field degrades to no points
@@ -353,6 +356,12 @@ export async function getWalkthroughDetail(
       files: { where: { status: 'uploaded' }, orderBy: { path: 'asc' } },
       notes: { orderBy: { createdAt: 'asc' } },
       comments: { orderBy: { createdAt: 'asc' } },
+      // Open only: dismissed nudges and satisfied ones (the file is in `files`)
+      // have nothing left to tell an agent.
+      suggestions: {
+        where: { dismissedAt: null, attachedPath: null },
+        orderBy: { createdAt: 'asc' },
+      },
     },
   })
   if (!walkthrough || !(await inScope(auth, walkthrough)) || !walkthrough.finalizedAt) return null
@@ -438,6 +447,11 @@ export async function getWalkthroughDetail(
       atMs: c.atMs,
       text: c.text,
       createdAt: c.createdAt.toISOString(),
+    })),
+    missingFiles: walkthrough.suggestions.map((s) => ({
+      label: s.label,
+      quote: s.quote,
+      atMs: s.atMs,
     })),
   }
 }

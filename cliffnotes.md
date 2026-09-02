@@ -1,7 +1,7 @@
 # Handback — CliffNotes
 
 > Living map of the project. Read this before any coding session.
-> Last updated: 2026-08-23. Visual language → `ui.md` · why → `decisions.md` ·
+> Last updated: 2026-09-02. Visual language → `ui.md` · why → `decisions.md` ·
 > log → `updates.md`.
 >
 > **2026-08-23 mega-wave** (plans/2026-08-23-fable5-mega-wave.md): sidebar app
@@ -209,6 +209,9 @@ server/
                         provider-local per chunk) when DEEPGRAM_API_KEY set, else Groq
                         whisper-large-v3-turbo; segments in ms
   polish.ts             transcript cleanup via claude-haiku-4-5 — text only, timings untouched
+  references.ts         "you mentioned a file": Haiku reads report.md at finalize (agent kind,
+                        null→set transition only) → WalkthroughFileSuggestion nudge rows;
+                        degrade-to-nothing like polish, unmetered
   structure.ts          the split pass: report.md + comments → 1–10 proposed tasks via
                         claude-sonnet-5 structured outputs (no prefill); every
                         failure degrades to null like polish. childBriefMd() writes a child's
@@ -574,6 +577,9 @@ edit) · **Project.instructions** (standing agent context, prepended to every br
 project) · **User.notifyResults** (+ unsubscribe kind 'results'). Statuses are now
 open | in_review | **needs_info** | resolved (needs_info = agent asked, answer flips back
 to open; expiry cleared like open).
+**WalkthroughFileSuggestion** (the "you mentioned a file" nudge: label/quote/atMs from
+server/references.ts; `dismissedAt` = human said no, `attachedPath` = an attachment satisfied
+it; open ones ride the brief as MISSING lines).
 
 ## Storage (Cloudflare R2 since 2026-08-13; S3 before that)
 
@@ -1110,6 +1116,18 @@ reaches the container on a plain push.
   METERED via `checkAndReservePolish` and human-confirmed before any row is written (the
   propose/apply split exists so the model never creates tasks unreviewed). The viewer's
   child page renders TaskBrief only — don't hand a zero-file walkthrough to AgentView.
+- **Attachments are the THIRD door into a walkthrough's file set, and the prefix is load-bearing**
+  (2026-08-31): reviewer-attached files are WalkthroughFile rows under `attachments/` — declare
+  (door 1) and `presignEdit` (door 2) can't collide with it. tRPC `presignAttachments` (agent
+  kind, finalized, not a split child; names server-sanitized; 100 MB/file, 20/walkthrough,
+  usual byte caps) → PUT → `finalizeAttachments` (recomputes `bytes`, stamps
+  `suggestion.attachedPath` via `fulfils`). The brief pulls `attachments/*` OUT of the files
+  listing into `--- attachments ---`, plus a `MISSING:` line per open suggestion. Intake pages
+  (/upload, /record done screens) attach AFTER finalize through this same tRPC pair —
+  deliberately NOT via the declare file list, which would fork the mirrored capture pipeline
+  (decisions.md 2026-08-31). `AttachmentsPanel` (viewer/attachments-panel.tsx) is the one UI:
+  self-fetching on `walkthroughs.attachments`, `framed` in the desk's overview (open state) + brief tabs, `poll` on intake done
+  screens (detection is async at finalize). Deleting an attachment restores its nudge.
 - **A voice note lives in memory until it's sent** (2026-08-13, deliberate): /record's "just
   talk" holds the MediaRecorder blob in component state — no IDB, a reload loses it, and the
   UI says so. Thirty seconds of talking isn't worth the crash-recovery machinery. It uploads
@@ -1334,6 +1352,12 @@ reaches the container on a plain push.
   Enterprise, all "coming soon". Cost model: real cost ≈ $1.50/recorded-hr (refine-dominated;
   /admin/costs understates ~10× — fix pending); $20/$40 underwater on a filled quota.
   e2e re-baselined 4/4; states live-verified in Chrome. Pushed to prod (41520b0).
+- **Done (2026-08-31)** — **attachments + "you mentioned a file"**
+  (`plans/2026-08-31-attachments.md`): `attachments/*` files over new tRPC (presign/finalize/
+  delete + `walkthroughs.attachments`), Haiku detection at finalize (`server/references.ts` →
+  `WalkthroughFileSuggestion`), brief `--- attachments ---` + MISSING lines, AttachmentsPanel in
+  the desk (overview + brief tabs) + /upload + /record done screens. Typecheck + build green; **schema pushed
+  NOWHERE** (the `.env`→prod hazard) — dev/`handback_test` by hand, prod via predeploy.
 - **Next** — **deploy, then re-test the loop**: `/mcp` and `/connect` only exist locally until the
   next push to `main`, so the command `/connect` prints for handback.dev 404s until then. Sal's
   Drydock/DNS checklist in the rename plan (zone, project, S3 via

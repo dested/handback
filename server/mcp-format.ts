@@ -18,7 +18,13 @@ export type FormattableWalkthrough = {
   // and report back on, one outcome per point. Optional: a wire body from an
   // older server carries neither.
   digestMd?: string | null
-  points?: Array<{ id: string; title: string; detail: string; severity: string; atMs: number | null }> | null
+  points?: Array<{
+    id: string
+    title: string
+    detail: string
+    severity: string
+    atMs: number | null
+  }> | null
   projectInstructions?: string | null
   curation?: {
     frames: Array<{ path: string; caption: string; atMs: number | null }>
@@ -42,6 +48,11 @@ export type FormattableWalkthrough = {
     atMs: number | null
     text: string
     createdAt: string
+  }>
+  missingFiles?: Array<{
+    label: string
+    quote: string | null
+    atMs: number | null
   }>
   [key: string]: unknown
 }
@@ -123,10 +134,24 @@ export function formatWalkthrough(walkthrough: FormattableWalkthrough): string {
     points,
     projectInstructions,
     curation,
+    missingFiles,
     ...meta
   } = walkthrough
   const maxFrames = briefFrameLimit(meta.durationMs)
   const curatedFrames = curation?.frames ?? []
+
+  // Reviewer-attached files are evidence the narration asked for — pulled out
+  // of the file listing into their own section right after the report, with a
+  // MISSING line for anything the recording mentioned that nobody attached.
+  const attachments = files.filter((f) => f.path.startsWith('attachments/'))
+  const listed = files.filter((f) => !f.path.startsWith('attachments/'))
+  const attachmentLines = [
+    ...attachments.map((f) => `${f.path} — ${f.url}`),
+    ...(missingFiles ?? []).map(
+      (m) =>
+        `MISSING: the recording mentions "${m.label}"${m.atMs === null ? '' : ` at ${mmss(m.atMs)}`} but no file was attached${m.quote ? ` — "${m.quote}"` : ''}`
+    ),
+  ]
 
   // Files section. With a curated set, every frame is pulled from the flat list
   // (the curated block above is the sample that matters) and the rest are a
@@ -146,7 +171,7 @@ export function formatWalkthrough(walkthrough: FormattableWalkthrough): string {
   const listLines: string[] = []
   let framesOmitted = 0
   if (curatedFrames.length > 0) {
-    for (const f of files) {
+    for (const f of listed) {
       if (isFrame(f.path)) {
         framesOmitted++
         continue
@@ -160,7 +185,7 @@ export function formatWalkthrough(walkthrough: FormattableWalkthrough): string {
     }
   } else {
     let framesShown = 0
-    for (const f of files) {
+    for (const f of listed) {
       if (isFrame(f.path)) {
         if (framesShown >= maxFrames) {
           framesOmitted++
@@ -202,6 +227,9 @@ export function formatWalkthrough(walkthrough: FormattableWalkthrough): string {
     ...(projectInstructions ? ['--- project instructions ---', projectInstructions] : []),
     '--- report.md ---',
     reportMd ?? '(no report.md was uploaded with this walkthrough)',
+    // Files the reviewer attached to support the narration — read these like
+    // the report, not like frames.
+    ...(attachmentLines.length > 0 ? ['--- attachments ---', attachmentLines.join('\n')] : []),
     // The reviewer's cut spans: markers only (the video is never re-encoded), so
     // the agent must be told not to trust anything shown inside them.
     ...(curation && curation.excluded.length > 0
@@ -219,15 +247,15 @@ export function formatWalkthrough(walkthrough: FormattableWalkthrough): string {
       ? [
           '--- comments ---',
           comments
-            .map(
-              (c) => `${c.atMs === null ? '' : `[${mmss(c.atMs)}] `}${c.authorName}: ${c.text}`
-            )
+            .map((c) => `${c.atMs === null ? '' : `[${mmss(c.atMs)}] `}${c.authorName}: ${c.text}`)
             .join('\n'),
         ]
       : []),
     // Chronological, so "what happened since the recording" reads top to
     // bottom: result, send-back, result again. Absent entirely when empty.
-    ...(notes && notes.length > 0 ? ['--- review thread ---', notes.map(formatNote).join('\n\n')] : []),
+    ...(notes && notes.length > 0
+      ? ['--- review thread ---', notes.map(formatNote).join('\n\n')]
+      : []),
     ...fileBlocks,
   ].join('\n\n')
 }
