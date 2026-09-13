@@ -495,13 +495,24 @@ export function Home({
       {/* The one thing the panel can't answer for itself, and the reason a
           walkthrough is worth recording at all. */}
       {link && !ctxFailed && (
-        <p className="home-foot">
+        <p className="home-mcp">
           An agent pulls these over MCP —{' '}
           <button className="link" onClick={() => openTab(`${serverUrl}/connect`)}>
             connect one
           </button>
         </p>
       )}
+      {/* The app on the left, the settings drawer on the right — the review screen
+          reaches settings by stepping back here. */}
+      <div className="home-foot">
+        <button className="link" onClick={() => openTab(inboxUrl(serverUrl || DEFAULT_SERVER))}>
+          Open Handback ↗
+        </button>
+        <span className="spacer" />
+        <button className="foot-settings" onClick={onOpenSettings}>
+          Settings
+        </button>
+      </div>
     </div>
   );
 }

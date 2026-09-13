@@ -1,12 +1,12 @@
 /*
  * The side panel's own styles — the whole shell: header, the live readout, the
  * gripe's title line, the parts list that is the review screen, settings, and the
- * handoff row. `styles.css` is the shared token sheet (paper, ink, cobalt, the
- * type scale); this is the surface built out of those tokens.
+ * handoff footer. `styles.css` is the shared token sheet (surface, ink, cobalt,
+ * the type scale); this is the surface built out of those tokens.
  *
- * Handback's one law: light only, nothing orange. Warm paper ground, white cards
- * brighter than the page, hairline rules instead of boxes, one cobalt accent, mono
- * for every timecode.
+ * Handback's one law: light only, nothing orange. White ground, hairline borders
+ * instead of boxes, 6px controls / 8px cards, one cobalt accent, the four status
+ * inks, mono for every timecode. The one dark surface is the video well.
  */
 
 .app {
@@ -18,11 +18,17 @@
   margin: 0;
 }
 
+/* ── Header ─────────────────────────────────────────────────────────────── */
+/* 44px, white, one hairline under it. Wordmark left; the destination (or, while
+ * a take runs, a red REC pill) right. */
 .head {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 12px;
+  height: 44px;
+  padding: 0 12px;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
 }
 .mark {
   width: 28px;
@@ -30,12 +36,39 @@
   flex: none;
 }
 .wordmark {
-  font-size: var(--fs-3);
+  font-size: var(--fs-2);
   font-weight: 600;
   letter-spacing: -0.01em;
 }
 .spacer {
   flex: 1;
+}
+/* Where the next recording lands, said in the header the whole time — a plain
+ * muted label; the control that changes it lives in the footer's destination row. */
+.head-dest {
+  flex: none;
+  max-width: 62%;
+  font-size: var(--fs-0);
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* While a take runs the header carries the one fact that matters — that it is
+ * running, and for how long. */
+.rec-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  background: var(--danger);
+  color: #fff;
+  font-size: var(--fs-0);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .count {
   font-family: var(--font-mono);
@@ -44,7 +77,7 @@
   white-space: nowrap;
 }
 
-/* :where() keeps these at zero specificity, so the timeline's own button rules win. */
+/* :where() keeps these at zero specificity, so the parts' own button rules win. */
 .app :where(button) {
   cursor: pointer;
 }
@@ -56,7 +89,7 @@
 .icon {
   background: none;
   border: 1px solid transparent;
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   color: var(--muted);
   font-size: var(--fs-2);
   line-height: 1;
@@ -65,21 +98,7 @@
 .icon:hover {
   border-color: var(--border);
   color: var(--ink);
-  background: var(--card);
-}
-/* A glyph alone was read as decoration. The word is what makes it a door. */
-.icon.labelled {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-.icon.labelled span {
-  font-size: var(--fs-0);
-}
-.icon.on {
-  border-color: var(--cobalt);
-  color: var(--cobalt);
-  background: var(--card);
+  background: var(--paper);
 }
 
 .link {
@@ -88,50 +107,49 @@
   padding: 0;
   color: var(--cobalt);
   font-size: var(--fs-1);
+  text-decoration: none;
+}
+.link:hover {
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 
 /* ── Record ─────────────────────────────────────────────────────────────── */
-/* With no gripe open the panel has exactly one thing to offer, so Record is the
- * page rather than a control on it: full width, its own sentence underneath. */
-
+/* With no gripe open the panel has one thing to offer, so Record is a full-width
+ * primary button, its own sentence underneath. */
 .hero {
   display: flex;
   flex-direction: column;
   align-items: stretch;
   gap: 10px;
-  padding: 18px 12px 14px;
+  padding: 14px 12px 12px;
 }
 .hero .link {
   align-self: flex-start;
 }
-/* Two pills over the Record button — the same choice /record offers, in the
- * panel's own type: hairline off, cobalt on, nothing filled but the button
- * below it. A locked pill stays legible; it just stops answering. */
+/* Two toggles over the Record button — the same choice /record offers. */
 .kindpick {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 6px;
 }
 .kindpick-opt {
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 7px 8px;
-  font-family: var(--font-mono);
-  font-size: var(--fs-0);
+  background: var(--card);
+  border: 1px solid var(--input);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  font-size: var(--fs-1);
   color: var(--muted);
   cursor: pointer;
 }
 .kindpick-opt:hover:not(:disabled) {
   color: var(--ink);
-  background: var(--card);
+  background: var(--paper);
 }
 .kindpick-opt.on {
-  border-color: var(--cobalt);
-  color: var(--cobalt);
-  background: var(--card);
+  border-color: var(--ink);
+  background: var(--ink);
+  color: #fff;
 }
 .kindpick-opt:disabled {
   cursor: default;
@@ -141,24 +159,23 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 9px;
   width: 100%;
-  min-height: 54px;
+  height: 40px;
   background: var(--cobalt);
   color: #fff;
   border: 0;
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   padding: 0 16px;
-  font-size: var(--fs-3);
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  font-size: var(--fs-2);
+  font-weight: 500;
 }
 .rec-hero:hover {
-  filter: brightness(1.06);
+  background: color-mix(in srgb, var(--cobalt) 92%, #000);
 }
 .rec-hero .dot {
-  width: 11px;
-  height: 11px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
   background: #fff;
   flex: none;
@@ -167,7 +184,7 @@
   margin: 0;
   font-size: var(--fs-1);
   line-height: 1.45;
-  color: var(--ink);
+  color: var(--muted);
 }
 .hero-keys {
   margin: 0;
@@ -177,12 +194,8 @@
 }
 
 /* ── Home ───────────────────────────────────────────────────────────────── */
-/* With no walkthrough open the panel is not empty — it is the space seen from
- * the recorder: where the next recording goes, what already went there and what
- * state somebody put it in, and what is still sitting in this browser. Record
- * stays the loudest thing on it; everything below is a quiet read, divided by
- * hairlines the way the app divides its sections. */
-
+/* The space seen from the recorder: where the next recording goes, what already
+ * went there and its state, and what is still sitting in this browser. */
 .home {
   flex: 1;
   min-height: 0;
@@ -197,15 +210,15 @@
   border-top: 1px solid var(--border);
 }
 
-/* Every block below the hero announces itself the same way: what this is on the
- * left, the one thing you can do about it on the right. */
+/* Every block announces itself the same way: what this is, uppercase and muted. */
 .sec-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 8px;
+  margin-top: 4px;
   margin-bottom: 8px;
-  font-size: var(--fs-0);
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -217,14 +230,14 @@
   white-space: nowrap;
 }
 .sec-head .link {
-  font-size: var(--fs-0);
+  font-size: 11px;
   text-transform: none;
   letter-spacing: 0;
   flex: none;
 }
 
-/* The destination, said before the recording rather than only at the send button.
- * It is also the door to a second server, so the whole row opens the picker. */
+/* The destination switcher — said before the recording, and the door to a second
+ * server, so the whole row opens the picker. */
 .wsbar {
   padding: 10px 12px;
 }
@@ -233,10 +246,10 @@
   align-items: center;
   gap: 9px;
   width: 100%;
-  padding: 8px 10px;
+  padding: 7px 10px;
   background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border: 1px solid var(--input);
+  border-radius: var(--radius-sm);
   text-align: left;
 }
 .wsbar-main:hover,
@@ -299,7 +312,7 @@
   border-bottom: 0;
 }
 .wspick-row:hover {
-  background: var(--cobalt-wash);
+  background: var(--paper);
 }
 .wspick-row.on .wsdot {
   background: var(--cobalt);
@@ -310,7 +323,6 @@
 }
 
 /* ── The space's queue ──────────────────────────────────────────────────── */
-
 .feed,
 .local {
   padding: 12px;
@@ -318,74 +330,62 @@
 .chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px;
+  gap: 6px;
   margin-bottom: 8px;
 }
+/* Filter chips: hairline off, ink on — the uniform work-tool chip. The tone lives
+ * in the row dots, not here. */
 .chip {
   display: inline-flex;
-  align-items: baseline;
-  gap: 5px;
+  align-items: center;
+  gap: 6px;
   max-width: 100%;
-  padding: 3px 8px;
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: 999px;
+  height: 28px;
+  padding: 0 10px;
+  background: var(--card);
+  border: 1px solid var(--input);
+  border-radius: var(--radius-sm);
   color: var(--muted);
-  font-size: var(--fs-0);
+  font-size: var(--fs-1);
+  font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .chip:hover {
   color: var(--ink);
-  border-color: var(--muted);
+  background: var(--paper);
 }
 .chip-n {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  opacity: 0.75;
+  opacity: 0.7;
 }
-/* On is the ink; the status inks are the same three the web app uses and there is
- * never a fourth. */
 .chip.on {
-  background: var(--cobalt-wash);
-  border-color: var(--cobalt);
-  color: var(--cobalt);
-}
-.chip.on.in_review {
-  background: var(--review-wash);
-  border-color: var(--review);
-  color: var(--review);
-}
-.chip.on.resolved {
-  background: var(--approve-wash);
-  border-color: var(--approve);
-  color: var(--approve);
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #fff;
 }
 
 .wtrow {
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  /* Pulled into the section's own padding so the hover wash reads as a full-bleed
-     row rather than a floating box. */
-  margin: 0 -8px;
-  width: calc(100% + 16px);
-  padding: 7px 8px;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 40px;
+  padding: 6px 4px;
   background: none;
   border: 0;
-  border-radius: var(--radius);
+  border-bottom: 1px solid #eef0f3;
   text-align: left;
 }
 .wtrow:hover {
-  background: var(--cobalt-wash);
+  background: var(--paper);
 }
-/* The status, as one dot in the row's left margin — the same three inks as the
- * chips, so the list is scannable by colour before it is read. */
+/* The status, as one dot — the four inks, so the list is scannable by colour. */
 .sdot {
   width: 7px;
   height: 7px;
-  margin-top: 5px;
   border-radius: 50%;
   background: var(--cobalt);
   flex: none;
@@ -418,20 +418,18 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Console errors the page threw while it was being recorded — the one number on
- * this row an agent will care about before opening it. */
+/* Console errors the page threw while recorded — the one number an agent cares
+ * about before opening it. */
 .wt-err {
   flex: none;
   align-self: center;
-  padding: 1px 5px;
-  border-radius: 3px;
-  background: var(--cobalt-wash);
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--paper);
   color: var(--muted);
   font-family: var(--font-mono);
   font-size: var(--fs-0);
 }
-/* Three grey lines while the queue is in flight. A spinner would be a bigger
- * promise than one list of six rows deserves. */
 .feed-skel {
   display: flex;
   flex-direction: column;
@@ -463,14 +461,11 @@
 }
 .feed .note,
 .feed > .link {
-  margin-top: 4px;
+  margin-top: 6px;
   line-height: 1.45;
 }
 
 /* ── Still on this machine ──────────────────────────────────────────────── */
-/* Sessions that never left, and the ones that did. Clicking one is how you get
- * back into it — a draft is not history, it is unfinished work. */
-
 .local .count {
   font-family: var(--font-mono);
   font-size: var(--fs-0);
@@ -480,12 +475,11 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  margin: 0 -8px;
-  padding: 0 4px;
-  border-radius: var(--radius);
+  min-height: 40px;
+  border-bottom: 1px solid #eef0f3;
 }
 .lrow:hover {
-  background: var(--cobalt-wash);
+  background: var(--paper);
 }
 /* The walkthrough you stepped out of. It is not history — it is where you were. */
 .lrow.on {
@@ -497,7 +491,7 @@
   gap: 1px;
   min-width: 0;
   flex: 1;
-  padding: 7px 4px;
+  padding: 6px 4px;
   background: none;
   border: 0;
   text-align: left;
@@ -523,9 +517,9 @@
 }
 .ltag {
   flex: none;
-  padding: 1px 5px;
-  border-radius: 3px;
-  background: var(--border);
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--paper);
   color: var(--muted);
   font-family: var(--font-mono);
   font-size: var(--fs-0);
@@ -547,12 +541,10 @@
   color: var(--cobalt);
   font-size: var(--fs-1);
 }
-/* `.kill` is absolute inside the older list rows; here it is just the last cell. */
 .lrow .kill {
   position: static;
   flex: none;
 }
-/* Save-to-disk: deliberately quiet — an exit, not a feature. */
 .lrow-save {
   flex: none;
   padding: 4px 6px;
@@ -565,75 +557,37 @@
   color: var(--ink);
 }
 
+/* Home footer: the app on the left, the settings drawer on the right. */
 .home-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 0;
   padding: 12px;
   border-top: 1px solid var(--border);
-  font-size: var(--fs-0);
-  color: var(--muted);
 }
 .home-foot .link {
   font-size: var(--fs-0);
 }
-
-/* Unlinked is a state, not an error: it says what is true and where to fix it. */
-.linkbar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  background: var(--cobalt-wash);
-  border-bottom: 1px solid var(--border);
-  font-size: var(--fs-1);
-}
-.linkbar > span {
-  flex: 1;
-}
-.linkbar .link {
-  white-space: nowrap;
-}
-
-.rec {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  background: var(--cobalt);
-  color: #fff;
-  border: 0;
-  border-radius: var(--radius);
-  padding: 9px 16px;
-  font-size: var(--fs-2);
-  font-weight: 600;
-}
-.rec:hover {
-  filter: brightness(1.06);
-}
-.rec .dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #fff;
+.foot-settings {
   flex: none;
-}
-.rec.live {
-  background: var(--cobalt-wash);
-  color: var(--cobalt);
-  font-family: var(--font-mono);
-}
-.rec.live .dot {
-  background: var(--cobalt);
-  animation: pulse 1.3s ease-in-out infinite;
-}
-/* A second take is an ordinary thing to want and never the loudest button on
- * screen — that is the send below it. */
-.rec.ghost {
   background: none;
-  border: 1px solid var(--cobalt);
-  color: var(--cobalt);
-  padding: 8px 15px;
+  border: 0;
+  padding: 0;
+  color: var(--muted);
+  font-size: var(--fs-0);
 }
-.rec.ghost .dot {
-  background: var(--cobalt);
+.foot-settings:hover {
+  color: var(--ink);
+}
+/* The reason a walkthrough is worth recording at all — the one thing the panel
+ * can't answer for itself. */
+.home-mcp {
+  margin: 0;
+  padding: 12px 12px 0;
+  font-size: var(--fs-0);
+  color: var(--muted);
+  line-height: 1.45;
 }
 
 .dot.pulse {
@@ -651,9 +605,7 @@
 
 /* ── Gates ──────────────────────────────────────────────────────────────── */
 /* The two waits Record can't clear on its own — the one-time mic grant and
- * Chrome's screen-share dialog. Each takes the whole body so the panel is about
- * the thing being waited on, not a blank behind an OS surface. Same paper, same
- * cobalt; the copy carries it, not a box. */
+ * Chrome's share dialog. Each takes the whole body; the copy carries it. */
 .gate {
   flex: 1;
   min-height: 0;
@@ -662,7 +614,7 @@
   flex-direction: column;
   align-items: flex-start;
   gap: 10px;
-  padding: 24px 16px 18px;
+  padding: 22px 16px 18px;
 }
 .gate-dot {
   width: 10px;
@@ -681,7 +633,7 @@
 }
 .gate-lead {
   margin: 0;
-  font-size: var(--fs-1);
+  font-size: var(--fs-2);
   line-height: 1.5;
   color: var(--muted);
 }
@@ -695,19 +647,18 @@
   justify-content: center;
   gap: 9px;
   align-self: stretch;
-  min-height: 46px;
+  height: 40px;
   margin-top: 4px;
   background: var(--cobalt);
   color: #fff;
   border: 0;
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   padding: 0 16px;
   font-size: var(--fs-2);
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  font-weight: 500;
 }
 .gate-cta:hover {
-  filter: brightness(1.06);
+  background: color-mix(in srgb, var(--cobalt) 92%, #000);
 }
 .gate-cta .dot {
   width: 9px;
@@ -724,18 +675,16 @@
   margin-top: 2px;
 }
 
-/* A portrait of Chrome's share dialog — the panel's one dark surface, dark
- * because the thing it depicts is dark (same license the landing page's contact
- * sheet holds). Everything in it is a ghost except the audio row, which wears
- * the cobalt ring: that switch is the picture's whole reason to exist. */
+/* A portrait of Chrome's share dialog — the panel's one dark surface besides the
+ * video well, dark because the thing it depicts is. Everything is a ghost except
+ * the audio row, ringed in cobalt: that switch is the picture's whole reason. */
 .sharemock {
   width: 100%;
   max-width: 280px;
   margin: 6px 0 2px;
   background: #202124;
-  border-radius: 10px;
+  border-radius: var(--radius);
   padding: 12px 12px 11px;
-  box-shadow: 0 8px 22px rgb(24 22 18 / 0.25);
 }
 .sm-title {
   color: #e8eaed;
@@ -825,65 +774,54 @@
 }
 
 /* ── While it runs ──────────────────────────────────────────────────────── */
-
-/* Three lines of unrelated type stacked 6px apart read as one mush. The meter, the
- * words and the hint are separate thoughts, so they are separately spaced, and the
- * words get a ruled well of their own — that is the part anyone is watching. */
 .live {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 12px;
+  padding: 14px 12px;
   background: var(--card);
-  border-bottom: 1px solid var(--border);
 }
 .live-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 .live-row .dot {
-  width: 9px;
-  height: 9px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
-  background: var(--cobalt);
+  background: var(--danger);
   flex: none;
 }
 .clock {
   font-family: var(--font-mono);
-  font-size: var(--fs-4);
+  font-size: 44px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1;
   font-variant-numeric: tabular-nums;
 }
 .stat {
-  flex: 1;
   font-size: var(--fs-0);
   color: var(--muted);
 }
-/* Stopping is the only thing anyone wants from this screen, and it is being read
- * mid-sentence out of the corner of an eye. It gets the full width. */
-.stop-big {
-  width: 100%;
-  height: 44px;
-  background: var(--cobalt);
-  color: #fff;
-  border: 0;
-  border-radius: var(--radius);
-  font-size: var(--fs-2);
-  font-weight: 600;
-}
-.stop-big:hover:not(:disabled) {
-  filter: brightness(1.06);
-}
-/* The dictation ticker holds its box so the panel doesn't jump word by word. Two
- * lines' worth, always — a sentence gets to land instead of being cut off at the
- * right edge, and the block is the same height whether or not anyone is talking. */
-.ticker {
-  height: 3.2em;
-  padding: 6px 8px;
+/* The captions box: the interim text large, the rough-captions caveat inside it. */
+.captions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 84px;
+  padding: 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--paper);
-  font-size: var(--fs-1);
+  background: var(--card);
+}
+.interim {
+  flex: 1;
+  font-size: 15px;
   line-height: 1.45;
   color: var(--ink);
   overflow: hidden;
@@ -892,68 +830,87 @@
   flex-direction: column;
   justify-content: flex-end;
 }
-/* Nothing being said right now: the well stays, the words go quiet. */
-.ticker.idle {
+.interim.idle {
   color: var(--muted);
   font-style: italic;
 }
-/* A blocked mic is the one live-state line you can click — it reads as a fix, not a label. */
-button.ticker.warn {
+.cap-note {
+  font-size: var(--fs-0);
+  color: var(--muted);
+}
+/* A blocked mic is the one caption-state line you can click — a fix, not a label. */
+.ticker.warn {
   display: block;
+  flex: 1;
   width: 100%;
-  /* Not the dictation well — this is one clickable sentence, so it drops the
-     well's box and its two-line height rather than floating inside them. */
-  height: auto;
   padding: 0;
   border: 0;
   background: none;
   text-align: left;
   font: inherit;
-  font-style: normal;
   color: var(--danger);
   cursor: pointer;
 }
-button.ticker.warn:hover {
+.ticker.warn:hover {
   text-decoration: underline;
 }
 .note {
   font-size: var(--fs-0);
   color: var(--muted);
+  line-height: 1.45;
 }
-/* ── The gripe ──────────────────────────────────────────────────────────── */
+/* Stopping is the only thing anyone wants from this screen. Ink, full width. */
+.stop-big {
+  width: 100%;
+  height: 40px;
+  background: var(--ink);
+  color: #fff;
+  border: 0;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-2);
+  font-weight: 600;
+}
+.stop-big:hover:not(:disabled) {
+  background: #000;
+}
+/* The whole point of capture living offscreen: the panel is disposable. Pinned to
+ * the bottom in its own quiet box. */
+.close-note {
+  margin-top: auto;
+  padding: 10px 12px;
+  background: var(--paper);
+  border-radius: var(--radius-sm);
+}
 
+/* ── The gripe ──────────────────────────────────────────────────────────── */
 .gripe {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 8px 12px 8px;
+  padding: 10px 12px 6px;
 }
-
-/* Where you are, what this walkthrough amounts to, and the way to throw it away —
- * one row, above the title. The meta used to be a band of its own; it is a
- * caption, and captions ride along. */
+/* Where you are, and the way to throw it away — one row above the title. */
 .crumb {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
-  margin-bottom: 4px;
   min-height: 20px;
 }
 .back {
   background: none;
   border: 0;
   padding: 0;
-  color: var(--muted);
+  color: var(--cobalt);
   font-size: var(--fs-0);
 }
 .back:hover {
-  color: var(--cobalt);
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 .crumb .link {
   font-size: var(--fs-0);
 }
-/* Armed. The question and both answers sit on one line so the row never grows and
- * shoves the timeline down mid-decision. */
+/* Armed. The question and both answers on one line so the row never grows. */
 .confirm {
   display: flex;
   align-items: center;
@@ -964,6 +921,10 @@ button.ticker.warn:hover {
 .link.danger {
   color: var(--danger);
 }
+.link.discard {
+  color: var(--danger);
+  font-size: var(--fs-0);
+}
 .title {
   background: none;
   border: 0;
@@ -971,7 +932,7 @@ button.ticker.warn:hover {
   padding: 2px 0;
   color: var(--ink);
   font: inherit;
-  font-size: var(--fs-4);
+  font-size: 17px;
   font-weight: 600;
   letter-spacing: -0.01em;
   width: 100%;
@@ -984,17 +945,6 @@ button.ticker.warn:hover {
   outline: none;
   border-bottom-color: var(--cobalt);
 }
-.meta {
-  font-family: var(--font-mono);
-  font-size: var(--fs-0);
-  color: var(--muted);
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-/* The name and the one thing you do to this walkthrough next, on one line. The
- * take button used to own a whole band under the meta line under the title. */
 .titlerow {
   display: flex;
   align-items: center;
@@ -1004,28 +954,25 @@ button.ticker.warn:hover {
   flex: 1;
   min-width: 4em;
 }
-.titlerow .rec.ghost {
-  flex: none;
-  padding: 5px 10px;
+/* The summary rides under the title as a caption, not a band of its own. */
+.gripe-meta {
+  font-family: var(--font-mono);
   font-size: var(--fs-0);
+  color: var(--muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
-}
-.titlerow .rec.ghost .dot {
-  width: 6px;
-  height: 6px;
 }
 
 /* ── The parts ──────────────────────────────────────────────────────────── */
-/* The review screen: a walkthrough as a vertical list of parts, one recording
- * each, in recorded order. It is the scrolling middle of the panel, between the
- * title section and the handoff footer — so it, not the panel, owns the scroll.
- * Cards divide with hairlines, never boxes; the one dark surface is the video
- * well, dark because a video needs it. */
+/* The review screen: a walkthrough as a vertical list of part cards, one recording
+ * each, in recorded order. It owns the scroll between the title and the footer. */
 .parts {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 0 12px 12px;
+  padding: 8px 12px 12px;
 }
 .parts-empty {
   padding: 14px 0;
@@ -1034,30 +981,77 @@ button.ticker.warn:hover {
 }
 
 .part {
-  padding: 12px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
 }
 .part + .part {
-  border-top: 1px solid var(--border);
+  margin-top: 10px;
 }
 
-/* Which part this is and how long it runs, with the one control that removes it.
- * The delete arms in place — the row holds its height so the question never shoves
- * the card below it around while it is being answered. */
+/* The card's head row: a thumb, which part and how long, its transcript state,
+ * and the two controls that save or remove it. The delete arms in place. */
 .part-head {
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-height: 20px;
+  gap: 10px;
+  min-height: 34px;
+}
+.part-thumb {
+  flex: none;
+  width: 56px;
+  height: 34px;
+  border-radius: 4px;
+  background: #eef0f3;
+  overflow: hidden;
+  display: flex;
+}
+.part-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.part-id {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
 }
 .part-n {
-  font-family: var(--font-mono);
-  font-size: var(--fs-0);
-  letter-spacing: 0.04em;
-  color: var(--muted);
+  font-size: var(--fs-1);
+  font-weight: 500;
+  color: var(--ink);
   white-space: nowrap;
 }
-.part-sp {
-  flex: 1;
+.part-meta {
+  font-family: var(--font-mono);
+  font-size: var(--fs-0);
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Transcript is in: a filled green disc. Still writing: a mono percentage. */
+.part-done {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--approve);
+  color: #fff;
+  font-size: 11px;
+  line-height: 1;
+}
+.part-pct {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--fs-0);
+  font-variant-numeric: tabular-nums;
+  color: var(--cobalt);
 }
 .part-save {
   flex: none;
@@ -1071,7 +1065,6 @@ button.ticker.warn:hover {
 .part-save:hover {
   color: var(--ink);
 }
-/* Styled after `.kill`, but a cell in the row rather than an absolute corner. */
 .part-kill {
   flex: none;
   padding: 2px 4px;
@@ -1108,6 +1101,33 @@ button.ticker.warn:hover {
 .part-arm .part-yes {
   color: var(--danger);
 }
+/* A 4px bar under the row while the transcript is being written; it slides when
+ * the pass reports no real fraction. */
+.part-prog {
+  height: 4px;
+  margin-top: 8px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.part-prog i {
+  display: block;
+  height: 100%;
+  background: var(--cobalt);
+  transition: width 160ms;
+}
+.part-prog.indeterminate i {
+  width: 40%;
+  animation: tprog-slide 1.2s ease-in-out infinite alternate;
+}
+@keyframes tprog-slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
 
 /* The video, in its dark well — click it to play or pause. */
 .part-well {
@@ -1117,9 +1137,9 @@ button.ticker.warn:hover {
   justify-content: center;
   width: 100%;
   max-height: 300px;
-  margin: 8px 0;
+  margin: 10px 0 8px;
   background: #17181c;
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   overflow: hidden;
   cursor: pointer;
 }
@@ -1133,9 +1153,6 @@ button.ticker.warn:hover {
   max-height: 300px;
   object-fit: contain;
 }
-/* The webm never made it to this machine (a recovered session, or the preview
- * harness): the first keyframe stands in, dimmed, and says so — never a broken
- * player. */
 .part-still {
   display: block;
   width: 100%;
@@ -1155,8 +1172,7 @@ button.ticker.warn:hover {
   pointer-events: none;
 }
 
-/* Under the video: play/pause, a slim seek bar, and the clock. Only drawn once
- * the video has loaded — a seek bar over a player that can't seek is a lie. */
+/* Under the video: play/pause, a slim seek bar, and the clock. */
 .part-controls {
   display: flex;
   align-items: center;
@@ -1170,8 +1186,8 @@ button.ticker.warn:hover {
   align-items: center;
   justify-content: center;
   background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border: 1px solid var(--input);
+  border-radius: var(--radius-sm);
   color: var(--cobalt);
   font-size: var(--fs-0);
   line-height: 1;
@@ -1179,8 +1195,6 @@ button.ticker.warn:hover {
 .part-play:hover {
   border-color: var(--cobalt);
 }
-/* 4px of track, ~16px of hit area around it — a slim bar is easier to read than
- * to grab, so the grab area is bigger than the mark. */
 .part-seek {
   position: relative;
   flex: 1;
@@ -1215,17 +1229,9 @@ button.ticker.warn:hover {
   color: var(--muted);
 }
 
-.part-meta {
-  margin-top: 6px;
-  font-family: var(--font-mono);
-  font-size: var(--fs-0);
-  color: var(--muted);
-}
-
-/* The narration, in its own scroll region so a long part stays a compact card and
- * the auto-follow never yanks the whole panel. */
+/* The narration, in its own scroll region so a long part stays a compact card. */
 .part-script {
-  margin-top: 8px;
+  margin-top: 10px;
 }
 .part-script-head {
   display: flex;
@@ -1235,8 +1241,6 @@ button.ticker.warn:hover {
   font-size: var(--fs-0);
   color: var(--muted);
 }
-/* The count is the fact and stays whole; the hint is the affordance and is the
- * one that truncates when the panel gets narrow. */
 .part-script-head > span:first-child {
   flex: none;
   white-space: nowrap;
@@ -1273,7 +1277,7 @@ button.ticker.warn:hover {
   cursor: pointer;
 }
 .part-line:hover {
-  background: rgba(35, 38, 46, 0.04);
+  background: var(--paper);
 }
 .part-line.now {
   background: var(--cobalt-wash);
@@ -1306,25 +1310,28 @@ button.ticker.warn:hover {
   caret-color: var(--cobalt);
 }
 
-/* The only add button on the screen now — full width at the foot of the list,
- * the cobalt outline ghost so it never outshouts send. */
+/* The one add button — full width at the foot of the list, a neutral outline so
+ * it never outshouts Send. */
 .parts-add {
   display: flex;
-  width: 100%;
+  align-items: center;
   justify-content: center;
+  gap: 8px;
+  width: 100%;
+  height: 40px;
   margin-top: 12px;
+  background: var(--card);
+  border: 1px solid var(--input);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  font-size: var(--fs-2);
+  font-weight: 500;
+}
+.parts-add:hover:not(:disabled) {
+  border-color: var(--muted);
+  background: var(--paper);
 }
 
-.empty {
-  flex: 1;
-  padding: 24px 12px;
-  color: var(--muted);
-  font-size: var(--fs-1);
-}
-
-/* The one list of walkthroughs is the home screen's (`.lrow`) — the panel used to
- * carry a second, foldable one here, and two competing lists is what made this
- * thing hard to get out of. */
 .kill {
   position: absolute;
   top: 6px;
@@ -1341,45 +1348,21 @@ button.ticker.warn:hover {
 }
 
 /* ── Settings ───────────────────────────────────────────────────────────── */
-
-/* Paper, not card: the fields inside are white, and they have to read as inputs. */
 .settings {
   padding: 10px 12px;
   background: var(--paper);
+  border-bottom: 1px solid var(--border);
 }
-/* Opening the drawer pushes everything below it down the panel. Without a heading
- * that reads as an arrival, the push looks like the page grew on its own. */
 .settings-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 8px;
-  font-size: var(--fs-0);
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--muted);
-}
-/* The link state leads the block, so it reads as a fact with two verbs, not a field. */
-.linked {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  font-size: var(--fs-1);
-}
-.linked strong {
-  font-weight: 600;
-}
-.linked-actions {
-  display: flex;
-  gap: 12px;
-  flex: none;
-}
-.linkcta {
-  height: 36px;
-  padding: 0 14px;
-  font-size: var(--fs-1);
 }
 .fields {
   display: flex;
@@ -1397,10 +1380,11 @@ button.ticker.warn:hover {
   color: var(--muted);
 }
 .field input {
+  height: 32px;
   background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 6px 8px;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-sm);
+  padding: 0 10px;
   color: var(--ink);
   font: inherit;
   font-size: var(--fs-1);
@@ -1419,16 +1403,15 @@ button.ticker.warn:hover {
   color: var(--muted);
   font-size: var(--fs-1);
 }
-/* A server is a row you click, not a field you edit — the whole row is the
- * radio, and the × is the only other thing in it that does anything. */
+/* A server is a row you click, not a field you edit — the whole row is the radio. */
 .wsrow {
   position: relative;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
   padding: 6px 24px 6px 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border: 1px solid var(--input);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   margin-bottom: 6px;
 }
@@ -1439,9 +1422,8 @@ button.ticker.warn:hover {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  border: 1px solid var(--border);
+  border: 1px solid var(--input);
   flex: none;
-  align-self: center;
 }
 .wsrow.on .wsdot {
   background: var(--cobalt);
@@ -1456,7 +1438,11 @@ button.ticker.warn:hover {
   color: var(--muted);
   font-size: var(--fs-0);
 }
-
+.linkcta {
+  height: 32px;
+  padding: 0 14px;
+  font-size: var(--fs-1);
+}
 .toggle {
   display: flex;
   align-items: center;
@@ -1472,8 +1458,8 @@ button.ticker.warn:hover {
   width: 30px;
   height: 17px;
   border-radius: 9px;
-  background: var(--border);
-  border: 1px solid var(--border);
+  background: var(--input);
+  border: 1px solid var(--input);
   flex: none;
   position: relative;
   transition: background 120ms;
@@ -1498,78 +1484,75 @@ button.ticker.warn:hover {
 }
 
 /* ── Handing it over ────────────────────────────────────────────────────── */
-
 .foot {
   display: flex;
   flex-direction: column;
   gap: 8px;
   padding: 10px 12px 14px;
+  border-top: 1px solid var(--border);
 }
 .primary {
   background: var(--cobalt);
   color: #fff;
   border: 0;
-  border-radius: var(--radius);
-  padding: 9px 14px;
+  border-radius: var(--radius-sm);
+  padding: 0 14px;
+  height: 32px;
   font-size: var(--fs-2);
-  font-weight: 600;
+  font-weight: 500;
 }
 .primary:hover:not(:disabled) {
-  filter: brightness(1.06);
+  background: color-mix(in srgb, var(--cobalt) 92%, #000);
 }
-/* The one irreversible thing the panel does, and it says where it is sending. */
+/* The one irreversible thing the panel does. */
 .send {
-  height: 46px;
+  height: 40px;
   padding: 0 14px;
-  font-size: var(--fs-3);
+  font-size: var(--fs-2);
 }
-/* What this walkthrough is — one line above the destination, in the same mono
- * pills the queue filters use: hairline off, cobalt on, nothing filled. */
-.intent-row {
+.foot-note {
+  margin: 2px 0 0;
+  text-align: center;
+  font-size: var(--fs-0);
+  color: var(--muted);
+  line-height: 1.4;
+}
+/* A field row: a muted label, then the control. "This is" and "To" align. */
+.intent-row,
+.dest {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
-  margin-bottom: 6px;
+  min-height: 32px;
   font-size: var(--fs-1);
 }
-.intent-label {
+.intent-label,
+.dest-to {
   flex: none;
+  width: 52px;
   color: var(--muted);
 }
 .intent-chip {
-  padding: 3px 9px;
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: 999px;
+  height: 26px;
+  padding: 0 10px;
+  background: var(--card);
+  border: 1px solid var(--input);
+  border-radius: var(--radius-sm);
   color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: var(--fs-0);
+  font-size: var(--fs-1);
 }
 .intent-chip:hover {
   color: var(--ink);
-  border-color: var(--muted);
+  background: var(--paper);
 }
 .intent-chip.on {
-  background: var(--cobalt-wash);
-  border-color: var(--cobalt);
-  color: var(--cobalt);
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #fff;
 }
-
-/* Where it lands, one line under the send: space · project, as ONE control.
- * A single trigger opens one panel grouped by space; a row sets both at once. */
 .dest {
   position: relative;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  margin-bottom: 6px;
-  font-size: var(--fs-1);
-}
-.dest-to {
-  flex: none;
-  color: var(--muted);
 }
 .dest-trigger {
   flex: 1 1 auto;
@@ -1577,15 +1560,14 @@ button.ticker.warn:hover {
   display: flex;
   align-items: center;
   gap: 5px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  /* The panel draws its own controls — Chrome's stock arrow would be the one
-   * native widget on the surface, so it's replaced with a muted chevron. */
+  height: 32px;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-sm);
   appearance: none;
-  background: var(--paper)
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath d='M1 1l3 3 3-3' fill='none' stroke='%23767676' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+  background: var(--card)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath d='M1 1l3 3 3-3' fill='none' stroke='%236b7280' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
     no-repeat right 8px center;
-  padding: 4px 22px 4px 8px;
+  padding: 0 22px 0 10px;
   color: var(--ink);
   font: inherit;
   font-size: var(--fs-1);
@@ -1658,7 +1640,7 @@ button.ticker.warn:hover {
   gap: 8px;
   width: 100%;
   border: 0;
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   background: none;
   padding: 5px 8px;
   color: var(--ink);
@@ -1668,7 +1650,7 @@ button.ticker.warn:hover {
   cursor: pointer;
 }
 .dest-opt:hover {
-  background: var(--cobalt-wash);
+  background: var(--paper);
 }
 .dest-opt.on {
   background: var(--cobalt-wash);
@@ -1681,14 +1663,12 @@ button.ticker.warn:hover {
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-/* The active row's cobalt tick; a hairline ring on the rest keeps the column
- * aligned so the names read as one list. */
 .dest-mark {
   flex: none;
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  border: 1px solid var(--border);
+  border: 1px solid var(--input);
 }
 .dest-opt.on .dest-mark {
   background: var(--cobalt);
@@ -1713,21 +1693,14 @@ button.ticker.warn:hover {
   border-top: 1px solid var(--border);
 }
 
-.send-sub {
-  margin: 0;
-  text-align: center;
-  font-family: var(--font-mono);
-  font-size: var(--fs-0);
-  color: var(--muted);
-}
-
+/* The link-first card — white, hairline, quiet. */
 .linkcard {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   padding: 12px;
-  background: var(--cobalt-wash);
-  border: 1px solid color-mix(in srgb, var(--cobalt) 35%, transparent);
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
 }
 .linkcard strong {
@@ -1738,14 +1711,14 @@ button.ticker.warn:hover {
   margin: 0;
   font-size: var(--fs-1);
   color: var(--muted);
+  line-height: 1.45;
 }
 .linkcard .link {
   align-self: center;
 }
 
 /* The outbox strip: uploads no longer block the panel, so this is where a push
- * you can't see is accounted for — going up, landed, or failed. Same quiet mono
- * list idiom as the home screen's `.lrow` rows, hairline-divided. */
+ * you can't see is accounted for — going up, landed, or failed. */
 .outbox {
   display: flex;
   flex-direction: column;
@@ -1755,13 +1728,11 @@ button.ticker.warn:hover {
   display: flex;
   flex-direction: column;
   gap: 5px;
-  padding: 7px 0;
+  padding: 8px 0;
 }
 .ob-row + .ob-row {
   border-top: 1px solid var(--border);
 }
-/* The title/percent on the left, the scale it is a percent of (or the row's
- * actions) on the right. */
 .ob-head {
   display: flex;
   align-items: baseline;
@@ -1779,7 +1750,6 @@ button.ticker.warn:hover {
 .ob-line.muted {
   color: var(--muted);
 }
-/* Tabular figures because both numbers change four times a second. */
 .ob-bytes {
   flex: none;
   font-family: var(--font-mono);
@@ -1788,7 +1758,7 @@ button.ticker.warn:hover {
   font-variant-numeric: tabular-nums;
 }
 .ob-bar {
-  height: 3px;
+  height: 4px;
   background: var(--border);
   border-radius: 2px;
   overflow: hidden;
@@ -1803,18 +1773,25 @@ button.ticker.warn:hover {
   font-size: var(--fs-0);
   color: var(--muted);
 }
+.ob-view {
+  align-self: flex-start;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-size: var(--fs-2);
+  font-weight: 600;
+  color: var(--cobalt);
+  cursor: pointer;
+}
+.ob-view:hover {
+  text-decoration: underline;
+}
 .ob-actions {
   display: flex;
   align-items: center;
   gap: 10px;
   flex: none;
-}
-.ob-open {
-  padding: 0 2px;
-  background: none;
-  border: 0;
-  color: var(--cobalt);
-  font-size: var(--fs-1);
 }
 .ob-dismiss {
   padding: 0 2px;
@@ -1833,10 +1810,10 @@ button.ticker.warn:hover {
   left: 12px;
   right: 12px;
   bottom: 12px;
-  padding: 7px 10px;
+  padding: 8px 10px;
   background: var(--ink);
-  color: var(--paper);
-  border-radius: var(--radius);
+  color: #fff;
+  border-radius: var(--radius-sm);
   font-size: var(--fs-1);
   text-align: center;
 }

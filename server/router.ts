@@ -1087,6 +1087,19 @@ const walkthroughsRouter = router({
         teamId: true,
         userId: true,
         team: { select: { name: true } },
+        // Inlined here, not on walkthroughListSelect: the card's "processing…"
+        // pill needs them, but `list` builds its own return object and has no
+        // use for them, so widening the shared select would only add noise.
+        refineStatus: true,
+        refineStage: true,
+        // The newest agent result, for the row's fix score. `take: 1` off the
+        // desc index is one note per card; only its outcomes ledger is read.
+        notes: {
+          where: { kind: 'result' },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: { outcomesJson: true },
+        },
       },
     })
 
@@ -1112,6 +1125,16 @@ const walkthroughsRouter = router({
     return Promise.all(
       rows.map(async (g) => {
         const thumbPath = thumbPathById.get(g.id)
+        // How much of the walkthrough the agent closed out: fixed over total key
+        // points, from the newest result note's ledger. Reuses the same boundary
+        // schema `get` parses this column with; null when no result reported.
+        const outcomes = pointOutcomesSchema.safeParse(g.notes[0]?.outcomesJson)
+        const score = outcomes.success
+          ? {
+              fixed: outcomes.data.filter((o) => o.status === 'fixed').length,
+              total: outcomes.data.length,
+            }
+          : null
         return {
           id: g.id,
           slug: g.slug,
@@ -1131,6 +1154,9 @@ const walkthroughsRouter = router({
           teamId: g.teamId,
           spaceName: g.team?.name ?? 'Personal',
           uploadedByName: g.uploadedBy?.name ?? null,
+          refineStatus: g.refineStatus,
+          refineStage: g.refineStage,
+          score,
           // Presigning is local HMAC signing — no S3 round trip — so one per
           // card at ≤200 items is cheap. Human kind or no frames → null.
           thumbUrl: thumbPath

@@ -1,10 +1,12 @@
 import type {
   PageEvent,
   PointerSample,
+  RecorderUpdate,
   RecordingMeta,
   SessionIntent,
   SessionKind,
   Settings,
+  TranscribeState,
   TranscriberId,
   TranscriptSegment,
 } from './types';
@@ -57,7 +59,7 @@ export type Request =
       micMime: string;
     }
   | { type: 'recording:finish'; id: string; meta: RecordingMeta }
-  // getDisplayMedia was granted but the recorder never really started.
+  // The capture was granted but the take's row was never really opened — drop it.
   | { type: 'recording:discard'; id: string }
   // The panel died mid-part; reassemble the chunk blobs into the video.
   | { type: 'recording:recover'; id: string }
@@ -85,9 +87,22 @@ export type Request =
   // identical. An ink stroke finishing on the page is a click for this purpose:
   // the drawing is on screen and dedup would score it as the same screen.
   | { type: 'recording:force'; why: 'click' | 'nav'; origin: string }
-  // The on-page toolbar's stop button. The panel owns the recorder, so it acts;
-  // the background just answers ok.
+  // The on-page toolbar's stop button. The offscreen document owns the recorder
+  // now, so it acts; the background just answers ok.
   | { type: 'recording:stop' }
+  // panel→offscreen. The offscreen document runs Chrome's picker (getDisplayMedia needs no gesture
+  // there) and does the capture, so closing the panel changes nothing.
+  | { type: 'capture:start'; id: string; lang: string; scope: string; pristine: boolean }
+  | { type: 'capture:stop' }
+  | { type: 'capture:cancel'; id: string }
+  // panel→offscreen on mount: is something recording right now? Reattaches the live readout.
+  | { type: 'capture:state' }
+  // panel→offscreen after recording:recover: transcribe this take. (A take that just stopped is queued by the offscreen doc itself.)
+  | { type: 'transcribe:enqueue'; id: string }
+  // panel→offscreen on mount: mirror the queue. Answer: TranscribeState.
+  | { type: 'transcribe:state' }
+  // panel→background: make sure the offscreen document exists before capture:start.
+  | { type: 'offscreen:ensure' }
   // panel→background after enqueue: ensure the offscreen doc exists, then broadcast
   // upload:drain so the uploader picks up the freshly queued entry.
   | { type: 'upload:kick' }
@@ -108,8 +123,25 @@ export type ContentCommand =
   | { type: 'draw:toggle' }
   | { type: 'ping' };
 
-/** Background → side panel broadcast. */
-export type Broadcast = { type: 'state:changed' } | { type: 'outbox:changed' };
+/** The offscreen document's answer to `capture:start`. */
+export type CaptureStartResult =
+  | { ok: true; sysAudio: 'none' | 'silent' | 'live' }
+  // `refused` = the human dismissed Chrome's picker; `error` names anything else.
+  | { ok: false; refused: boolean; error: string };
+
+/** The offscreen document's answer to `capture:state` — null when nothing is recording. */
+export type CaptureState = { id: string; update: RecorderUpdate } | null;
+
+/** Background/offscreen → side panel broadcast. */
+export type Broadcast =
+  | { type: 'state:changed' }
+  | { type: 'outbox:changed' }
+  // offscreen→panel, every recorder emit while a capture runs; `update: null` = it just ended.
+  | { type: 'capture:update'; id: string; update: RecorderUpdate | null }
+  // offscreen→panel after recording:finish landed — the panel refreshes and queues transcription.
+  | { type: 'capture:done'; id: string }
+  // offscreen→panel on every queue/progress change — the panel mirrors it into its readout.
+  | { type: 'transcribe:update'; state: TranscribeState };
 
 /**
  * What a Handback web page may send via chrome.runtime.sendMessage(EXTENSION_ID, …).

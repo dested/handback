@@ -34,8 +34,42 @@ export interface TranscriptSegment {
   speaker?: number;
 }
 
+/** How far the post-recording transcription pass has got, stage and a 0–100 pct (−1 = indeterminate). */
+export interface TranscribeProgress {
+  stage: 'decode' | 'upload' | 'download' | 'model' | 'transcribe' | 'polish';
+  pct: number;
+}
+
+/** The offscreen transcription queue as the panel sees it. `queue[0]` is the take being transcribed; `progress` is its stage, null before the first tick. */
+export interface TranscribeState {
+  queue: string[];
+  progress: TranscribeProgress | null;
+}
+
 /** The live dictation engine's state, as the panel reports it. */
 export type MicState = 'listening' | 'off' | 'denied' | 'error';
+
+/**
+ * The recorder's live readout, emitted on every tick. It lives in lib/types
+ * rather than the recorder module because both sides of the wire speak it: the
+ * offscreen document (which owns the recorder) fills it, and the side panel
+ * renders it — the recorder now runs where the panel can't reach it directly.
+ */
+export interface RecorderUpdate {
+  elapsedMs: number;
+  frameCount: number;
+  segmentCount: number;
+  interim: string;
+  micState: MicState;
+  /**
+   * App/system audio: 'none' = the share came without a track (checkbox missed,
+   * or a window was picked), 'silent' = a track exists but nothing has been
+   * heard on it yet, 'live' = real signal has landed. 'silent' minutes into a
+   * take with sound playing means the loopback is dead — the sound is reaching
+   * the ears but not Chrome (wrong default output device, virtual audio driver).
+   */
+  sysAudio: 'none' | 'silent' | 'live';
+}
 
 /** Where the mouse was, sampled by the recorded tab while a walkthrough runs. All lengths are CSS px. */
 export interface PointerSample {
@@ -220,6 +254,8 @@ export interface OutboxEntry {
   title: string;
   createdAt: number;
   state: 'queued' | 'uploading' | 'done' | 'failed';
+  /** uploading only — the drain is holding for this session's transcripts before it bundles. */
+  waiting?: 'transcript';
   /** failed only — the raw pushGripe message, for explainUpload to turn into a sentence. */
   error?: string;
   /** Live while uploading. */

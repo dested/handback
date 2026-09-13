@@ -2,6 +2,39 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-09-13 — complete redesign: Asana-shaped web, portal, extension
+Asked: "perfect, go with it, use /fable-opus and build everything. update the entire website,
+portal, and extension, complete redesign of everything." Done (6 Opus waves, per
+plans/2026-09-12-asana-redesign.md, canvas
+https://claude.ai/code/artifact/cc32b6a3-ea2c-4056-94c7-e578c3dd8afc): Inter + JetBrains Mono,
+hex work-tool tokens, new primitives (StatusPill/ProjectTag/Avatar/Tabs/Chip/PageHeader);
+topbar + 232px sidebar shell; /app = List + Board with URL-param filters, grouped Needs your
+call · Processing · Open · Done, right-hand detail pane (?w=); /walkthroughs/:id = the same
+WalkthroughDetail body + tabs (desk masthead/rail/overview-tab deleted); inbox gains
+`score {fixed,total}`; landing/docs/legal, every app page, auth/join/watch/upload/phone/admin
+restyled; extension side panel restyled (no behaviour change). ui.md rewritten. Typecheck +
+build green (root + extension). Extension 1.11.0 still UNPUBLISHED — capture engine untested
+in a real Chrome since the getDisplayMedia fix.
+Touched: index.html, src/styles/app.css, src/app/*, src/components/{ui,inbox,viewer/pane,
+viewer/desk,landing,phone,legal,logo}.tsx|/*, src/lib/time.ts, server/router.ts,
+extension/src/sidepanel/*, ui.md, cliffnotes.md, decisions.md
+
+## 2026-09-12 — two-part handback: recorder panel + app fixes + redesign canvas
+Asked: walkthroughs 6919f581 (panel: closing kills the recording, clutter, transcribing note,
+send gating, discard grey) + 9ce3a6a7 (app: unclickable card, processing state, resolve/archive,
+"redo the whole UI — mock-ups first"). Done: extension 1.11.0 — capture/transcription/upload in
+the offscreen document, red REC badge, live-only recording screen + new copy, send never blocks,
+"view your handback →"; web — card link z-order, processing… chip + polling, Mark resolved/Reopen;
+design canvas (3 directions). Results posted on both walkthroughs → in_review. Extension built,
+NOT published (needs load-unpacked test). Per plans/2026-09-12-panel-and-app-handback.md.
+Follow-up same day: first build failed ("couldn't start the recording") — a desktopCapture stream
+id can't be consumed offscreen; now getDisplayMedia runs in the offscreen document itself,
+desktopCapture permission dropped. Canvas redone as one Asana-shaped direction after Sal rejected
+all three ("not cutesy").
+Touched: extension/src/{offscreen,sidepanel,background,lib}/*, extension/public/manifest.json,
+server/router.ts, src/app/app.tsx, src/components/inbox/card.tsx,
+src/components/viewer/desk/masthead.tsx, cliffnotes.md, ui.md, decisions.md
+
 ## 2026-08-25 — upload UX wave: outbox + compression + speakers + export + re-transcribe
 Asked: "upload is slow… i can't be stuck on this screen… what about compression? · a better way
 to know there are multiple people talking and defining who's who · download the mp4 on the

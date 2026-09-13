@@ -17,12 +17,14 @@ export function Step({
   children: React.ReactNode
 }) {
   return (
-    <section className="border-border grid grid-cols-[3rem_1fr] gap-x-4 border-t pt-6">
-      <span className="text-muted-foreground font-mono text-sm">{n}</span>
-      <div className="min-w-0">
-        <h2 className="font-display text-2xl font-semibold">{title}</h2>
-        <p className="text-muted-foreground mt-2 text-sm leading-relaxed">{blurb}</p>
-        <div className="mt-5">{children}</div>
+    <section className="bg-card border-border flex gap-4 rounded-lg border p-5">
+      <span className="bg-cobalt-wash text-cobalt flex size-7 shrink-0 items-center justify-center rounded-md text-sm font-semibold">
+        {n}
+      </span>
+      <div className="min-w-0 flex-1">
+        <h2 className="text-[15px] font-semibold">{title}</h2>
+        <p className="text-muted-foreground mt-1 text-[13px] leading-relaxed">{blurb}</p>
+        <div className="mt-4">{children}</div>
       </div>
     </section>
   )

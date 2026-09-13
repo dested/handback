@@ -1,251 +1,188 @@
 # Handback — UI
 
 > Visual-language source of truth. Follow exactly; deviations are bugs.
-> Last updated: 2026-08-23.
+> Last updated: 2026-09-13 (the Asana-shaped redesign — plans/2026-09-12-asana-redesign.md,
+> canvas https://claude.ai/code/artifact/cc32b6a3-ea2c-4056-94c7-e578c3dd8afc).
 
 ## The one law
 
 **Light only. No dark mode. Nothing orange.** Sal's words: "no more of this
 fucking dark mode and orange." There is no `.dark` variant, no
-`prefers-color-scheme` handling, no orange or near-orange hue anywhere. Handback
-must never resemble the Gripe extension's dark/orange look.
+`prefers-color-scheme` handling, no orange or near-orange hue anywhere.
 
 ## Concept
 
-Editorial review — blue ink on paper. The product is a human reviewing work and
-signing off, so the UI reads like a well-set proof: warm paper ground, near-black
-ink, hairline rules, generous margins, one confident cobalt accent (the
-reviewer's pen), monospace for anything technical. Quiet pages; the recordings
-and reports are the loud part.
+**A work tool, not a magazine.** Handback replaces Asana for the loop between a
+person and a coding agent, so it looks like the tool you keep open all day: a
+sidebar and a topbar, a project with List and Board views, a detail pane that
+slides in beside the list, one accent, dense 13px type, 1px borders. Sal on the
+previous rounds: "built for an accountant" (the old editorial paper) and "too
+cute" (serif/stamps/hard shadows). Neither comes back. The recordings are the
+loud part; the chrome is quiet and functional.
 
 ## Tokens (`src/styles/app.css`)
 
 | Token | Value | Use |
 | --- | --- | --- |
-| `--background` | warm paper `oklch(0.985 0.004 95)` | page ground |
-| `--foreground` / `--ink` | cool near-black | text |
-| `--card` | pure white | cards sit brighter than the page |
-| `--cobalt` (= `--primary`) | `oklch(0.485 0.195 262)` | THE accent: links, primary buttons, active states, open status |
-| `--cobalt-wash` | pale blue | selected/hover washes, accent chips |
-| `--review` / `--review-wash` | violet | "in review" status only |
-| `--approve` / `--approve-wash` | green | "resolved"/success only |
-| `--destructive` | red | delete/danger only |
-| `--radius` | 0.375rem | tight, print-like corners |
+| `--background` / `--card` / `--popover` | `#ffffff` | page and surfaces are white |
+| `--secondary` | `#f7f8fa` | board columns, composer/notice wells, hover rows |
+| `--muted` | `#f1f2f5` | tags, search pill, disabled |
+| `--foreground` / `--ink` | `#1f2229` | text, the ON state of chips/Stop |
+| `--muted-foreground` | `#6b7280` | secondary text, labels |
+| `--border` | `#e6e7eb` | every 1px rule and card edge |
+| `--input` | `#d9dbe1` | control borders (chips, inputs, outline buttons) |
+| `--cobalt` (= `--primary`) | `#2f56d8` | THE accent: links, primary buttons, active nav, open status |
+| `--cobalt-wash` | `#e9edfb` | selected row, active nav, open-status pill |
+| `--review` / `--review-wash` | `#6b45d6` / `#efe9fb` | "Your call" (in_review) only |
+| `--approve` / `--approve-wash` | `#128a3c` / `#e4f4ea` | Done (resolved), Approve, fixed ✓ |
+| `--destructive` | `#c8322b` | delete/discard, REC badge, error ticks |
+| `--sidebar` / `--sidebar-accent` | `#fafbfc` / `#e9edfb` | the sidebar and its active item |
+| `--radius` | `0.5rem` | cards 8px (`rounded-lg`), controls 6px (`rounded-md`), board columns 10px |
 
-Status mapping is fixed: **open = cobalt, in_review = violet, resolved = green,
-needs_info = grey (muted ink — `bg-muted-foreground` dot, muted word).** needs_info
-(2026-08-23) deliberately takes NO new hue: "waiting on you" is quiet, not an alarm.
-Never invent a fifth status color.
+Status mapping is fixed and is the whole status vocabulary everywhere (List,
+Board, pane, extension, emails): **in_review = violet "Your call" · open = cobalt
+"Open" · needs_info = grey "Needs info" · resolved = green "Done"**, plus
+**Processing** (grey pill, pulsing dot) which overrides the label while
+`refineStatus === 'running'`. Rendered ONLY by `StatusPill`
+(`src/components/ui/status-pill.tsx`, `STATUS_INK`); never hand-roll a status
+colour, never invent a fifth hue. Project colours come from `projectColor(id)`
+(`ui/project-tag.tsx`): six fixed inks hashed by id (cobalt, violet, green, teal,
+slate, magenta), a grey square for General.
 
 ## Type
 
-- **Display — Fraunces** (`font-display`): h1–h3, the wordmark, hero copy.
-  Weights 500–700. Tight tracking.
-- **Body — Libre Franklin** (`font-sans`): everything else. 400/500/600.
-- **Mono — IBM Plex Mono** (`font-mono`): timestamps, slugs, tokens, file
-  paths, transcript times, code, the stamp.
+- **Inter** for everything (`--font-display` and `--font-body` both resolve to
+  it; the `font-display` class is harmless but adds nothing). Headings are
+  `font-semibold tracking-[-0.01em]`: page h1 `text-xl`, pane title `text-xl`,
+  section h2/h3 `text-base` / `text-[13px]`, landing h1 `text-5xl`.
+- **JetBrains Mono** (`font-mono`): timestamps, counts and scores (`7/8`),
+  slugs, tokens, file paths, transcript times, code. Tabular numerals on clocks.
+- Density: body `text-sm` (14px) for prose; tables, rows, pills, fields and the
+  extension run at **13px**; labels and meta at `text-xs`.
+- Loaded via Google Fonts in `index.html`. Do not add other font families; the
+  extension stays on the system stack.
 
-Loaded via Google Fonts in `index.html`. Do not add other font families.
+## Components (`src/components/ui/`)
 
-## Motifs
+shadcn-style primitives, new-york, no `asChild`: `button` (h-8 default, h-7
+`sm`, h-9 `lg`; variants `default` cobalt · `outline` · `ghost` · `approve`
+green · `destructive` · `link`; `text-[13px] font-medium`, no shadows), `card`
+(`rounded-lg border bg-card`, no shadow), `input` (h-8, `border-input`), `label`,
+`sidebar` (hand-rolled, no radix; collapse persisted; mobile overlay). Plus the
+redesign's six:
 
-- **The return mark** — `src/components/logo.tsx` (`ReturnMark`): one
-  returning stroke — out along the top in ink, U-turn, back in cobalt with an
-  arrowhead landing left — beside the lowercase Fraunces wordmark `handback`.
-  Never redraw it ad hoc; import it. Oversized restatement for the landing
-  watermark: `landing/return-diagram.tsx`. Extension icons render the same
-  geometry (`extension/scripts/make-icons.mjs` maps the 28×20 viewBox).
-- **Hairline rules** — sections divide with 1px `--border` lines (`.rule`),
-  like ledger paper. Prefer rules over boxes; prefer boxes over shadows.
-- **The stamp** (`.stamp`) — tilted, letterspaced, bordered mono label. Used
-  sparingly: landing-page flourishes, the "signed off" moment. Max one per view.
-- **Ink underline** (`.ink-underline`) — cobalt underline stroke for one key
-  word in a headline. Landing only.
-- **Numbered sections** — editorial `01 / 02 / 03` mono numerals for
-  how-it-works flows and setup pages (`src/components/setup-step.tsx`).
-  **Only number what the person actually does on this page**; reference
-  material (tool lists, disconnect instructions, token management, "what
-  happens next") takes a plain `font-display` heading over a hairline rule
-  instead. A shorter numbered run reads lighter, and an inflated one reads as
-  work — /connect went 01–04 → 01/02 for exactly that reason.
-- **Inert command blocks** — a copyable block whose contents aren't yet real
-  (a placeholder token) renders dimmed (`bg-muted/30 opacity-60`),
-  `select-none`, and with the Copy button replaced by a mono `preview` label.
-  Never ship a Copy button on something that must not be pasted.
+- `StatusPill({status, processing})` — 22px washed pill, 7px ink dot, the label.
+- `ProjectTag({id, name})` — 22px muted pill with the project's colour square.
+- `Avatar({name, size})` — initials in a cobalt-wash disc (`sm` 20px, `md` 28px).
+- `Tabs({items, value, onChange})` — underline tabs, 2px ink bar on the active
+  one, optional mono count.
+- `Chip({on, count})` — 28px filter chip, `border-input`; ON = ink background,
+  white text. Also the look of every popover trigger (Space/Project facets,
+  destination).
+- `PageHeader({title, meta, actions, tabs})` — h1 + muted meta + right actions,
+  tabs row under it.
 
-## Components
+**Motifs that survive:** the return mark (`logo.tsx` `ReturnMark` + lowercase
+`handback` wordmark, never redrawn; extension icons share the geometry); 1px
+rules; inert command blocks (`opacity-60 select-none` + a mono `preview` label
+until the contents are real — never a Copy button on something that must not be
+pasted). **Motifs that are gone:** `.stamp` (the class exists without its tilt;
+do not use it), `.ink-underline`, editorial `01/02` numerals, paper ground,
+serif anything, hard offset shadows, black slabs.
 
-shadcn primitives live in `src/components/ui/` (button, card, input, label,
-sidebar — add more there as needed, new-york style, no `asChild`). The sidebar
-is shadcn's re-cut without radix: paper ground, hairline right rule, mono
-uppercase group labels, cobalt-wash active item; collapse persists (`storageKey`
-prop), mobile is an overlay. **It is THE app chrome since 2026-08-23** — the top
-tab nav is deleted. `layout.tsx`'s AppShell renders it on every signed-in page
-except /admin (which keeps its own sidebar shell; the two never nest): groups
-Review (Walkthroughs · Projects · Usage), Capture (Record · Upload · Phone ·
-Extension), Team (Teams · Connect); the footer carries Upgrade (non-pro only),
-Admin (admins), the account email + Sign out. No new sidebar variants — reuse
-it. Buttons: `default` variant is cobalt; `outline` for secondary actions;
-destructive only for deletes. Marketing chrome on public pages is unchanged.
-Pro-gated surfaces refuse with the exact string `Pro feature`; clients render
-`ProUpsell` (`src/components/pro-upsell.tsx`) linking /upgrade — never a raw
-error. /upload's working screen carries a violet-left-ruled "stay on this page"
-notice — the beforeunload guard can't catch sidebar navigation, the sentence
-has to. The walkthrough viewer's surfaces (the desk, its rail, its tabs) are
-specified in the Viewer section below — RefinePanel / AssistantPanel /
-AgentAnswer / CommentsPanel are DELETED (2026-08-24), and the single "exchange"
-pane that briefly replaced them was itself untangled 2026-08-24pm into the
-Conversation tab + Edit with AI tab + the Overview hero's sign-off/answer.
+## The shell (`src/app/layout.tsx`)
 
-## Extension (`extension/`)
+Signed-in pages render inside **topbar + (sidebar | content)**:
 
-The Chrome side panel and on-page surfaces obey the same law — light paper,
-cobalt, nothing orange, no dark mode — but run on **system fonts** (no Google
-Fonts inside an extension): `ui-sans-serif` body, `ui-monospace` for
-timestamps/keycaps/transcript times. Tokens are duplicated as plain CSS custom
-properties in `extension/src/sidepanel/styles.css` (no Tailwind there).
+- **Topbar** — sticky, 52px, white, `border-b`: wordmark → /app; a 420px grey
+  search pill (`Search walkthroughs, projects, people`, submits to `/app?q=`);
+  spacer; `● Record` (default button → /record); `Upgrade` ghost (non-pro);
+  the `Avatar` menu (email · Usage · Admin · Sign out).
+- **Sidebar** — 232px, `bg-sidebar`, `border-r`, 13px items with 16px icons,
+  active = cobalt-wash + cobalt text. Top: Walkthroughs · Projects · Teams ·
+  Connect. Group **Projects**: the live project list (colour square + name →
+  `/app?project=<id>`), `All projects →` past 10, `+ New project`. Group
+  **Spaces** (only with ≥1 team): Personal → `/app?space=personal`, each team →
+  `/app?space=<id>`. Group **Capture**: Record · Upload · Phone · Extension.
+  Footer: Usage · Upgrade (non-pro) · Admin (admins). Group labels are 11px
+  semibold uppercase — not mono. No email/sign-out here (they moved to the
+  avatar menu). `/admin` keeps its own sidebar shell in the same styles.
+- **Content** — `/app` and `/walkthroughs/*` are full-bleed (the pages own their
+  `px-7`); every other page sits in `mx-auto max-w-6xl px-7 py-6` and opens with
+  `PageHeader`.
+- Marketing chrome (public pages): 60px white header (wordmark, How it works ·
+  Pricing · Docs, Sign in ghost + Get started primary), footer `mt-20 border-t`.
 
-- **Panel** (`panel.css`): paper ground, white cards, hairline rules. One big
-  cobalt action per state: idle = the full-width `Record a walkthrough` hero,
-  recording = full-width `stop recording`, review = `send to Handback` (46px).
-  With nothing open the hero sits over the **home screen** (`Home.tsx`): the
-  destination row (workspace + host + project count, click opens the switcher),
-  then the workspace's queue, then what's still on this machine — each an
-  editorial section with a mono uppercase head and the one action it offers on
-  the right, divided by hairlines, never boxes. Status reads twice on a queue
-  row, as a 7px dot and as the word, in the three fixed inks; filter chips are
-  pills that go from hairline to that same ink when on. Nothing below the hero
-  may be louder than it. An open walkthrough is **two rows of
-  chrome and then content, never more**: a **crumb row** (`← all walkthroughs`
-  muted, the mono meta line as a caption on the same row, `discard` on the
-  right), then a **title row** (the name, with `● add another recording` as the
-  cobalt ghost beside it). Discard arms into one line
-  (`discard 2 takes? yes, discard / keep`, the yes in `--destructive`) so the
-  row never grows and shoves the timeline down mid-decision.
-  Above the send button sits the destination row — **one** control, "to [space] ·
-  [project]", not two selects. Its trigger is a single hairline button with a
-  drawn chevron (`appearance: none`, never Chrome's stock arrow); clicking opens
-  **one panel that opens upward** (the row lives at the foot of the panel),
-  grouped by space — mono-uppercase space headers, and under each a `General` row
-  (the project-less choice — the server still routes by origin) then that space's
-  projects. One click sets space *and* project together; the active row is
-  cobalt-washed with a filled cobalt dot, the rest carry a hairline ring so the
-  names align. A space with no projects shows just `General` + `+ new project…`; a
-  failed context fetch shows `projects unavailable · retry` under the current
-  space; a foot row carries `manage projects` / `+ link a server`. With keys to
-  more than one server the spaces group under a mono host header. The take button
-  is the cobalt *outline* ghost — never louder than send. Settings live behind the
-  header gear and lead
-  with the Workspaces list (one row per linked workspace, cobalt border + filled
-  dot on the active one, whole row clickable, `×` to unlink); unlinked states
-  point at `/recorder` (cobalt-wash callout), they never demand a pasted token. Upload errors are a
-  white card with a 2px danger left rule: mono `UPLOAD FAILED` head, one human
-  sentence, `try again`/`details` links — never a raw server body.
-- **Parts list** (`Parts.tsx`, panel.css): the review screen. A walkthrough is a
-  vertical list of **parts** — one card per recording, in recorded order, divided
-  by hairline rules, never boxes. The word "take" never reaches the user; the noun
-  is **part** (or "recording" where that reads better). Each card: a mono head row
-  (`part N · m:ss`) with a quiet `×` that **arms inline in the same row**
-  (`delete part 1 (2:19)? yes / keep`, the yes in `--danger`, the row never
-  grows — never a browser `confirm()`); the **video in a dark well** (the one dark
-  surface, because a video needs it) that plays on click; a control row under it —
-  a small cobalt play/pause glyph, a slim 4px seek bar with a cobalt played fill,
-  and a mono tabular clock `0:04 / 2:19` — drawn only once the video has loaded; a
-  mono muted meta line (`N frames captured` / `full-rate video`, `· N console
-  errors`, `· recovered after the panel closed`, `· transcribing…`); and the
-  **transcript in its own scroll region** so a long part stays a compact card:
-  cobalt mono times, the active line cobalt-washed with an inset bar, click seeks,
-  double-click fixes a line in place. A recording whose video isn't on this machine
-  (recovered, or the preview harness) shows the first keyframe dimmed with
-  `video isn't on this machine` — never a broken player. At the foot of the list, a
-  full-width cobalt-*outline* ghost button (`● record another part`) is the only
-  add/record control on the screen; empty, the list is one muted line.
-- **Intent chips** (1.9.0): one row directly above the destination row — muted
-  lowercase `this is` + three mono pill chips `bug / feature / idea`, hairline
-  off, cobalt border + cobalt-wash on. Clicking the active chip clears it.
-  Hidden on the empty review screen. The web intake pages share the same
-  three-chip control as `IntentControl` (`src/components/phone/intent.tsx`),
-  shown only for agent-kind sends.
-- **On-page dock** (`content/ui.ts`): white pill, hairline border, mono keycaps
-  for its three keys — **draw `d`**, **clear `c`**, **stop `s`**; ink strokes
-  draw in cobalt. Never dark, never orange.
-- **Draw mode says so**: while ink owns the pointer the viewport wears a cobalt
-  inset frame with one top tag (`drawing · esc to click`), and the dock never
-  fades. The frame is captured in the recording on purpose.
-- Judged in the preview harness (`npm run preview` → `:8777/gallery.html`),
-  acceptance seed is `mode=long` (10:18, two parts, 150 frames). `mode=fresh` is
-  the other one that has to hold: a walkthrough seconds old must be one quiet
-  line, not a stack of empty scaffolding.
+## Walkthroughs — List, Board, pane (`/app`)
 
-## Viewer — the review desk (2026-08-24 rethink; supersedes the 2026-08-12 chassis)
+`src/app/app.tsx` + `src/components/inbox/*`. Filters are **URL params**
+(`view=list|board`, `status=all|call|open|processing|done`, `space`, `project`,
+`q`, `w` = the open pane) — the sidebar and topbar link into them; nothing is
+remembered in localStorage.
 
-`/walkthroughs/:id` is **the desk** (`src/components/viewer/desk/*`, canvas:
-the Walkthrough Viewer design artifact; plan: `plans/2026-08-23-viewer-rethink.md`).
-The page is **state-driven** — status decides what the hero tab IS — and renders
-**full-bleed**: the app sidebar is forced to its icon rail on this route
-(`SidebarProvider forceCollapsed`, preference untouched) and the `max-w-6xl`
-container is dropped. Structure: a **masthead bar** (crumb `Walkthroughs /` ·
-Fraunces title + quiet Rename · StatusChip dot+word, popover to change · intent
-pill · quiet project picker · "Copy agent brief" only while open · `⋯`
-OverflowMenu; mono meta line below; a `refine suggests: "…" use · dismiss` mono
-row when refine proposed a title) over two columns: **[tab rail 208px | work]**.
-The review is tabbed, not a third column (the 360px exchange pane was deleted
-2026-08-24pm — plans/2026-08-24-exchange-untangle.md): the Overview/Verdict hero
-carries the STATE **and its action**, a **Conversation** tab holds the thread,
-and **Edit with AI** is the assistant on its own surface — nothing overloads a
-single pane any more.
+- **Groups** (`inbox/groups.ts`), in this order everywhere: **Needs your call**
+  (in_review + needs_info, violet dot) · **Processing** (refine running, grey
+  pulsing) · **Open** (cobalt) · **Done** (resolved, green — the archive, auto-
+  expires in 30 days).
+- **Header**: `PageHeader` — title is the project (with its swatch) or the space
+  when filtered, else "Walkthroughs"; meta `N walkthroughs`; actions `Upload`
+  outline + `Record` primary; tabs `List | Board`. Tools row: status `Chip`s with
+  mono counts, spacer, Space/Project facet triggers styled as chips.
+- **List** (`list-view.tsx`): a 13px table — Walkthrough · Status · Agent ·
+  Project · Recorded by · Age. Section rows per group (`▾ Needs your call 3`;
+  Done collapsed by default with `archived · clears after 30 days`). Rows h-11,
+  hover `bg-secondary`, selected `bg-cobalt-wash`. Cell 1 = the **✓ circle**
+  (approves an in_review row; filled green on Done; decorative otherwise), a
+  48×30 keyframe thumb, the title over a muted sub line (`2 parts · 3:57 · 31
+  keyframes`). Agent = a 56px green score bar + mono `fixed/total` from the
+  newest result's outcomes, or `—`. Row click opens the pane (`?w=`); the row
+  `⋯` = Rename (inline) · Mark resolved / Reopen · Open full page.
+- **Board** (`board-view.tsx`): four `bg-secondary` rounded-[10px] columns,
+  compact cards (thumb, title, `ProjectTag`, green score, age, `Avatar sm`).
+  HTML5 drag: drop on Open or Done changes status (optimistic); Needs your call
+  and Processing are not drop targets.
+- **Pane host**: with `w` set the page becomes `grid [1fr_640px]`; the pane is
+  sticky under the topbar, `border-l`, and the one shadow in the app
+  (`-8px 0 24px rgb(31 34 41 / .06)`). Below `lg` it is a full-screen overlay.
+- Empty state: one muted line with the Record and Upload links. Never a card
+  grid, never a dashboard row of stats.
 
-- **The rail** (`desk/rail.tsx`): vertical tabs with 16px stroke icons + mono
-  counts. Hero tab label follows status (Overview / Verdict / Question / Signed
-  off — violet count pill on verdict/question); a **Conversation** item sits
-  directly under the hero (muted count = review-note count). Then group
-  `the source` (Recording · Frames · Agent brief · Console · report.md),
-  `carved out` (Tasks), and `revise` (**Edit with AI** — agent-kind non-child
-  only). Footer = the refine run/re-run/refining…/failed control (pro only).
-  Below lg the rail is a horizontal scrollable tab bar.
-- **Overview tab** (`desk/overview-tab.tsx`) — the state-driven hero, which now
-  carries the reviewer's action inline (not in a side pane):
-  *refining* = progress hero ("Reading your walkthrough… / Watching the frames… /
-  Writing it up…" from `refineStage`) + skeletons, resolved live by polling;
-  *open* = the digest (react-markdown) + **the key-points table** + curated
-  frames strip + capture notes + removed spans + "the full ledger" disclosure;
-  *in_review* = **THE VERDICT**: violet `handed back` head, the agent's summary
-  as a Fraunces statement, rendered body, **what you raised → what came back**
-  (per-point outcomes: `✓ fixed` green · `◐ partial` · `— skipped/n-a` muted ·
-  `· unanswered`), evidence thumbs, files touched, then the **sign-off card**
-  (`SignOff`, violet-left-ruled, Approve & sign off cobalt / Send back arming
-  inline); *needs_info* = the agent's question as the hero with the **answer
-  form** right under it (`AnswerForm`: input, then Answer / Answer by voice /
-  Ask <uploader>); *resolved* = THE `.stamp` (the one stamp on the view) +
-  archival verdict + expiry + Keep. The sign-off/answer controls live in
-  `desk/review-actions.tsx` (`SignOff` self-guards to member·in_review·hasResult).
-- **Key points** (`desk/key-points.tsx`): severity dots (high red · medium ink ·
-  low muted), mono cobalt m:ss seek chips — the only interactive elements.
-- **Conversation tab** (`desk/conversation.tsx`): ONE chronological thread —
-  refine/activity `·` system lines, agent results (white card, PR link, `N/M key
-  points addressed`), questions (ink left rule), answers, send-backs, and
-  timestamped comments (initial chips, seek chip, inline-armed delete) — and ONE
-  single-purpose **comment** box (+ an `at m:ss` pin chip once the player has
-  moved). No mode toggle, no assistant, no sign-off — it's the history and the
-  margin only.
-- **Edit with AI tab** (`desk/assistant.tsx` — `AssistantTab`): the walkthrough
-  assistant on its own surface, labeled so it never reads as a person. `You` /
-  `AI editor` turns with quiet `·` action lines, one message box, Pro-gated
-  (upsell inline). Pulled out of the review thread 2026-08-24pm.
-- **Recording tab**: VideoStage takes the width the aspect leaves; the
-  transcript keeps a fixed 300px column with bounded scroll (a portrait phone
-  recording must never shred it into one-word lines). Timeline below; console
-  and raw report.md live in their own tabs (report stays deliberately
-  unrendered).
-- Human kind keeps the edit→share page (masthead + FinalCut/CloudEditor, no
-  rail/tabs); a child task is brief + `SignOff`/`AnswerForm` + Conversation in a
-  two-column container (no rail).
+## Walkthrough detail — pane and page (`src/components/viewer/pane/*`)
 
-The bullets below (player, timeline, frames slideshow, transcript, editor,
-watch page) describe components the desk reuses unchanged:
-- **Section heads** are `SectionHead` (small-caps mono) — transcript, console,
-  frames, report, for a person. Sections divide with `.rule` hairlines, never
-  boxes.
+ONE body, `WalkthroughDetail`, renders in the pane (`/app?w=`) and as the
+Overview of the full page (`/walkthroughs/:id`). The old desk (masthead + rail +
+tabbed hero) is deleted.
+
+- **Header** (`pane/header.tsx`): `✓ Approve` (approve green; member ·
+  in_review · has a result) · `Send back` (outline → popover textarea) · spacer ·
+  `Copy brief` ghost (agent kind, open) / `ShareControl` (human) · `OverflowMenu`
+  · pane: `Open full page ↗` + `×`. Page mode adds a crumb `Walkthroughs /
+  {ProjectTag}` above.
+- **Body**, in order: editable title (`text-xl font-semibold`; the refine-
+  suggested title as a muted `use · dismiss` line) → **fields grid**
+  (`120px 1fr 120px 1fr`: Status `StatusChip` popover · Project picker as a
+  `ProjectTag` + chevron · Recorded by `Avatar sm` + name + UTC stamp · Agent
+  `author · answered 2h ago` · Parts `2 · 3:57 · 31 keyframes` · Intent) → the
+  **video** (`VideoStage`, pane only — the page's Recording tab owns the single
+  player and Overview seeks jump to it) → **What you said** (`digestMd`, or the
+  refining pill + stage line, or the run-refine / `ProUpsell` line) → **Key
+  points · N of M fixed** (`key-points-checklist.tsx`: 18px disc — green ✓ fixed
+  · cobalt ring ◐ partial · grey – skipped · hollow when unanswered; severity
+  dot; mono cobalt `m:ss` seek chip) → **Result from {agent}**
+  (`result-card.tsx`: summary, ≤6 mono file chips, PR · evidence thumbs · full
+  write-up toggles) → the question card + `AnswerForm` (needs_info) → the Done
+  line (`StatusPill` + `Signed off … · clears …` + Keep; no stamp) →
+  **Activity** (`desk/conversation.tsx`: `Avatar sm` + `who · time` lines,
+  system lines muted, a bordered composer with one `Comment` button).
+- **Page tabs** (`Tabs`): Overview · Recording · Frames (count) · Console
+  (count) · Brief · report.md · Tasks · Edit with AI (agent kind non-child; Pro
+  gating unchanged). Recording stays mounted across tabs; leaving it pauses
+  sound. Human kind = header + FinalCut/CloudEditor; child = the detail body
+  with `TaskBrief`.
+- Section heads are `text-[13px] font-semibold` (`SectionHead`), never
+  small-caps mono.
+
+The bullets below describe components the pane and page reuse unchanged:
 - **The player** (`video-stage.tsx`, `VideoStage`): every viewer surface (agent
   view, final cut, `/w`) plays through ONE custom-chrome player — **never native
   `<video controls>`**. A dark video well over a paper transport bar: play/pause,
@@ -326,43 +263,90 @@ watch page) describe components the desk reuses unchanged:
   centered Download link, transcript, and the one-line sign-off
   "Recorded with Handback → handback.dev". No controls, no metadata soup.
 
-## Walkthroughs grid (`/app`)
+## Extension (`extension/`)
 
-`/app` is a **card grid**, not a list — "the walkthroughs available to you," never
-an inbox or a queue. Responsive CSS grid (1 col phone / 2 mid / 3 wide), every
-grid item `min-w-0` (the landing gotcha — mono lines never wrap). Card anatomy
-(`src/components/inbox/card.tsx`):
+The side panel obeys the same law on **system fonts** (no webfonts in an
+extension): `'Segoe UI', system-ui` body, `Cascadia Mono / Consolas` mono.
+Tokens mirror the web palette as plain CSS custom properties in
+`extension/src/sidepanel/styles.css` (white ground, `--paper #f7f8fa` for wells,
+`--input`, the four status inks, `--danger`); type scale 12/13/14/16/20; radius
+8 (cards) / 6 (controls).
 
-- **Visual header** (aspect-video, hairline bottom rule). Agent-kind walkthroughs
-  with frames show a **real keyframe thumbnail** (`object-cover`) with a small
-  mono duration pill bottom-right (white/backdrop-blur, hairline). Human handbacks
-  and frameless walkthroughs get a **paper title-card**, never a grey box: paper
-  ground, a hairline inner frame, a mono small-caps kind label
-  (`For a person` / `Screen recording`) over the duration set large in Fraunces —
-  the duration is the hero so the placeholder reads as a designed cover.
-- **Body**: status chip (7px dot + word in the fixed ink) with the ⋯ menu on the
-  right; Fraunces title (2-line clamp); a mono `space · project` line; a mono
-  footer of `uploader · time` left and `duration · N err · Nd` (expiry) right.
-- The **whole card is a stretched `<Link>`**; the only thing above it is the ⋯
-  menu, whose single job is **Rename** — it arms the inline title editor in the
-  card body (usePopover from `viewer/overflow-menu`), no native select, no
-  `confirm()`.
+- **Header** (44px, white, 1px rule): mark + `handback` (600 14px). Right: while
+  recording a red pill `● REC m:ss`; otherwise a muted `space · project` label
+  (the destination control itself stays in the review footer — its popover
+  opens upward). No settings gear here.
+- **Home**: `● Record a walkthrough` — full-width, 40px, cobalt (the one primary
+  per screen). Sections with 11px semibold uppercase heads (`Needs your call ·
+  N`, `In progress · N`, `On this machine · N`), rows 40px with a 7px status
+  dot, 500 title, right-aligned mono score / muted stage / `1 part · not sent`.
+  Filter chips = `.chip` (28px, ON = ink). Footer line: `Open Handback ↗` left,
+  `Settings` right (opens the drawer).
+- **Recording** — the panel is the live block and nothing else (1.11.0): mono
+  clock 44px, muted `N keyframes · N lines · tab audio on`, the captions box
+  (1px border, radius 8, 15px text, with the muted line `rough live captions —
+  the real transcript is written after you stop` inside it), `■ Stop` 40px ink,
+  and pinned to the bottom in a grey well: `you can close this panel — recording
+  keeps going. reopen it from the toolbar icon, or press s on the page, to stop`.
+  The toolbar badge is red `REC` (the one red besides discard/delete).
+- **Review**: crumb `← Walkthroughs` (cobalt) left, `Discard` (danger red,
+  arms inline — never a browser confirm) right; title input 17px 600; muted `N
+  parts · m:ss`; each **part** a bordered card: 56×34 thumb, `Part N · m:ss`,
+  muted status line (`N keyframes · transcript ready` / `writing the transcript ·
+  62%` / `recovered after the panel closed`), a green ✓ disc when the transcript
+  is in or mono `%` + a 4px cobalt bar while it's written (indeterminate slide
+  when no real fraction); the video well, controls and transcript list live
+  inside the card. `+ Record another part` = 40px outline. Footer: `This is` +
+  three chips (ON = ink) · `To` + the destination trigger · `Send to Handback`
+  cobalt 40px · muted `Uploads in the background once the transcript is done.
+  You can close this.` Send is never disabled by transcription and never ships
+  the live dictation (the upload waits).
+- **Outbox rows** (13px): `waiting for the transcript…` · `uploading … 71%` +
+  bar · done = `"title" uploaded`, **`view your handback →`** (cobalt 600 14px),
+  `Handback is processing it`.
+- Gates (mic, picker), the settings drawer and the link card are bordered
+  cards with 32px buttons. Nothing orange, no shadows, no dark surface but the
+  video well.
+- **On-page dock** (`content/ui.ts`): white pill, 1px border, mono keycaps for
+  **draw `d`**, **clear `c`**, **stop `s`**; ink strokes draw in cobalt. **Draw
+  mode says so**: a cobalt inset frame with one top tag (`drawing · esc to
+  click`); the frame is captured in the recording on purpose.
+- Judged in the preview harness (`npm run preview` → `:8777/gallery.html`),
+  acceptance seed `mode=long`; `mode=fresh` must read as one quiet line.
 
-The **filter toolbar** is a light row over a hairline, not a rail: a search
-input, the status filter as a **segmented control** (each segment carries its
-mono count), and quiet **Space/Project popover selects** (label + value +
-chevron) that appear only when the account has more than one space / any
-projects. Summary counts are one quiet mono meta line under the "Walkthroughs"
-title (`N available · N open · N in review`), never a dashboard row. Thumbnails
-come from `walkthroughs.inbox`'s `thumbUrl` (one presigned keyframe per card).
+## Landing, docs, legal
+
+Landing (`src/components/landing/*`): hero = headline `text-5xl font-semibold`
++ `text-lg` sub + two buttons on the left, `AppMock` (a CSS rendering of the
+List + pane, `rounded-xl border shadow-sm`) on the right; How it works = three
+bordered cards with a cobalt-wash number badge; Pricing = three bordered cards,
+the middle with a `border-t-2 border-t-cobalt` and a `Most popular` chip; final
+CTA = one `bg-secondary` band. Docs/privacy/terms (`legal.tsx`): `max-w-3xl`,
+h1 `text-2xl font-semibold`, h2 `text-base`, prose 15px, command blocks
+`rounded-md border bg-secondary font-mono text-[13px]`.
+
+## Secondary app pages
+
+Every page: `PageHeader` first, then bordered cards (`rounded-lg border bg-card
+p-5`) and List-idiom tables (13px, `th` xs muted, rows h-10/11, hover
+`bg-secondary`). Setup pages (`/connect`, `/recorder`) use `SetupStep` cards
+with a cobalt-wash number badge for the steps the person actually does;
+reference material is a plain `text-base font-semibold` heading over a card.
+Meters (`/usage`) are 4px bars (cobalt, destructive at ≥90%). Pro-gated
+surfaces refuse with the exact string `Pro feature`; clients render `ProUpsell`
+(`bg-secondary` notice + `Upgrade`), never a raw error. `/upload`'s "stay on this
+page" notice stays violet-ruled.
 
 ## Don'ts
 
 - No dark mode, no `.dark`, no `color-scheme: dark`.
 - No orange, amber, or warm-yellow hues. Warning states use violet or red.
-- No purple-gradient hero, no glassmorphism, no drop-shadow soup — shadows stay
-  `shadow-sm` or none; depth comes from rules and card/paper contrast.
+- No serif, no stamps, no editorial numerals, no paper/ledger motifs, no hard
+  offset shadows, no black slabs, no glassmorphism — the pane edge is the one
+  shadow.
 - No new font families, no icon libraries beyond `lucide-react`.
+- No status colour outside `StatusPill`/`STATUS_INK`; no fifth status hue.
+- No card grid on `/app`; no separate "inbox" or dashboard.
+- Don't center whole app pages; app surfaces are left-aligned (`max-w-6xl` or
+  full-bleed), landing sections may center.
 - Nothing copied from the Gripe extension UI — not a div, not a class list.
-- Don''t center whole app pages; app surfaces are left-aligned with a max-width
-  container (`max-w-6xl`), landing sections may center.

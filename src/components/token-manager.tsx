@@ -11,6 +11,7 @@ import type { ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '~/components/ui/button'
 import { useTRPC } from '~/lib/trpc'
+import { cn } from '~/lib/utils'
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
@@ -21,6 +22,8 @@ function fmtDate(value: string | null) {
   const d = new Date(value)
   return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`
 }
+
+const TH = 'text-muted-foreground border-border border-b px-3 py-1.5 text-left text-xs font-medium'
 
 /**
  * True when a `tokens.create` failure is the active-token cap (server:
@@ -55,32 +58,34 @@ export function TokenList() {
 
   return (
     <div className="space-y-3">
-      {tokensQuery.isPending && <p className="text-muted-foreground text-sm">Loading…</p>}
-      {tokensQuery.isError && <p className="text-destructive text-sm">{tokensQuery.error.message}</p>}
+      {tokensQuery.isPending && <p className="text-muted-foreground text-[13px]">Loading…</p>}
+      {tokensQuery.isError && (
+        <p className="text-destructive text-[13px]">{tokensQuery.error.message}</p>
+      )}
       {tokensQuery.data?.length === 0 && (
-        <p className="text-muted-foreground text-sm">No tokens yet.</p>
+        <p className="text-muted-foreground text-[13px]">No tokens yet.</p>
       )}
       {tokensQuery.data && tokensQuery.data.length > 0 && (
-        <>
-          <div className="border-border text-muted-foreground flex items-center gap-4 border-b pb-2 text-xs font-medium tracking-wide uppercase">
-            <span className="min-w-0 flex-1">Name</span>
-            <span className="w-20 shrink-0">Token</span>
-            <span className="w-28 shrink-0">Created</span>
-            <span className="w-28 shrink-0">Last used</span>
-            <span className="w-20 shrink-0" />
-          </div>
-          <div className="divide-border divide-y">
+        <table className="w-full border-collapse text-[13px]">
+          <thead>
+            <tr>
+              <th className={TH}>Name</th>
+              <th className={TH}>Created</th>
+              <th className={TH}>Last used</th>
+              <th className={cn(TH, 'text-right')} />
+            </tr>
+          </thead>
+          <tbody>
             {tokensQuery.data.map((t) => (
-              <div key={t.id} className="flex items-center gap-4 py-3">
-                <p className="min-w-0 flex-1 truncate text-sm font-medium">{t.name}</p>
-                <span className="w-20 shrink-0 font-mono text-xs">…{t.lastFour}</span>
-                <span className="text-muted-foreground w-28 shrink-0 font-mono text-xs">
+              <tr key={t.id} className="border-border/60 border-b">
+                <td className="px-3 py-2 font-medium">{t.name}</td>
+                <td className="text-muted-foreground px-3 py-2 font-mono text-xs tabular-nums">
                   {fmtDate(t.createdAt)}
-                </span>
-                <span className="text-muted-foreground w-28 shrink-0 font-mono text-xs">
+                </td>
+                <td className="text-muted-foreground px-3 py-2 font-mono text-xs tabular-nums">
                   {fmtDate(t.lastUsedAt)}
-                </span>
-                <div className="w-20 shrink-0">
+                </td>
+                <td className="px-3 py-2 text-right">
                   <Button
                     type="button"
                     variant="ghost"
@@ -94,13 +99,13 @@ export function TokenList() {
                     }}>
                     Revoke
                   </Button>
-                </div>
-              </div>
+                </td>
+              </tr>
             ))}
-          </div>
-        </>
+          </tbody>
+        </table>
       )}
-      {revoke.isError && <p className="text-destructive text-sm">{revoke.error.message}</p>}
+      {revoke.isError && <p className="text-destructive text-[13px]">{revoke.error.message}</p>}
     </div>
   )
 }
@@ -125,12 +130,12 @@ export function TokenManager({
   blurb?: ReactNode
 }) {
   return (
-    <section className="border-border border-t pt-6">
-      <h2 className="font-display text-xl font-semibold">{title}</h2>
+    <section className="mt-10">
+      <h2 className="text-base font-semibold">{title}</h2>
       {blurb && (
-        <p className="text-muted-foreground mt-2 max-w-2xl text-sm leading-relaxed">{blurb}</p>
+        <p className="text-muted-foreground mt-1 max-w-2xl text-[13px] leading-relaxed">{blurb}</p>
       )}
-      <div className="mt-5">
+      <div className="bg-card border-border mt-4 rounded-lg border p-5">
         <TokenList />
       </div>
     </section>
@@ -144,10 +149,10 @@ export function TokenManager({
  */
 export function TokenLimitNotice() {
   return (
-    <div className="border-review/40 bg-review-wash space-y-4 rounded-md border p-4">
+    <div className="border-destructive/40 bg-card space-y-4 rounded-lg border p-4 text-[13px]">
       <div>
-        <p className="text-sm font-semibold">You've reached your active-token limit.</p>
-        <p className="text-muted-foreground mt-1 text-sm leading-relaxed">
+        <p className="font-semibold">You've reached your active-token limit.</p>
+        <p className="text-muted-foreground mt-1 leading-relaxed">
           Linking, connecting an agent, and recording each mint a token, and they don't expire on
           their own. Revoke one you no longer use, then try again.
         </p>

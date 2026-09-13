@@ -3,6 +3,7 @@ import type {
   MicState,
   PageEvent,
   PointerSample,
+  RecorderUpdate,
   RecordingFrame,
   RecordingMeta,
   TranscriptSegment,
@@ -93,22 +94,6 @@ type DisplayOptions = DisplayMediaStreamOptions & { systemAudio?: 'include' | 'e
 /** MicState moved to lib/types — the content script speaks it too. */
 export type { MicState };
 
-export interface RecorderUpdate {
-  elapsedMs: number;
-  frameCount: number;
-  segmentCount: number;
-  interim: string;
-  micState: MicState;
-  /**
-   * App/system audio: 'none' = the share came without a track (checkbox missed,
-   * or a window was picked), 'silent' = a track exists but nothing has been
-   * heard on it yet, 'live' = real signal has landed. 'silent' minutes into a
-   * take with sound playing means the loopback is dead — the sound is reaching
-   * the ears but not Chrome (wrong default output device, virtual audio driver).
-   */
-  sysAudio: 'none' | 'silent' | 'live';
-}
-
 export interface RecorderHandlers {
   onUpdate(update: RecorderUpdate): void;
   /** The user ended the screen share from Chrome's own UI. */
@@ -168,7 +153,7 @@ function toJpeg(canvas: HTMLCanvasElement): Promise<Blob> {
 
 /**
  * Where the pointer lands inside the captured frame, 0–1, or null when we can't
- * be sure. getDisplayMedia never says *what* it handed us, so the frame's shape
+ * be sure. The capture stream never says *what* it handed us, so the frame's shape
  * is the only evidence: a frame shaped like the screen is the screen (map from
  * `screenX/Y`), a frame shaped like the viewport is the tab (map from
  * `clientX/Y`). A window capture matches neither and a second monitor pushes
@@ -308,6 +293,11 @@ export class Recorder {
     // belongs in the take. Chrome only grants it when the picker's "share audio"
     // box is ticked on a tab or full-screen surface — a window share has no box —
     // so its absence is a normal outcome, surfaced in the HUD, never an error.
+    // getDisplayMedia runs HERE, in the offscreen document: Chrome allows it
+    // there without a user gesture (the DISPLAY_MEDIA reason is what it's for),
+    // whereas a chrome.desktopCapture stream id picked by the panel cannot be
+    // consumed from another document — Chrome aborts with "Error starting tab
+    // capture" (Screenity hit the same wall). Don't move the picker back.
     const displayOptions: DisplayOptions = {
       video: { frameRate: { ideal: this.pristine ? 30 : 10 } },
       audio: { ...RAW_AUDIO },

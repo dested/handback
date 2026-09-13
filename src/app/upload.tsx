@@ -21,6 +21,7 @@ import { HUMAN_ROWS, StageList, isCommitted } from '~/components/phone/stages'
 import { Button, buttonVariants } from '~/components/ui/button'
 import { Input } from '~/components/ui/input'
 import { Label } from '~/components/ui/label'
+import { PageHeader } from '~/components/ui/page-header'
 import { TokenLimitNotice, isTokenLimitError } from '~/components/token-manager'
 import { useCaptureToken } from '~/lib/capture-token'
 import { fetchContext, type ServerContext } from '~/lib/capture/context'
@@ -268,23 +269,20 @@ export function UploadPage() {
   }, [phase])
 
   return (
-    <div className="max-w-3xl space-y-10">
-      <header className="space-y-4">
-        <p className="text-cobalt font-mono text-xs tracking-widest uppercase">Upload</p>
-        <h1 className="font-display text-4xl font-semibold tracking-tight">
-          Hand back a recording.
-        </h1>
-        <p className="text-muted-foreground text-base leading-relaxed">
+    <div className="max-w-3xl space-y-8">
+      <div>
+        <PageHeader title="Hand back a recording" className="px-0 pt-0" />
+        <p className="text-muted-foreground mt-3 text-[15px] leading-relaxed">
           Already have the clip? Drop it here — distilled into keyframes, transcript and report for
           your agent, or shipped whole for a person to review — without leaving the browser.
         </p>
-        <p className="text-muted-foreground text-xs">
+        <p className="text-muted-foreground mt-2 text-[13px]">
           Where your recording goes →{' '}
           <Link to="/privacy#processors" className="text-cobalt hover:underline">
             /privacy#processors
           </Link>
         </p>
-      </header>
+      </div>
 
       {phase === 'intake' && (
         <section className="space-y-6">
@@ -316,12 +314,12 @@ export function UploadPage() {
               addFiles(Array.from(event.dataTransfer.files))
             }}
             className={cn(
-              'flex w-full items-center justify-center rounded-md border border-dashed px-6 py-12 text-sm transition-colors',
+              'flex w-full items-center justify-center rounded-lg border-2 border-dashed p-10 text-center text-[13px] transition-colors',
               dragging
                 ? 'border-cobalt bg-cobalt-wash/40 text-cobalt'
-                : 'border-border bg-muted/20 text-muted-foreground hover:border-cobalt/50'
+                : 'border-input bg-secondary text-muted-foreground hover:border-cobalt/50'
             )}>
-            drop a screen recording here — or <span className="text-primary ml-1">browse</span>
+            drop a screen recording here — or <span className="text-cobalt ml-1 font-medium">browse</span>
           </button>
 
           {/* Who it's for decides everything downstream — distill or ship
@@ -341,8 +339,10 @@ export function UploadPage() {
             onRetryContext={() => setCtxAttempt((n) => n + 1)}
           />
 
-          <div className="space-y-2">
-            <Label htmlFor="upload-title">Title</Label>
+          <div className="space-y-1.5">
+            <Label htmlFor="upload-title" className="text-muted-foreground text-xs">
+              Title
+            </Label>
             <Input
               id="upload-title"
               value={title}
@@ -388,11 +388,9 @@ export function UploadPage() {
           <StageList progress={progress} rows={kind === 'human' ? HUMAN_ROWS : undefined} />
           {/* The beforeunload guard only catches tab close/reload — a sidebar
               click is a plain SPA navigation, so the warning has to do the work. */}
-          <div className="border-review border-l-2 pl-3">
-            <p className="text-sm leading-relaxed">
-              Stay on this page until it finishes. The distilling and upload happen in this tab —
-              navigating away (the sidebar included) throws the run away and you start over.
-            </p>
+          <div className="border-review/40 bg-review-wash/40 rounded-lg border p-4 text-[13px] leading-relaxed">
+            Stay on this page until it finishes. The distilling and upload happen in this tab —
+            navigating away (the sidebar included) throws the run away and you start over.
           </div>
           {!isCommitted(progress) && (
             <Button type="button" variant="outline" onClick={() => abort.current?.abort()}>
@@ -404,12 +402,12 @@ export function UploadPage() {
 
       {phase === 'done' && result && (
         <section className="space-y-6">
-          <div className="border-approve/40 bg-approve-wash space-y-3 rounded-md border p-5">
-            <div className="flex items-center gap-3">
+          <div className="border-approve/40 bg-approve-wash space-y-3 rounded-lg border p-5">
+            <div className="flex items-center gap-2.5">
               <span className="bg-approve size-2 shrink-0 rounded-full" />
-              <p className="font-display text-2xl font-semibold">Handed back.</p>
+              <p className="text-lg font-semibold tracking-tight">Handed back.</p>
             </div>
-            <p className="text-sm font-medium">{sendTitle}</p>
+            <p className="text-[13px] font-medium">{sendTitle}</p>
             <p className="text-muted-foreground font-mono text-xs">
               {kind === 'human'
                 ? `video for a person · ${result.lineCount} lines · ${mmss(result.durationMs)}`
@@ -440,9 +438,7 @@ export function UploadPage() {
               hand — the panel polls briefly for the server's own nudges. */}
           {kind === 'agent' && (
             <div className="space-y-2">
-              <p className="text-muted-foreground font-mono text-xs tracking-widest uppercase">
-                Attachments
-              </p>
+              <p className="text-[13px] font-semibold">Attachments</p>
               <AttachmentsPanel walkthroughId={result.walkthroughId} poll />
             </div>
           )}
@@ -459,27 +455,25 @@ export function UploadPage() {
       )}
 
       {phase === 'failed' && (
-        <section className="border-border border-l-destructive bg-card space-y-3 rounded-md border border-l-2 p-5">
-          <p className="text-muted-foreground font-mono text-xs tracking-widest uppercase">
-            Didn't make it
-          </p>
+        <section className="border-border border-l-destructive bg-card space-y-3 rounded-lg border border-l-2 p-5">
+          <p className="text-[13px] font-semibold">Didn't make it</p>
           {isTokenLimitError(failure) ? (
             <TokenLimitNotice />
           ) : (
-            <p className="text-sm leading-relaxed">{failure}</p>
+            <p className="text-[13px] leading-relaxed">{failure}</p>
           )}
-          <p className="text-sm">
+          <p className="text-[13px]">
             <button
               type="button"
               onClick={() => void send()}
-              className="text-primary underline underline-offset-4">
+              className="text-cobalt font-medium hover:underline">
               try again
             </button>
             <span className="text-muted-foreground"> · </span>
             <button
               type="button"
               onClick={reset}
-              className="text-muted-foreground underline underline-offset-4">
+              className="text-muted-foreground hover:underline">
               start over
             </button>
           </p>

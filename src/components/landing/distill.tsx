@@ -102,7 +102,7 @@ export function Distill() {
             </figcaption>
           </figure>
           <div>
-            <p className="font-display text-2xl leading-snug font-semibold tracking-tight">
+            <p className="text-2xl leading-snug font-semibold tracking-tight">
               A model reading consecutive frames side by side follows what happened. The same frames
               handed over one at a time, it doesn’t.
             </p>
@@ -129,9 +129,9 @@ export function Distill() {
 
 function Stage({ n, title }: { n: string; title: string }) {
   return (
-    <div className="flex items-baseline gap-4">
-      <span className="text-cobalt font-mono text-sm tracking-[0.14em]">{n}</span>
-      <h3 className="font-display text-2xl font-semibold tracking-tight">{title}</h3>
+    <div className="flex items-baseline gap-3">
+      <span className="text-cobalt text-xs font-semibold">{n}</span>
+      <h3 className="text-lg font-semibold tracking-tight">{title}</h3>
     </div>
   )
 }

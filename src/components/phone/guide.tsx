@@ -210,8 +210,8 @@ function IosSteps({ onFiles }: { onFiles: (files: File[]) => void }) {
 
 function DesktopNotice() {
   return (
-    <div className="border-border bg-card rounded-xl border p-6">
-      <p className="text-sm leading-relaxed">
+    <div className="border-border bg-card rounded-lg border p-6">
+      <p className="text-[13px] leading-relaxed">
         This page is for your phone. Open{' '}
         <span className="font-mono text-xs font-medium">handback.dev/phone</span> there — record
         your screen anywhere, narrate it, and it lands in this inbox distilled.
@@ -223,9 +223,9 @@ function DesktopNotice() {
 /** Reference, not a step — nobody does any of this, so none of it gets a numeral. */
 function WhatHappens({ spaceLabel }: { spaceLabel: string }) {
   return (
-    <section className="rule pt-6">
-      <h2 className="font-display text-xl font-semibold">What happens to a clip</h2>
-      <ul className="text-muted-foreground mt-4 space-y-2 text-sm">
+    <section className="border-border border-t pt-6">
+      <h2 className="text-base font-semibold tracking-tight">What happens to a clip</h2>
+      <ul className="text-muted-foreground mt-4 space-y-2 text-[13px]">
         <li className="flex gap-2">
           <span className="text-cobalt">·</span>
           <span>The keyframes are cut out here, in your browser, before anything is sent.</span>
@@ -248,15 +248,12 @@ function WhatHappens({ spaceLabel }: { spaceLabel: string }) {
 
 function JustSayIt({ onIntake }: { onIntake: () => void }) {
   return (
-    <section className="rule pt-6">
-      <h2 className="font-display text-xl font-semibold">Or just say it</h2>
-      <p className="text-muted-foreground mt-2 text-sm leading-relaxed">
+    <section className="border-border border-t pt-6">
+      <h2 className="text-base font-semibold tracking-tight">Or just say it</h2>
+      <p className="text-muted-foreground mt-2 text-[13px] leading-relaxed">
         Nothing to show, only something to explain? Record a voice note instead — it goes through
         the same transcript and the same report, minus the pictures.{' '}
-        <button
-          type="button"
-          onClick={onIntake}
-          className="text-primary underline underline-offset-4">
+        <button type="button" onClick={onIntake} className="text-cobalt font-medium hover:underline">
           Start one
         </button>
         .

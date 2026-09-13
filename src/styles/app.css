@@ -1,9 +1,9 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 
-/* Handback is LIGHT ONLY — no dark mode, ever, and nothing orange. The look is
-   editorial: warm paper, near-black ink, one cobalt "reviewer's pen" accent.
-   Full visual language: ui.md. */
+/* Handback is LIGHT ONLY — no dark mode, ever, and nothing orange. The look is a
+   work tool: white ground, near-black ink, one cobalt accent, four status inks.
+   Full visual language: plans/2026-09-12-asana-redesign.md (supersedes ui.md). */
 
 @theme inline {
   --color-background: var(--background);
@@ -48,51 +48,51 @@
 }
 
 :root {
-  --radius: 0.375rem;
+  --radius: 0.5rem;
 
-  --font-display: 'Fraunces', Georgia, serif;
-  --font-body: 'Libre Franklin', 'Helvetica Neue', Arial, sans-serif;
-  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+  --font-display: 'Inter', 'Helvetica Neue', Arial, sans-serif;
+  --font-body: 'Inter', 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
 
-  /* Paper + ink */
-  --background: oklch(0.985 0.004 95); /* warm paper #fbfaf7 */
-  --foreground: oklch(0.23 0.015 260); /* cool near-black ink */
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.23 0.015 260);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.23 0.015 260);
+  /* White ground + near-black ink */
+  --background: #ffffff;
+  --foreground: #1f2229;
+  --card: #ffffff;
+  --card-foreground: #1f2229;
+  --popover: #ffffff;
+  --popover-foreground: #1f2229;
 
-  /* The reviewer's pen — cobalt blue ink */
-  --cobalt: oklch(0.485 0.195 262);
-  --cobalt-wash: oklch(0.955 0.022 262);
+  /* The one accent — cobalt */
+  --cobalt: #2f56d8;
+  --cobalt-wash: #e9edfb;
   --primary: var(--cobalt);
-  --primary-foreground: oklch(0.985 0.004 95);
+  --primary-foreground: #ffffff;
 
-  --secondary: oklch(0.955 0.006 95);
-  --secondary-foreground: oklch(0.23 0.015 260);
-  --muted: oklch(0.955 0.006 95);
-  --muted-foreground: oklch(0.5 0.012 260);
+  --secondary: #f7f8fa;
+  --secondary-foreground: #1f2229;
+  --muted: #f1f2f5;
+  --muted-foreground: #6b7280;
   --accent: var(--cobalt-wash);
   --accent-foreground: var(--cobalt);
-  --destructive: oklch(0.55 0.21 25);
-  --destructive-foreground: oklch(0.985 0.004 95);
-  --border: oklch(0.9 0.008 95);
-  --input: oklch(0.9 0.008 95);
-  --ring: oklch(0.485 0.195 262 / 45%);
+  --destructive: #c8322b;
+  --destructive-foreground: #ffffff;
+  --border: #e6e7eb;
+  --input: #d9dbe1;
+  --ring: rgb(47 86 216 / 45%);
 
-  /* Status inks: open = cobalt, in review = violet, resolved = approve green */
-  --review: oklch(0.5 0.16 300);
-  --review-wash: oklch(0.955 0.025 300);
-  --approve: oklch(0.52 0.13 155);
-  --approve-wash: oklch(0.955 0.03 155);
+  /* Status inks: open = cobalt, your-call = violet, done = approve green */
+  --review: #6b45d6;
+  --review-wash: #efe9fb;
+  --approve: #128a3c;
+  --approve-wash: #e4f4ea;
 
   --ink: var(--foreground);
 
-  /* Sidebar (admin console) — same paper/ink/cobalt system, no new hues */
-  --sidebar: var(--background);
+  /* Sidebar — the same system, one step off white */
+  --sidebar: #fafbfc;
   --sidebar-foreground: var(--foreground);
-  --sidebar-accent: var(--cobalt-wash);
-  --sidebar-accent-foreground: var(--cobalt);
+  --sidebar-accent: #e9edfb;
+  --sidebar-accent-foreground: #2f56d8;
   --sidebar-border: var(--border);
   --sidebar-ring: var(--ring);
 }
@@ -107,13 +107,13 @@
   body {
     @apply bg-background text-foreground;
     font-family: var(--font-body);
-    font-feature-settings: 'ss01';
     -webkit-font-smoothing: antialiased;
   }
   h1,
   h2,
   h3 {
     font-family: var(--font-display);
+    font-weight: 600;
     letter-spacing: -0.01em;
   }
 }
@@ -130,7 +130,7 @@
     background-size: 100% 0.09em;
     background-position: 0 92%;
   }
-  /* The sign-off stamp: bordered, tilted, letterspaced */
+  /* The sign-off stamp: bordered, letterspaced (no tilt in the work-tool look) */
   .stamp {
     font-family: var(--font-mono);
     letter-spacing: 0.14em;
@@ -138,7 +138,6 @@
     border: 1.5px solid currentColor;
     border-radius: 0.25rem;
     padding: 0.2rem 0.55rem;
-    transform: rotate(-2deg);
     display: inline-block;
   }
 }

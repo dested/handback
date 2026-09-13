@@ -1,26 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   OutboxEntry,
-  PageEvent,
-  PointerSample,
+  RecorderUpdate,
   Recording,
   ServerLink,
   Session,
   SessionIntent,
   SessionKind,
   Settings,
+  TranscribeProgress,
+  TranscribeState,
 } from '../lib/types';
 import { DEFAULT_SERVER, DEFAULT_SETTINGS, activeLink, linkId, sessionKind } from '../lib/types';
 import { fetchContext, spaceProjects, type ServerContext } from '../lib/context';
-import { send } from '../lib/messages';
-import { blobs, putOutbox } from '../lib/db';
+import { send, type CaptureStartResult, type CaptureState } from '../lib/messages';
+import { putOutbox } from '../lib/db';
 import { hostOf, mmss, plural } from '../lib/format';
 import { partSpans, totalMs } from '../lib/timeline';
 import { agentPrompt } from '../lib/report';
-import { Recorder, type RecorderUpdate } from './recorder';
-import { Dictation } from '../content/speech';
-import { polishTranscript } from './polish';
-import { transcribeRecording, type TranscribeProgress } from './transcribe';
 import { Parts } from './Parts';
 import { Home } from './Home';
 import { OutboxStrip } from './Outbox';
@@ -40,7 +37,6 @@ function DestinationPicker({
   ctxFailed,
   teamId,
   currentProjectId,
-  disabled,
   onRetry,
   onOpenRecorder,
   onOpenProjects,
@@ -52,7 +48,6 @@ function DestinationPicker({
   ctxFailed: boolean;
   teamId: string;
   currentProjectId: string;
-  disabled: boolean;
   onRetry: () => void;
   onOpenRecorder: () => void;
   onOpenProjects: () => void;
@@ -101,11 +96,10 @@ function DestinationPicker({
 
   return (
     <div className="dest" ref={wrap}>
-      <span className="dest-to">to</span>
+      <span className="dest-to">To</span>
       <button
         type="button"
         className="dest-trigger"
-        disabled={disabled}
         onClick={() => setOpen((o) => !o)}
         aria-label="Destination"
       >
@@ -180,9 +174,13 @@ function DestinationPicker({
 /**
  * The side panel is the remote: Record, a live readout while it runs, the editor,
  * and the one button that hands the gripe over. It is a pure view over the worker's
- * state — it re-pulls on every `state:changed` and mutates nothing directly. The
- * one thing it owns because the worker can't is the `MediaRecorder` (the
- * display-media grant belongs to the document that asked for it).
+ * state — it re-pulls on every `state:changed` and mutates nothing directly. It no
+ * longer owns the recorder: as of 1.11.0 the capture runs in the offscreen document
+ * so a closed panel doesn't kill the take. The offscreen document raises Chrome's
+ * picker itself (getDisplayMedia needs no gesture there); the panel sends
+ * `capture:start` and follows the live readout over `capture:*`.
+ * Post-recording transcription moved there too: the offscreen document runs the
+ * queue and the panel only mirrors it through `transcribe:update`.
  *
  * There is no folder, and the upload no longer happens here: "send to Handback"
  * drops the walkthrough into an outbox and returns, and the offscreen document
@@ -241,6 +239,18 @@ export function App() {
   const [recUpdate, setRecUpdate] = useState<RecorderUpdate | null>(null);
   const [stopping, setStopping] = useState(false);
   /**
+   * The take being recorded, by id — the offscreen document owns it, so the panel
+   * only ever holds its id (learned from `capture:update` and, on mount, from
+   * `capture:state`) and mirrors the readout. null = nothing live here.
+   */
+  const [liveId, setLiveId] = useState<string | null>(null);
+  /**
+   * Whether `capture:state` has answered yet. A take still marked `recording` in
+   * the store might be the live one, so orphan recovery must wait for this — before
+   * it lands, "is anything recording?" is genuinely unknown, not "no".
+   */
+  const [captureKnown, setCaptureKnown] = useState(false);
+  /**
    * The two moments Record can't do anything about until the human acts elsewhere,
    * each a full-container takeover so the panel isn't a lump behind an OS surface:
    * `micGate` is the one-time microphone grant (it happens in a tab Chrome opens);
@@ -249,9 +259,9 @@ export function App() {
    */
   const [micGate, setMicGate] = useState(false);
   const [picking, setPicking] = useState<'choosing' | 'refused' | null>(null);
+  // The offscreen document owns transcription now; these two only mirror its queue,
+  // seeded from `transcribe:state` on mount and kept current by `transcribe:update`.
   const [whisper, setWhisper] = useState<TranscribeProgress | null>(null);
-  // The queue, mirrored into state so the panel can say `queued` / `transcribing…`.
-  // A single-slot guard silently dropped the second of a back-to-back pair.
   const [whisperIds, setWhisperIds] = useState<string[]>([]);
   /** What the active token can see — the spaces it reaches and their projects. Null until fetched, or when it failed. */
   const [ctx, setCtx] = useState<ServerContext | null>(null);
@@ -260,26 +270,12 @@ export function App() {
   const [ctxFailed, setCtxFailed] = useState(false);
   /** Bumped by that retry; the context effect is the only thing that fetches. */
   const [ctxReloads, setCtxReloads] = useState(0);
-  const whisperQueue = useRef<string[]>([]);
-  const whisperRunning = useRef(false);
-  const recorderRef = useRef<Recorder | null>(null);
   const recovering = useRef<Set<string>>(new Set());
   // The Stop button, the page dock, and Chrome's own "Stop sharing" bar can all fire.
   const stopGuard = useRef(false);
-  // The runtime listener is installed once, but the stop path closes over today's
-  // state. Keep the latest copy behind a ref.
-  const stopRef = useRef<() => void>(() => {});
   // The mic gate's permission watcher fires long after this render — it needs the
   // current start path, not the one captured when the gate opened.
   const startRef = useRef<() => void>(() => {});
-  // Transcription runs off a queue, minutes after the settings it needs were read.
-  // A ref keeps it on the current server, token, and on-device choice.
-  const settingsRef = useRef<Settings>(DEFAULT_SETTINGS);
-  settingsRef.current = state.settings;
-  // Same reason, one step further along: the cleanup pass wants the take's own
-  // console errors and origin, read after the transcript comes back.
-  const stateRef = useRef<PanelState>(EMPTY);
-  stateRef.current = state;
 
   const session = useMemo(
     () => state.sessions.find((s) => s.id === state.activeSessionId) ?? null,
@@ -355,32 +351,6 @@ export function App() {
   );
 
   useEffect(() => {
-    void refresh();
-    const listener = (message: { type?: string; origin?: string }) => {
-      if (message?.type === 'state:changed') void refresh();
-      // The stop button on the page dock. The panel owns the recorder, so it acts.
-      if (message?.type === 'recording:stop') stopRef.current();
-      const recorder = recorderRef.current;
-      if (!recorder) return;
-      // Telemetry and pointer arrive from every tab; the recorder keeps only what
-      // came from the one being recorded.
-      if (message?.type === 'recording:event') {
-        recorder.addEvent((message as { event: PageEvent }).event, message.origin);
-      }
-      if (message?.type === 'recording:pointer') {
-        recorder.addPointer((message as { sample: PointerSample }).sample, message.origin);
-      }
-      // A click, an ink stroke, or a route change in the recorded tab — dedup
-      // gets overruled.
-      if (message?.type === 'recording:force') {
-        recorder.force((message as { why: 'click' | 'nav' }).why, message.origin);
-      }
-    };
-    chrome.runtime.onMessage.addListener(listener);
-    return () => chrome.runtime.onMessage.removeListener(listener);
-  }, [refresh]);
-
-  useEffect(() => {
     setName(session?.name ?? '');
   }, [session?.id, session?.name]);
 
@@ -410,117 +380,91 @@ export function App() {
     };
   }, [link?.id, link?.apiToken, ctxReloads]);
 
-  // ── transcription queue ───────────────────────────────────────────────
-  /**
-   * Runs after the take is already saved, never before: on success it swaps in the
-   * Whisper lines. Fail, or close the panel, and the live Web Speech lines stand —
-   * and the report says which engine wrote them.
-   */
-  const runWhisper = useCallback(
-    async (id: string) => {
-      const video = await blobs.get(`${id}:video`);
-      if (!video) return;
-      // Takes with system audio carry a mic-only shadow — transcribe that, or
-      // Whisper writes the app's own sound into the narration. The mixed webm
-      // is the fallback for takes that never had one.
-      const narration = (await blobs.get(`${id}:mic`)) ?? video;
-      const l = activeLink(settingsRef.current);
-      const result = await transcribeRecording(
-        narration,
-        {
-          serverUrl: l?.serverUrl ?? '',
-          apiToken: l?.apiToken ?? '',
-          lang: settingsRef.current.lang,
-          onDevice: settingsRef.current.onDeviceTranscription,
-        },
-        setWhisper,
-      );
-      if (!result?.segments.length) return;
-
-      // Then the cleanup pass, which knows what the page was called and what it
-      // logged. It edits words, never timings, and a null answer just means the
-      // raw lines ship — see extension/src/sidepanel/polish.ts.
-      setWhisper({ stage: 'polish', pct: -1 });
-      const rec = stateRef.current.recordings.find((r) => r.id === id);
-      const origin = stateRef.current.sessions.find((s) => s.id === rec?.sessionId)?.origin;
-      const polished = await polishTranscript(result.segments, {
-        serverUrl: l?.serverUrl ?? '',
-        apiToken: l?.apiToken ?? '',
-        origin,
-        events: rec?.meta.events,
-      }).catch(() => null);
-
-      await send({
-        type: 'recording:transcript',
-        id,
-        transcript: polished ?? result.segments,
-        engine: result.engine,
-        polished: Boolean(polished),
-      });
-      await refresh();
-    },
-    [refresh],
-  );
-
-  const enqueueWhisper = useCallback(
-    (id: string) => {
-      if (whisperQueue.current.includes(id)) return;
-      whisperQueue.current.push(id);
-      setWhisperIds([...whisperQueue.current]);
-      if (whisperRunning.current) return;
-      whisperRunning.current = true;
-      void (async () => {
-        try {
-          // One model in memory at a time — takes wait their turn, none are dropped.
-          while (whisperQueue.current.length) {
-            await runWhisper(whisperQueue.current[0]).catch(() => {});
-            whisperQueue.current.shift();
-            setWhisperIds([...whisperQueue.current]);
-            setWhisper(null);
-          }
-        } finally {
-          whisperRunning.current = false;
-        }
-      })();
-    },
-    [runWhisper],
-  );
-
-  // A take still marked `recording` belongs to a panel that died mid-ramble —
-  // unless it's the one recording right now. Reassemble it from its chunk blobs.
+  // The one runtime listener. `state:changed` re-pulls; the `capture:*` broadcasts
+  // from the offscreen document drive the live readout, and `transcribe:update`
+  // mirrors its transcription queue. On mount it also asks whether a take is already
+  // running (`capture:state`), so a panel reopened mid-recording reattaches its
+  // readout instead of flashing Home over a live take — and answers `captureKnown`
+  // so orphan recovery can start — and pulls the current queue (`transcribe:state`).
   useEffect(() => {
-    const live = recorderRef.current?.id;
+    void refresh();
+    void send<CaptureState>({ type: 'capture:state' })
+      .then((s) => {
+        if (s) {
+          setLiveId(s.id);
+          setRecUpdate(s.update);
+          setBrowsing(false);
+          // The dock note is harmless on a tab with no content script, so reattach
+          // it whenever a take is live rather than probing the page for one.
+          setPageDock(Boolean(s.update));
+        }
+      })
+      .catch(() => {})
+      .finally(() => setCaptureKnown(true));
+    void send<TranscribeState>({ type: 'transcribe:state' })
+      .then((s) => {
+        if (s) {
+          setWhisperIds(s.queue);
+          setWhisper(s.progress);
+        }
+      })
+      .catch(() => {});
+    const listener = (message: {
+      type?: string;
+      id?: string;
+      update?: RecorderUpdate | null;
+      state?: TranscribeState;
+    }) => {
+      if (message?.type === 'state:changed') void refresh();
+      // The offscreen recorder's every emit while a take runs; `update: null` = ended.
+      if (message?.type === 'capture:update') {
+        setLiveId(message.update ? (message.id ?? null) : null);
+        setRecUpdate(message.update ?? null);
+      }
+      // recording:finish has landed in the store — the offscreen document queues
+      // transcription itself, so the panel just refreshes to show the new take.
+      if (message?.type === 'capture:done') void refresh();
+      // The offscreen transcription queue moved; mirror it into the readout.
+      if (message?.type === 'transcribe:update' && message.state) {
+        setWhisperIds(message.state.queue);
+        setWhisper(message.state.progress);
+      }
+    };
+    chrome.runtime.onMessage.addListener(listener);
+    return () => chrome.runtime.onMessage.removeListener(listener);
+  }, [refresh]);
+
+  // A take still marked `recording` belongs to a session whose recorder died —
+  // unless it's the one recording right now. Reassemble it from its chunk blobs.
+  // Wait for capture:state: before it answers, an in-progress take is genuinely
+  // indistinguishable from an orphan, and recovering the live one would kill it.
+  useEffect(() => {
+    if (!captureKnown) return;
     const orphan = state.recordings.find(
-      (r) => r.state === 'recording' && r.id !== live && !recovering.current.has(r.id),
+      (r) => r.state === 'recording' && r.id !== liveId && !recovering.current.has(r.id),
     );
     if (!orphan) return;
     recovering.current.add(orphan.id);
     void (async () => {
       await send({ type: 'recording:recover', id: orphan.id });
       await refresh();
-      enqueueWhisper(orphan.id);
+      void send({ type: 'transcribe:enqueue', id: orphan.id }).catch(() => {});
       say('recovered an interrupted recording');
     })();
-  }, [state.recordings, refresh, enqueueWhisper, say]);
+  }, [state.recordings, liveId, captureKnown, refresh, say]);
 
   // ── recording ─────────────────────────────────────────────────────────
   const stopRecording = async () => {
-    const r = recorderRef.current;
-    if (!r || stopGuard.current) return;
+    // The offscreen document owns the recorder, so stopping is one message. The
+    // save (recording:setActive, recording:finish), the refresh, and the
+    // transcription all arrive back through the `capture:done` broadcast — which
+    // reaches this panel like any other, so they must not be duplicated here.
+    if (!recUpdate || stopGuard.current) return;
     stopGuard.current = true;
     setStopping(true);
     try {
-      await send({ type: 'recording:setActive', active: false });
-      const meta = await r.stop();
-      await send({ type: 'recording:finish', id: r.id, meta });
-      await refresh();
-      say('saved — added below');
-      // Transcription is queued, not awaited: Record has to be pressable again
-      // right now — stopping and starting again is what takes are for.
-      enqueueWhisper(r.id);
+      await send({ type: 'capture:stop' });
     } finally {
-      recorderRef.current = null;
-      setRecUpdate(null);
       setStopping(false);
       setPageDock(false);
       stopGuard.current = false;
@@ -549,7 +493,7 @@ export function App() {
   const openMicTab = () => void chrome.tabs.create({ url: chrome.runtime.getURL('micperm.html') });
 
   const startRecording = async (skipMic = false) => {
-    if (recorderRef.current) return;
+    if (liveId) return;
     if (!skipMic && !(await ensureMic())) return;
     setMicGate(false);
     // A take lands in the open walkthrough, so pressing Record from the home
@@ -560,55 +504,68 @@ export function App() {
     // logs an error for the next five minutes is somebody else's noise.
     const tab = (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
     const scope = originOf(tab?.url ?? '');
+    // The events/dock scope is the tab's origin, but only for a real page.
+    const origin = scope.startsWith('http') ? scope : '';
     const id = crypto.randomUUID();
-    const r = new Recorder(
-      { onUpdate: setRecUpdate, onEnd: () => void stopRecording() },
-      state.settings.lang,
-      scope.startsWith('http') ? scope : '',
-      id,
-      Dictation,
-      kind === 'human',
-    );
-    // Chrome's screen-share dialog is a separate OS surface; the panel would sit
-    // blank behind it, so it says what the dialog is waiting on instead.
+    // Chrome's screen-share picker is a separate OS surface, raised by the
+    // offscreen document (getDisplayMedia needs no gesture there). The panel sits
+    // blank behind it, so it says what the dialog is waiting on. The offscreen
+    // document must exist first — it is the thing that captures.
     setPicking('choosing');
-    try {
-      await r.start();
-    } catch {
-      // Refused or dismissed the picker: nothing was minted, so there's nothing to
-      // undo — but the panel stays on the pick screen with a way back, rather than
-      // snapping to Home as if nothing happened.
-      setPicking('refused');
+    await send({ type: 'offscreen:ensure' });
+    const started = await send<CaptureStartResult | undefined>({
+      type: 'capture:start',
+      id,
+      lang: state.settings.lang,
+      scope: origin,
+      // Only read when this opens a fresh walkthrough; joining an open one keeps
+      // that one's mode, which is the same mode `kind` already is.
+      pristine: kind === 'human',
+    });
+    // No answer at all = the offscreen document isn't there to hear us.
+    if (!started) {
+      setPicking(null);
+      say("couldn't start the recording — the recorder didn't answer");
       return;
     }
-    // Claim the take *before* announcing it: `recording:start` broadcasts, and a
-    // refresh that lands before this ref is set reads the new take as an orphan.
-    recorderRef.current = r;
+    if (!started.ok) {
+      if (started.refused) {
+        // Dismissed the picker: nothing was minted, so there's nothing to undo — the
+        // panel stays on the pick screen with a way back rather than snapping to Home.
+        setPicking('refused');
+        return;
+      }
+      setPicking(null);
+      say(`couldn't start the recording — ${started.error}`);
+      return;
+    }
+    // The capture is running in the offscreen document; open its row in the worker.
     try {
-      const started = await send<{ sessionId?: string }>({
+      const opened = await send<{ sessionId?: string }>({
         type: 'recording:start',
         id,
         name: 'Walkthrough',
-        origin: r.scope,
-        // Only read when this opens a fresh walkthrough; joining an open one
-        // keeps that one's mode, which is the same mode `kind` already is.
+        origin,
         kind,
       });
-      if (!started?.sessionId) throw new Error('recording:start refused');
+      if (!opened?.sessionId) throw new Error('recording:start refused');
     } catch {
-      recorderRef.current = null;
-      await r.cancel();
+      // The take is orphaned in the offscreen document — tear it down and drop the
+      // row that never opened, so nothing lingers as a phantom recording.
+      await send({ type: 'capture:cancel', id }).catch(() => {});
       await send({ type: 'recording:discard', id }).catch(() => {});
       setRecUpdate(null);
+      setLiveId(null);
       setPicking(null);
       say("couldn't start the recording");
       return;
     }
+    setLiveId(id);
     // The dock only exists where a content script can run, and the live readout
     // must not point at a bar that isn't there.
-    setPageDock(Boolean(r.scope));
+    setPageDock(Boolean(origin));
     // Seed the live readout so the pick screen hands straight to it — the recorder's
-    // first real emit is a sample-tick away, and a blank Home must not flash between.
+    // first real emit is a broadcast away, and a blank Home must not flash between.
     setRecUpdate(
       (u) =>
         u ?? {
@@ -617,17 +574,16 @@ export function App() {
           segmentCount: 0,
           interim: '',
           micState: 'off',
-          sysAudio: r.sysState,
+          sysAudio: started.sysAudio,
         },
     );
     setPicking(null);
     await refresh();
   };
 
-  // Every stop path — this button, Chrome's own "Stop sharing" bar, the page dock —
-  // lands in stopRecording, and the listener above needs today's copy.
+  // The mic gate's permission watcher fires long after this render and must start
+  // recording with today's start path, not the one captured when the gate opened.
   useEffect(() => {
-    stopRef.current = () => void stopRecording();
     startRef.current = () => void startRecording();
   });
 
@@ -723,7 +679,11 @@ export function App() {
     await refresh();
     // Land on the home screen, where the outbox strip accounts for the push.
     setBrowsing(true);
-    say(human ? 'sending — see the strip on home' : 'sending — the brief is on your clipboard');
+    say(
+      human
+        ? 'uploading in the background — you can close this panel'
+        : 'uploading in the background — brief copied. you can close this panel',
+    );
   };
 
   /** Open one from the home screen — which is also the way back into the one you left. */
@@ -761,19 +721,6 @@ export function App() {
     await send({ type: 'settings:set', patch });
     await refresh();
   };
-
-  /** `queued` / the live stage / nothing — where the transcriber has got to. */
-  const whisperLabel = useMemo((): string | null => {
-    if (!whisperIds.length) return null;
-    const waiting = whisperIds.length > 1 ? ` · ${whisperIds.length - 1} waiting` : '';
-    if (!whisper) return `transcribing…${waiting}`;
-    if (whisper.stage === 'decode') return `reading the audio…${waiting}`;
-    if (whisper.stage === 'upload') return `transcribing the narration…${waiting}`;
-    if (whisper.stage === 'transcribe') return `transcribing on this device…${waiting}`;
-    if (whisper.stage === 'model') return `loading the speech model…${waiting}`;
-    if (whisper.stage === 'polish') return `cleaning up the transcript…${waiting}`;
-    return `fetching the speech model — ${Math.round(whisper.pct)}%${waiting}`;
-  }, [whisper, whisperIds]);
 
   const takes = state.recordings.filter((r) => r.state === 'done');
   const hasContent = takes.length > 0;
@@ -826,41 +773,39 @@ export function App() {
     })();
 
   const summary = [
-    // Duration, not a count — the panel presents one timeline.
-    takes.length ? `${mmss(totalMs(partSpans(takes)))} recorded` : '',
-    takes.length > 1 ? `${takes.length} parts` : '',
+    takes.length ? plural(takes.length, 'part') : '',
+    takes.length ? mmss(totalMs(partSpans(takes))) : '',
   ]
     .filter(Boolean)
     .join(' · ');
 
-  /**
-   * The one thing still worth saying at the footer while a walkthrough is open:
-   * the transcript isn't in yet, so sending now ships the live dictation. The
-   * upload's own progress moved to the outbox strip.
-   */
-  const stillTranscribing = hasContent && Boolean(whisperLabel);
+  // Where the next recording lands, named in the header. Derived display only —
+  // the control that changes it is the footer's destination row.
+  const spaceLabel = teamId ? (ctx?.teams.find((t) => t.id === teamId)?.name ?? 'team') : 'Personal';
+  const projectLabel = currentProjectId
+    ? (projects.find((p) => p.id === currentProjectId)?.name ?? 'General')
+    : 'General';
 
   return (
     <div className="app">
       <header className="head">
         <Mark />
         <span className="wordmark">handback</span>
-        {/* The gripe's own line below says the duration; up here it would only repeat it. */}
         <span className="spacer" />
-        {/* A bare glyph here read as decoration — nobody guessed the settings
-            lived behind it. It says what it is, and says when it is open. */}
-        <button
-          className={`icon labelled${showSettings ? ' on' : ''}`}
-          title="Server, transcription and language"
-          aria-expanded={showSettings}
-          onClick={() => setShowSettings((v) => !v)}
-        >
-          ⚙ <span>settings</span>
-        </button>
+        {/* While a take runs the header carries the one fact that matters — that it
+            is, and for how long. Otherwise it names where the next recording lands;
+            the control that changes it lives in the footer's destination row, and the
+            settings drawer opens from the Home footer. */}
+        {recUpdate ? (
+          <span className="rec-pill">● REC {mmss(recUpdate.elapsedMs)}</span>
+        ) : (
+          <span className="head-dest" title="Where the next recording lands">
+            {spaceLabel} · {projectLabel}
+          </span>
+        )}
       </header>
-      <div className="rule" />
 
-      {showSettings && (
+      {showSettings && !recording && (
         <>
           {/* Opening this used to shove the whole panel down with no explanation —
               it read as content streaming in rather than as a drawer. The header
@@ -882,7 +827,6 @@ export function App() {
               onOpenRecorder={openRecorderUrl}
             />
           </section>
-          <div className="rule" />
         </>
       )}
 
@@ -899,30 +843,40 @@ export function App() {
           <div className="live-row">
             <span className="dot pulse" />
             <span className="clock">{mmss(recUpdate.elapsedMs)}</span>
-            <span className="stat">
-              {plural(recUpdate.frameCount, 'frame')} kept ·{' '}
-              {plural(recUpdate.segmentCount, 'line')}
-            </span>
           </div>
-          {/* The words being heard are the reason to look at this block at all, so
-              they get their own ruled well with room for two lines. On one nowrap
-              line they were guillotined mid-sentence, and the well kept collapsing
-              to nothing between phrases and shoving the button around. */}
-          {recUpdate.micState === 'denied' ? (
-            <button
-              className="ticker warn"
-              title="Open the permission page in a tab"
-              onClick={() =>
-                void chrome.tabs.create({ url: chrome.runtime.getURL('micperm.html') })
-              }
-            >
-              microphone blocked — no narration on this part · fix it
-            </button>
-          ) : (
-            <div className={`ticker${recUpdate.interim ? '' : ' idle'}`}>
-              {recUpdate.interim || (recUpdate.micState === 'listening' ? 'listening…' : '')}
+          <div className="stat">
+            {plural(recUpdate.frameCount, 'keyframe')} · {plural(recUpdate.segmentCount, 'line')} ·
+            tab audio{' '}
+            {recUpdate.sysAudio === 'none'
+              ? 'off'
+              : recUpdate.sysAudio === 'silent'
+                ? 'silent'
+                : 'on'}
+          </div>
+          {/* The words being heard, in their own box with room for two lines, and the
+              caveat that they are rough sits inside it. */}
+          <div className="captions">
+            {recUpdate.micState === 'denied' ? (
+              <button
+                className="ticker warn"
+                title="Open the permission page in a tab"
+                onClick={() =>
+                  void chrome.tabs.create({ url: chrome.runtime.getURL('micperm.html') })
+                }
+              >
+                microphone blocked — no narration on this part · fix it
+              </button>
+            ) : (
+              <div className={`interim${recUpdate.interim ? '' : ' idle'}`}>
+                {recUpdate.interim || (recUpdate.micState === 'listening' ? 'listening…' : '')}
+              </div>
+            )}
+            {/* Web Speech drops words — the transcript that ships is written from the
+                audio after you stop, so say the live text is rough. */}
+            <div className="cap-note">
+              rough live captions — the real transcript is written after you stop
             </div>
-          )}
+          </div>
           {/* Chrome's "share audio" box is easy to miss and its absence is silent —
               the take records fine, just without the app's sound. Say so now,
               while stopping and re-picking still costs seconds. 'silent' is the
@@ -942,8 +896,14 @@ export function App() {
           )}
           {pageDock && <div className="note">draw and stop from the little bar on the page</div>}
           <button className="stop-big" onClick={() => void stopRecording()} disabled={stopping}>
-            {stopping ? 'saving…' : 'stop recording'}
+            {stopping ? 'saving…' : '■ Stop'}
           </button>
+          {/* The whole point of capture living offscreen: the panel is disposable now.
+              Say so, and say how to get back to Stop. */}
+          <div className="note close-note">
+            you can close this panel — recording keeps going. reopen it from the toolbar icon
+            {pageDock ? ', or press s on the page,' : ''} to stop
+          </div>
         </section>
       ) : editing ? null : (
         <Home
@@ -972,13 +932,12 @@ export function App() {
         />
       )}
 
-      {!overlay && editing && session && (
+      {!overlay && !recording && editing && session && (
         <>
           <section className="gripe">
-            {/* Two rows, not four. The crumb row carries where you are, what this
-                walkthrough amounts to, and the way to throw it away; the title row
-                carries its name and the one thing you do to it next. Leaving is
-                free; the destructive one arms first and says what it costs. */}
+            {/* The crumb carries where you are and the way to throw this away; the
+                summary rides under the title as a caption. Leaving is free; the
+                destructive one arms first and says what it costs. */}
             <div className="crumb">
               <button
                 className="back"
@@ -988,11 +947,8 @@ export function App() {
                   setConfirmDiscard(false);
                 }}
               >
-                ← all walkthroughs
+                ← Walkthroughs
               </button>
-              <span className="meta">
-                {whisperLabel ?? (hasContent ? summary : 'nothing recorded yet')}
-              </span>
               <span className="spacer" />
               {confirmDiscard ? (
                 <span className="confirm">
@@ -1006,16 +962,15 @@ export function App() {
                 </span>
               ) : (
                 <button
-                  className="link"
+                  className="link discard"
                   disabled={recording}
                   title="Delete this walkthrough and its parts from this machine"
                   onClick={() => setConfirmDiscard(true)}
                 >
-                  discard
+                  Discard
                 </button>
               )}
             </div>
-            {/* Just the name now — the add lives at the end of the parts list. */}
             <div className="titlerow">
               <input
                 className="title"
@@ -1026,6 +981,7 @@ export function App() {
                 onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
               />
             </div>
+            <div className="gripe-meta">{hasContent ? summary : 'nothing recorded yet'}</div>
           </section>
           <OutboxStrip serverHost={serverHost} />
           <Parts
@@ -1033,24 +989,22 @@ export function App() {
             recordings={state.recordings}
             busy={recording}
             transcribing={whisperIds}
+            progress={whisper}
             onAdd={() => void startRecording()}
             onSay={say}
           />
         </>
       )}
 
-      {!overlay && editing && (hasContent || !linked || stillTranscribing || recording) && (
+      {!overlay && !recording && editing && (hasContent || !linked) && (
         <footer className="foot">
-          {stillTranscribing && (
-            <div className="note">
-              still transcribing — hand it over now and it ships the live dictation instead
-            </div>
-          )}
-          {/* What this walkthrough is — one line above where it lands. Hidden on the
-              empty review screen; present once a part exists or one is recording. */}
-          {(recording || hasContent) && session && (
+          {/* What this walkthrough is — a field row above where it lands. Hidden on
+              the empty review screen; present once a part exists. The per-part bar in
+              the parts list now carries transcription progress, so the footer no
+              longer repeats it. */}
+          {hasContent && session && (
             <div className="intent-row">
-              <span className="intent-label">this is</span>
+              <span className="intent-label">This is</span>
               {(['bug', 'feature', 'idea'] as const).map((it) => (
                 <button
                   key={it}
@@ -1074,7 +1028,6 @@ export function App() {
                 ctxFailed={ctxFailed}
                 teamId={teamId}
                 currentProjectId={currentProjectId}
-                disabled={recording}
                 onRetry={() => setCtxReloads((n) => n + 1)}
                 onOpenRecorder={openRecorderUrl}
                 onOpenProjects={openProjectsUrl}
@@ -1082,13 +1035,14 @@ export function App() {
               />
               <button
                 className="primary send"
-                disabled={recording}
-                title="Queue this walkthrough for upload, copy the brief, and close it"
+                title="Upload this walkthrough in the background — the transcript is finished first"
                 onClick={() => void finish()}
               >
-                send to Handback
+                Send to Handback
               </button>
-              {/*<p className="send-sub">copies a brief for your agent</p>*/}
+              <p className="foot-note">
+                Uploads in the background once the transcript is done. You can close this.
+              </p>
             </>
           )}
           {!linked && (

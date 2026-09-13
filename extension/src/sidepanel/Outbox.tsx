@@ -103,6 +103,16 @@ function OutboxRow({ entry, serverHost }: { entry: OutboxEntry; serverHost: stri
   const [copied, setCopied] = useState(false);
 
   if (entry.state === 'uploading') {
+    // The drain is holding this walkthrough back until its transcript lands, so it
+    // ships the real lines and not the live dictation.
+    if (entry.waiting === 'transcript') {
+      return (
+        <div className="ob-row">
+          <div className="ob-line">waiting for the transcript of “{entry.title}”…</div>
+          <div className="ob-sub">then it uploads on its own — you can close this panel</div>
+        </div>
+      );
+    }
     const p = entry.progress;
     const pct = p && p.bytesTotal > 0 ? Math.min(100, (p.bytesDone / p.bytesTotal) * 100) : 0;
     if (!p || p.phase === 'declare') {
@@ -179,15 +189,6 @@ function OutboxRow({ entry, serverHost }: { entry: OutboxEntry; serverHost: stri
       <div className="ob-head">
         <span className="ob-line">“{entry.title}” uploaded</span>
         <span className="ob-actions">
-          {entry.url && (
-            <button
-              className="ob-open"
-              title="Open it in Handback"
-              onClick={() => entry.url && void chrome.tabs.create({ url: entry.url })}
-            >
-              ↗
-            </button>
-          )}
           {entry.brief && (
             <button className="link" onClick={copyBrief}>
               {copied ? 'copied' : 'copy brief'}
@@ -202,6 +203,13 @@ function OutboxRow({ entry, serverHost }: { entry: OutboxEntry; serverHost: stri
           </button>
         </span>
       </div>
+      {/* The link is the next thing to do, so it comes before the status line. */}
+      {entry.url && (
+        <button className="ob-view" onClick={() => entry.url && void chrome.tabs.create({ url: entry.url })}>
+          view your handback →
+        </button>
+      )}
+      {entry.kind !== 'human' && <div className="ob-sub">Handback is processing it</div>}
       {entry.missing ? (
         <div className="ob-sub">
           {entry.missing} keyframe{entry.missing === 1 ? '' : 's'} had gone missing

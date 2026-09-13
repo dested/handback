@@ -37,16 +37,16 @@ export function IntentControl({
             // you say "actually, don't presume".
             onClick={() => onChange(value === option.value ? null : option.value)}
             className={cn(
-              'rounded-md border px-3 py-2 font-mono text-xs transition-colors',
+              'inline-flex h-8 items-center justify-center rounded-md border px-2.5 text-[13px] font-medium transition-colors',
               value === option.value
-                ? 'border-primary bg-accent text-primary'
-                : 'border-border text-muted-foreground hover:text-foreground'
+                ? 'bg-foreground border-foreground text-white'
+                : 'text-foreground/80 hover:bg-secondary border-input bg-card'
             )}>
             {option.label}
           </button>
         ))}
       </div>
-      <p className="text-muted-foreground text-sm leading-relaxed">
+      <p className="text-muted-foreground text-[13px] leading-relaxed">
         {value === 'bug'
           ? 'Framed for the agent as something broken to fix.'
           : value === 'feature'

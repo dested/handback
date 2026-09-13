@@ -43,9 +43,9 @@ export function StatusChip({ status }: { status: string }) {
 
 export function StatTile({ label, value, sub }: { label: string; value: ReactNode; sub?: string }) {
   return (
-    <div>
-      <p className="font-mono text-2xl">{value}</p>
-      <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">{label}</p>
+    <div className="bg-card min-w-[9rem] rounded-lg border p-4">
+      <p className="text-2xl font-semibold tracking-tight tabular-nums">{value}</p>
+      <p className="text-muted-foreground mt-1 text-xs font-medium">{label}</p>
       {sub && <p className="text-muted-foreground mt-0.5 text-xs">{sub}</p>}
     </div>
   )
@@ -54,8 +54,8 @@ export function StatTile({ label, value, sub }: { label: string; value: ReactNod
 export function PageHeader({ title, sub }: { title: string; sub: string }) {
   return (
     <header className="space-y-1">
-      <h1 className="font-display text-3xl font-semibold">{title}</h1>
-      <p className="text-muted-foreground text-sm">{sub}</p>
+      <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
+      <p className="text-muted-foreground text-[13px]">{sub}</p>
     </header>
   )
 }
@@ -63,7 +63,7 @@ export function PageHeader({ title, sub }: { title: string; sub: string }) {
 export function SectionTitle({ children, right }: { children: ReactNode; right?: ReactNode }) {
   return (
     <div className="border-border flex items-baseline justify-between border-b pb-2">
-      <h2 className="font-display text-xl font-semibold">{children}</h2>
+      <h2 className="text-base font-semibold tracking-tight">{children}</h2>
       {right}
     </div>
   )
@@ -73,7 +73,7 @@ export function Th({ children, className }: { children?: ReactNode; className?: 
   return (
     <th
       className={cn(
-        'text-muted-foreground pr-4 pb-2 text-left text-xs font-medium tracking-wide uppercase',
+        'text-muted-foreground border-border border-b px-3 py-1.5 text-left text-xs font-medium',
         className
       )}>
       {children}
@@ -83,7 +83,9 @@ export function Th({ children, className }: { children?: ReactNode; className?: 
 
 export function Td({ children, className }: { children?: ReactNode; className?: string }) {
   return (
-    <td className={cn('border-border border-t py-2.5 pr-4 align-top', className)}>{children}</td>
+    <td className={cn('border-border/60 border-b px-3 py-2.5 align-middle', className)}>
+      {children}
+    </td>
   )
 }
 

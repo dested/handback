@@ -64,7 +64,7 @@ export function DestinationControl({
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((was) => !was)}
-        className="border-border hover:bg-muted/40 flex w-full items-center justify-between gap-3 rounded-md border px-3 py-2.5 text-left font-mono text-sm">
+        className="border-input bg-card hover:bg-secondary flex h-8 w-full items-center justify-between gap-3 rounded-md border px-2.5 text-left text-[13px] font-medium">
         <span className="truncate">to {label(list, value)}</span>
         {/* Drawn, never the platform's own select arrow. */}
         <ChevronDown
@@ -76,12 +76,12 @@ export function DestinationControl({
       </button>
 
       {open && (
-        <div className="border-border bg-card overflow-hidden rounded-md border">
+        <div className="border-border bg-card overflow-hidden rounded-lg border">
           {list.map((group) => (
             <div
               key={group.teamId ?? 'personal'}
               className="border-border border-b last:border-b-0">
-              <p className="text-muted-foreground bg-muted/40 px-3 py-1.5 font-mono text-xs tracking-widest uppercase">
+              <p className="text-muted-foreground bg-secondary px-3 py-1.5 text-[11px] font-semibold">
                 {group.name}
               </p>
               <Row
@@ -103,12 +103,12 @@ export function DestinationControl({
       )}
 
       {ctxFailed && (
-        <p className="text-muted-foreground text-sm">
+        <p className="text-muted-foreground text-[13px]">
           projects unavailable ·{' '}
           <button
             type="button"
             onClick={onRetryContext}
-            className="text-primary underline underline-offset-4">
+            className="text-cobalt font-medium hover:underline">
             retry
           </button>
         </p>
@@ -124,8 +124,8 @@ function Row({ name, active, onPick }: { name: string; active: boolean; onPick: 
       type="button"
       onClick={onPick}
       className={cn(
-        'flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm',
-        active ? 'bg-cobalt-wash text-cobalt' : 'hover:bg-muted/40'
+        'flex w-full items-center gap-3 px-3 py-2 text-left text-[13px]',
+        active ? 'bg-cobalt-wash text-cobalt' : 'hover:bg-secondary'
       )}>
       <span
         className={cn(

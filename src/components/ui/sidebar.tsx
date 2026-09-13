@@ -90,7 +90,7 @@ function Sidebar({ children, className }: { children?: React.ReactNode; classNam
         data-collapsed={collapsed ? '' : undefined}
         className={cn(
           'group/sidebar bg-sidebar border-sidebar-border sticky top-0 hidden h-dvh shrink-0 flex-col border-r transition-[width] duration-200 md:flex',
-          collapsed ? 'w-14' : 'w-60',
+          collapsed ? 'w-14' : 'w-58',
           className
         )}
       >
@@ -169,7 +169,7 @@ function SidebarGroupLabel({
     <p
       data-slot="sidebar-group-label"
       className={cn(
-        'text-muted-foreground px-2.5 pb-1.5 font-mono text-[10px] font-medium tracking-[0.14em] uppercase group-data-[collapsed]/sidebar:hidden',
+        'text-muted-foreground mt-3 mb-1 px-2.5 text-[11px] font-semibold tracking-[.06em] uppercase group-data-[collapsed]/sidebar:hidden',
         className
       )}
     >
@@ -201,7 +201,7 @@ function SidebarMenuItem({
 }
 
 const itemClass =
-  'flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium transition-colors [&_svg]:size-4 [&_svg]:shrink-0 group-data-[collapsed]/sidebar:justify-center group-data-[collapsed]/sidebar:px-0'
+  'flex h-8 w-full items-center gap-2.5 rounded-md px-2.5 text-[13px] font-medium transition-colors [&_svg]:size-4 [&_svg]:shrink-0 group-data-[collapsed]/sidebar:justify-center group-data-[collapsed]/sidebar:px-0'
 
 function SidebarMenuButton({
   icon: Icon,
@@ -238,12 +238,24 @@ function SidebarMenuLink({
   icon: Icon,
   label,
   className,
+  swatch,
+  trailing,
+  active,
 }: {
   to: string
   end?: boolean
-  icon: LucideIcon
+  /** Optional: a `swatch` fills the icon slot instead (project/space links). */
+  icon?: LucideIcon
   label: string
   className?: string
+  /** A coloured square in the icon slot — used where a link stands for a project
+   *  or space rather than a fixed nav destination. */
+  swatch?: string
+  /** Right-aligned muted content (e.g. a count). */
+  trailing?: React.ReactNode
+  /** Overrides NavLink's own path match — needed for query-param links, where the
+   *  path is always `/app` and the active one is decided by the search string. */
+  active?: boolean
 }) {
   const { setMobileOpen } = useSidebar()
   return (
@@ -253,18 +265,28 @@ function SidebarMenuLink({
       data-slot="sidebar-menu-link"
       title={label}
       onClick={() => setMobileOpen(false)}
-      className={({ isActive }) =>
-        cn(
+      className={({ isActive: navActive }) => {
+        const on = active ?? navActive
+        return cn(
           itemClass,
-          isActive
-            ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-            : 'text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground',
+          on
+            ? 'bg-sidebar-accent text-cobalt'
+            : 'text-foreground/80 hover:bg-sidebar-accent/60 hover:text-foreground',
           className
         )
-      }
+      }}
     >
-      <Icon />
+      {swatch !== undefined ? (
+        <i className="size-2 shrink-0 rounded-[2px]" style={{ background: swatch }} />
+      ) : (
+        Icon && <Icon />
+      )}
       <span className="truncate group-data-[collapsed]/sidebar:hidden">{label}</span>
+      {trailing !== undefined && (
+        <span className="text-muted-foreground ml-auto font-mono text-[11px] group-data-[collapsed]/sidebar:hidden">
+          {trailing}
+        </span>
+      )}
     </NavLink>
   )
 }

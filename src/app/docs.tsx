@@ -1,6 +1,25 @@
 import { Link } from 'react-router-dom'
 import { LegalPage, Notice, Section, Terms } from '~/components/legal'
 
+// The MCP surface, rendered as a bordered reference table.
+const TOOLS: Array<[string, string]> = [
+  ['list_walkthroughs', 'Everything the token can reach, newest first, filterable by status.'],
+  [
+    'get_walkthrough',
+    'The full brief: report, transcript, contact sheets, keyframes, video — presigned links, short-lived.',
+  ],
+  ['set_walkthrough_status', 'open → in_review → resolved as the work moves.'],
+  [
+    'post_result',
+    "The agent's answer: summary, optional PR link and files touched. Lands on the review thread and notifies the uploader.",
+  ],
+  [
+    'ask_reviewer',
+    'Hit a fork? The agent asks a clarifying question; the walkthrough waits in needs_info until a human answers.',
+  ],
+  ['attach_evidence', 'Before/after screenshots attached to the result, shown at sign-off.'],
+]
+
 export function DocsPage() {
   return (
     <LegalPage
@@ -50,7 +69,7 @@ export function DocsPage() {
           <Link to="/connect">/connect</Link> and mint your command — the page creates an API token
           and renders it into the exact line below. Third, paste that line into your terminal:
         </p>
-        <pre className="bg-muted/50 overflow-x-auto rounded-md border px-4 py-3 font-mono text-sm">
+        <pre className="bg-secondary overflow-x-auto rounded-md border p-3 font-mono text-[13px]">
           claude mcp add --transport http handback https://handback.dev/mcp --header
           &quot;Authorization: Bearer hb_…&quot;
         </pre>
@@ -68,37 +87,20 @@ export function DocsPage() {
       </Section>
 
       <Section heading="What the agent gets" id="tools">
-        <Terms
-          items={[
-            {
-              term: 'list_walkthroughs',
-              detail: 'Everything the token can reach, newest first, filterable by status.',
-            },
-            {
-              term: 'get_walkthrough',
-              detail:
-                'The full brief: report, transcript, contact sheets, keyframes, video — presigned links, short-lived.',
-            },
-            {
-              term: 'set_walkthrough_status',
-              detail: 'open → in_review → resolved as the work moves.',
-            },
-            {
-              term: 'post_result',
-              detail:
-                "The agent's answer: summary, optional PR link and files touched. Lands on the review thread and notifies the uploader.",
-            },
-            {
-              term: 'ask_reviewer',
-              detail:
-                'Hit a fork? The agent asks a clarifying question; the walkthrough waits in needs_info until a human answers.',
-            },
-            {
-              term: 'attach_evidence',
-              detail: 'Before/after screenshots attached to the result, shown at sign-off.',
-            },
-          ]}
-        />
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-[13px]">
+            <tbody>
+              {TOOLS.map(([name, detail]) => (
+                <tr key={name} className="border-border/60 border-b align-top">
+                  <td className="text-foreground py-2.5 pr-6 font-mono font-medium whitespace-nowrap">
+                    {name}
+                  </td>
+                  <td className="text-muted-foreground py-2.5 leading-6">{detail}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
         <p>
           Why the brief works: contact sheets — a model reading consecutive frames side by side
           follows what happened; the same frames one at a time, it doesn't.

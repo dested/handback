@@ -35,16 +35,16 @@ export function KindControl({
             aria-checked={value === option.value}
             onClick={() => onChange(option.value)}
             className={cn(
-              'rounded-md border px-3 py-2 font-mono text-xs transition-colors',
+              'inline-flex h-8 items-center justify-center rounded-md border px-2.5 text-[13px] font-medium transition-colors',
               value === option.value
-                ? 'border-primary bg-accent text-primary'
-                : 'border-border text-muted-foreground hover:text-foreground'
+                ? 'bg-foreground border-foreground text-white'
+                : 'text-foreground/80 hover:bg-secondary border-input bg-card'
             )}>
             {option.label}
           </button>
         ))}
       </div>
-      <p className="text-muted-foreground text-sm leading-relaxed">
+      <p className="text-muted-foreground text-[13px] leading-relaxed">
         {value === 'human'
           ? 'The video ships whole for a person to watch — nothing is distilled. Tighten it up in the viewer, then share the link.'
           : 'Distilled for your coding agent — keyframes, transcript and a report it can read.'}

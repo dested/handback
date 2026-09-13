@@ -1,4 +1,4 @@
-import type { TranscriberId, TranscriptSegment } from '../lib/types';
+import type { TranscribeProgress, TranscriberId, TranscriptSegment } from '../lib/types';
 import { transcribeInCloud } from './transcribeCloud';
 import type { WorkerIn, WorkerOut } from './transcribeWorker';
 
@@ -23,11 +23,6 @@ const SAMPLE_RATE = 16000;
 /** Peak below this is silence, and Whisper hallucinates sentences out of silence. */
 const SILENCE_FLOOR = 0.001;
 const TIMEOUT_MS = 15 * 60 * 1000;
-
-export interface TranscribeProgress {
-  stage: 'decode' | 'upload' | 'download' | 'model' | 'transcribe' | 'polish';
-  pct: number;
-}
 
 export interface TranscribeResult {
   segments: TranscriptSegment[];

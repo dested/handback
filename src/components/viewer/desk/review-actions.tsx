@@ -1,9 +1,6 @@
-// The reviewer's act-on-it controls, rendered on the Overview/Verdict hero right
-// beside what they answer. SignOff is the "waiting on your sign-off" card
-// (Approve / Send back), shown once an agent has handed a result back; AnswerForm
-// is the needs_info reply box. Both used to live in the exchange pane; they moved
-// here when the conversation became its own tab, so the primary action sits with
-// the verdict instead of behind a tab.
+// The needs_info reply box, rendered by the detail body (viewer/pane/detail.tsx) right under
+// the agent's question. The sign-off card that used to live beside it became the Approve /
+// Send back buttons in viewer/pane/header.tsx (2026-09-13 redesign).
 
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -23,83 +20,6 @@ function useInvalidate(walkthroughId: string) {
     queryClient.invalidateQueries({ queryKey: trpc.walkthroughs.list.queryKey() })
     queryClient.invalidateQueries({ queryKey: trpc.walkthroughs.inbox.queryKey() })
   }
-}
-
-/**
- * The sign-off card. Renders only for a member on an in_review walkthrough that
- * has an agent result to sign off on — otherwise null, so callers can drop it in
- * unconditionally.
- */
-export function SignOff({ walkthrough }: { walkthrough: Walkthrough }) {
-  const trpc = useTRPC()
-  const invalidate = useInvalidate(walkthrough.id)
-  const [armed, setArmed] = useState(false)
-
-  const setStatus = useMutation(
-    trpc.walkthroughs.setStatus.mutationOptions({ onSettled: invalidate })
-  )
-  const sendBack = useMutation(
-    trpc.walkthroughs.sendBack.mutationOptions({
-      onSuccess: () => setArmed(false),
-      onSettled: invalidate,
-    })
-  )
-
-  const hasResult = walkthrough.notes.some((n) => n.role === 'agent' && n.kind === 'result')
-  if (!walkthrough.viewerIsMember || walkthrough.status !== 'in_review' || !hasResult) return null
-
-  const busy = setStatus.isPending || sendBack.isPending
-
-  return (
-    <div className="border-border border-l-review bg-card max-w-[680px] rounded-md border border-l-[3px] p-4">
-      <p className="text-review font-mono text-[11px] tracking-widest uppercase">
-        waiting on your sign-off
-      </p>
-      {armed ? (
-        <form
-          className="mt-3 space-y-2"
-          onSubmit={(e) => {
-            e.preventDefault()
-            const input = e.currentTarget.elements.namedItem('note')
-            const note = input instanceof HTMLInputElement ? input.value.trim() : ''
-            if (note) sendBack.mutate({ walkthroughId: walkthrough.id, note })
-          }}>
-          <input
-            name="note"
-            autoFocus
-            disabled={busy}
-            placeholder="What still needs doing?"
-            aria-label="Send-back note"
-            className="border-input bg-card focus-visible:border-ring w-full min-w-0 rounded-md border px-3 py-1.5 text-sm outline-none"
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') setArmed(false)
-            }}
-          />
-          <div className="flex gap-2">
-            <Button type="submit" variant="outline" disabled={busy}>
-              Send to agent
-            </Button>
-            <Button type="button" variant="ghost" disabled={busy} onClick={() => setArmed(false)}>
-              Cancel
-            </Button>
-          </div>
-        </form>
-      ) : (
-        <div className="mt-3 flex flex-wrap gap-2">
-          <Button
-            disabled={busy}
-            onClick={() => setStatus.mutate({ walkthroughId: walkthrough.id, status: 'resolved' })}>
-            Approve &amp; sign off
-          </Button>
-          <Button variant="outline" disabled={busy} onClick={() => setArmed(true)}>
-            Send back
-          </Button>
-        </div>
-      )}
-      {sendBack.error && <p className="text-destructive mt-2 text-[13px]">{sendBack.error.message}</p>}
-      {setStatus.error && <p className="text-destructive mt-2 text-[13px]">{setStatus.error.message}</p>}
-    </div>
-  )
 }
 
 /**

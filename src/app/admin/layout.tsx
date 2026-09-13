@@ -8,7 +8,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '~/com
 import {
   Sidebar,
   SidebarContent,
-  SidebarFooter,
   SidebarGroup,
   SidebarGroupLabel,
   SidebarHeader,
@@ -71,11 +70,9 @@ export function AdminLayout() {
   return (
     <SidebarProvider>
       <Sidebar>
-        <SidebarHeader>
-          <span className="text-muted-foreground font-mono text-[11px] font-medium tracking-[0.14em] uppercase group-data-[collapsed]/sidebar:hidden">
-            Admin
-          </span>
-          <SidebarTrigger className="ml-auto group-data-[collapsed]/sidebar:ml-0" />
+        <SidebarHeader className="px-2">
+          <SidebarMenuLink to="/app" icon={ArrowLeft} label="App" className="flex-1" />
+          <SidebarTrigger className="group-data-[collapsed]/sidebar:ml-0" />
         </SidebarHeader>
         <SidebarContent>
           <SidebarGroup>
@@ -94,20 +91,11 @@ export function AdminLayout() {
             </SidebarMenu>
           </SidebarGroup>
         </SidebarContent>
-        <SidebarFooter>
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuLink to="/app" icon={ArrowLeft} label="Back to app" />
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </SidebarFooter>
       </Sidebar>
       <SidebarInset>
         <div className="mb-2 flex items-center gap-2 px-6 pt-4 md:hidden">
           <SidebarTrigger />
-          <span className="text-muted-foreground font-mono text-[11px] font-medium tracking-[0.14em] uppercase">
-            Admin
-          </span>
+          <span className="text-[13px] font-semibold">Admin</span>
         </div>
         <div className="mx-auto w-full max-w-6xl px-6 py-8">
           <Outlet />

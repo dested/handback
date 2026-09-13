@@ -1,6 +1,6 @@
 // The Handback identity: one returning stroke — the work goes out in ink,
 // turns, and comes back in cobalt to land in your hand — beside the lowercase
-// Fraunces wordmark. Import this — never redraw it.
+// Inter wordmark. Import this — never redraw it.
 
 import { cn } from '~/lib/utils'
 
@@ -38,7 +38,7 @@ export function Wordmark({ className }: { className?: string }) {
   return (
     <span className={cn('inline-flex items-center gap-2', className)}>
       <ReturnMark />
-      <span className="font-display text-xl font-semibold tracking-tight">handback</span>
+      <span className="font-display text-xl font-semibold tracking-[-0.01em]">handback</span>
     </span>
   )
 }

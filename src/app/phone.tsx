@@ -27,6 +27,7 @@ import { HUMAN_ROWS, StageList, isCommitted } from '~/components/phone/stages'
 import { Button, buttonVariants } from '~/components/ui/button'
 import { Input } from '~/components/ui/input'
 import { Label } from '~/components/ui/label'
+import { PageHeader } from '~/components/ui/page-header'
 import { TokenLimitNotice, isTokenLimitError } from '~/components/token-manager'
 import { useCaptureToken } from '~/lib/capture-token'
 import { fetchContext, type ServerContext } from '~/lib/capture/context'
@@ -508,24 +509,21 @@ export function PhonePage() {
   }, [phase])
 
   return (
-    <div className="max-w-3xl space-y-12">
-      <header className="space-y-4">
-        <p className="text-cobalt font-mono text-xs tracking-widest uppercase">Phone</p>
-        <h1 className="font-display text-4xl font-semibold tracking-tight">
-          Record anywhere. Hand it back.
-        </h1>
-        <p className="text-muted-foreground text-base leading-relaxed">
+    <div className="max-w-3xl space-y-10">
+      <div>
+        <PageHeader title="Record anywhere. Hand it back." className="px-0 pt-0" />
+        <p className="text-muted-foreground mt-3 text-[15px] leading-relaxed">
           Your phone already records its own screen with your voice over it — this page takes that
           clip, distils it into keyframes and a transcript, and files it as a walkthrough your agent
           can read.
         </p>
-        <p className="text-muted-foreground text-xs">
+        <p className="text-muted-foreground mt-2 text-[13px]">
           Where your recording goes →{' '}
           <Link to="/privacy#processors" className="text-cobalt hover:underline">
             /privacy#processors
           </Link>
         </p>
-      </header>
+      </div>
 
       {phase === 'guide' && (
         <PhoneGuide
@@ -542,16 +540,16 @@ export function PhonePage() {
       {phase === 'intake' && (
         <section className="space-y-6">
           {shareMissed && (
-            <p className="text-muted-foreground text-sm">
+            <p className="text-muted-foreground text-[13px]">
               the share didn't carry a file — pick the clip below instead
             </p>
           )}
 
           {resumable && (
-            <div className="border-review/40 bg-review-wash space-y-3 rounded-md border p-4">
-              <div className="flex items-center gap-3">
+            <div className="border-review/40 bg-review-wash/40 space-y-3 rounded-lg border p-4">
+              <div className="flex items-center gap-2.5">
                 <span className="bg-review size-2 shrink-0 rounded-full" />
-                <p className="text-sm font-medium">This walkthrough didn't finish uploading.</p>
+                <p className="text-[13px] font-medium">This walkthrough didn't finish uploading.</p>
               </div>
               <div className="flex flex-wrap items-center gap-3">
                 <Button type="button" size="sm" onClick={() => void send()}>
@@ -582,8 +580,10 @@ export function PhonePage() {
             onRetryContext={() => setCtxAttempt((n) => n + 1)}
           />
 
-          <div className="space-y-2">
-            <Label htmlFor="phone-title">Title</Label>
+          <div className="space-y-1.5">
+            <Label htmlFor="phone-title" className="text-muted-foreground text-xs">
+              Title
+            </Label>
             <Input
               id="phone-title"
               value={title}
@@ -643,12 +643,12 @@ export function PhonePage() {
 
       {phase === 'done' && result && (
         <section className="space-y-6">
-          <div className="border-approve/40 bg-approve-wash space-y-3 rounded-md border p-5">
-            <div className="flex items-center gap-3">
+          <div className="border-approve/40 bg-approve-wash space-y-3 rounded-lg border p-5">
+            <div className="flex items-center gap-2.5">
               <span className="bg-approve size-2 shrink-0 rounded-full" />
-              <p className="font-display text-2xl font-semibold">Handed back.</p>
+              <p className="text-lg font-semibold tracking-tight">Handed back.</p>
             </div>
-            <p className="text-sm font-medium">{title.trim() || placeholder}</p>
+            <p className="text-[13px] font-medium">{title.trim() || placeholder}</p>
             <p className="text-muted-foreground font-mono text-xs">
               {kind === 'human'
                 ? `video for a person · ${result.lineCount} lines · ${mmss(result.durationMs)}`
@@ -687,27 +687,25 @@ export function PhonePage() {
       )}
 
       {phase === 'failed' && (
-        <section className="border-border border-l-destructive bg-card space-y-3 rounded-md border border-l-2 p-5">
-          <p className="text-muted-foreground font-mono text-xs tracking-widest uppercase">
-            Didn't make it
-          </p>
+        <section className="border-border border-l-destructive bg-card space-y-3 rounded-lg border border-l-2 p-5">
+          <p className="text-[13px] font-semibold">Didn't make it</p>
           {isTokenLimitError(failure) ? (
             <TokenLimitNotice />
           ) : (
-            <p className="text-sm leading-relaxed">{failure}</p>
+            <p className="text-[13px] leading-relaxed">{failure}</p>
           )}
-          <p className="text-sm">
+          <p className="text-[13px]">
             <button
               type="button"
               onClick={() => void send()}
-              className="text-primary underline underline-offset-4">
+              className="text-cobalt font-medium hover:underline">
               try again
             </button>
             <span className="text-muted-foreground"> · </span>
             <button
               type="button"
               onClick={reset}
-              className="text-muted-foreground underline underline-offset-4">
+              className="text-muted-foreground hover:underline">
               start over
             </button>
           </p>

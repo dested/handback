@@ -29,6 +29,7 @@ import { TakeList } from '~/components/record/takes'
 import { Button, buttonVariants } from '~/components/ui/button'
 import { Input } from '~/components/ui/input'
 import { Label } from '~/components/ui/label'
+import { PageHeader } from '~/components/ui/page-header'
 import { AttachmentsPanel } from '~/components/viewer/attachments-panel'
 import { useCopy } from '~/components/viewer/use-copy'
 import { TokenLimitNotice, isTokenLimitError } from '~/components/token-manager'
@@ -799,48 +800,43 @@ export function RecordPage() {
 
   return (
     <div className="max-w-3xl space-y-10">
-      <header className="space-y-4">
-        <p className="text-cobalt font-mono text-xs tracking-widest uppercase">Record</p>
-        <h1 className="font-display text-4xl font-semibold tracking-tight">
-          Record it right here.
-        </h1>
-        <p className="text-muted-foreground text-base leading-relaxed">
+      <div>
+        <PageHeader title="Record it right here." className="px-0 pt-0" />
+        <p className="text-muted-foreground mt-3 text-[15px] leading-relaxed">
           Share a tab, a window or your whole screen, talk through what's wrong, and this page
           distils it into the same walkthrough the recorder extension produces — keyframes,
           transcript, report — with nothing installed.
         </p>
-        <p className="text-muted-foreground text-sm leading-relaxed">
+        <p className="text-muted-foreground mt-2 text-[13px] leading-relaxed">
           The{' '}
-          <Link to="/recorder" className="text-primary underline underline-offset-4">
+          <Link to="/recorder" className="text-cobalt font-medium hover:underline">
             extension
           </Link>{' '}
           still does more: it draws on the page, captures console errors, and keyframes the moment
           you click. This page can't reach inside the page it's recording — everything else is the
           same.
         </p>
-        <p className="text-muted-foreground text-xs">
+        <p className="text-muted-foreground mt-2 text-[13px]">
           Where your recording goes →{' '}
           <Link to="/privacy#processors" className="text-cobalt hover:underline">
             /privacy#processors
           </Link>
         </p>
-      </header>
+      </div>
 
       {capable === false && (
-        <section className="border-border border-l-destructive bg-card space-y-3 rounded-md border border-l-2 p-5">
-          <p className="text-muted-foreground font-mono text-xs tracking-widest uppercase">
-            Not here
-          </p>
-          <p className="text-sm leading-relaxed">
+        <section className="border-border border-l-destructive bg-card space-y-3 rounded-lg border border-l-2 p-5">
+          <p className="text-[13px] font-semibold">Not here</p>
+          <p className="text-[13px] leading-relaxed">
             This browser can't capture the screen — no mobile browser can, and that isn't going to
             change. On a phone, record with the OS recorder and hand the clip over.
           </p>
-          <p className="text-sm">
-            <Link to="/phone" className="text-primary underline underline-offset-4">
+          <p className="text-[13px]">
+            <Link to="/phone" className="text-cobalt font-medium hover:underline">
               Handback on the phone
             </Link>
             <span className="text-muted-foreground"> · </span>
-            <Link to="/upload" className="text-primary underline underline-offset-4">
+            <Link to="/upload" className="text-cobalt font-medium hover:underline">
               upload a clip you already have
             </Link>
           </p>
@@ -850,8 +846,8 @@ export function RecordPage() {
       {capable && (phase === 'idle' || phase === 'review') && (
         <section className="space-y-6">
           {phase === 'idle' ? (
-            <div className="border-border bg-muted/20 flex flex-col items-center gap-4 rounded-md border px-6 py-12 text-center">
-              <p className="font-display text-xl font-semibold">Ready when you are</p>
+            <div className="bg-card flex flex-col items-center gap-4 rounded-lg border px-6 py-12 text-center">
+              <p className="text-lg font-semibold tracking-tight">Ready when you are</p>
 
               {/* Who it's for decides everything downstream — capture rate,
                   distill, where it shows up — so it's the first choice, not a
@@ -874,10 +870,10 @@ export function RecordPage() {
                     aria-checked={kind === option.value}
                     onClick={() => setKind(option.value)}
                     className={cn(
-                      'rounded-md border px-3 py-2 font-mono text-xs transition-colors',
+                      'inline-flex h-8 items-center justify-center rounded-md border px-2.5 text-[13px] font-medium transition-colors',
                       kind === option.value
-                        ? 'border-primary bg-accent text-primary'
-                        : 'border-border text-muted-foreground hover:text-foreground'
+                        ? 'bg-foreground border-foreground text-white'
+                        : 'text-foreground/80 hover:bg-secondary border-input bg-card'
                     )}>
                     {option.label}
                   </button>
@@ -892,7 +888,7 @@ export function RecordPage() {
                 </div>
               )}
 
-              <p className="text-muted-foreground max-w-md text-sm leading-relaxed">
+              <p className="text-muted-foreground max-w-md text-[13px] leading-relaxed">
                 {kind === 'human'
                   ? 'Full-rate, full-quality video for a person to watch — you tighten it up here, then send a link or the file. Nothing is distilled.'
                   : kind === 'voice'
@@ -901,7 +897,8 @@ export function RecordPage() {
               </p>
               <Button
                 type="button"
-                className="h-[46px] w-full max-w-xs"
+                size="lg"
+                className="w-full max-w-xs"
                 onClick={() => void (kind === 'voice' ? startVoice() : startTake())}>
                 {kind === 'human'
                   ? 'Record a video'
@@ -909,7 +906,7 @@ export function RecordPage() {
                     ? 'Record a voice note'
                     : 'Record a walkthrough'}
               </Button>
-              <p className="text-muted-foreground font-mono text-xs">
+              <p className="text-muted-foreground text-[13px]">
                 {kind === 'voice'
                   ? 'any browser with a mic — nothing is captured but your voice'
                   : 'a computer with Chrome or Edge · your mic turns on when the share starts'}
@@ -919,19 +916,17 @@ export function RecordPage() {
             <>
               <div className="space-y-3">
                 <div className="flex items-baseline justify-between gap-3">
-                  <p className="text-muted-foreground font-mono text-xs tracking-widest uppercase">
-                    voice note
-                  </p>
+                  <p className="text-[13px] font-semibold">Voice note</p>
                   <p className="text-muted-foreground font-mono text-xs">{mmss(voiceMs)}</p>
                 </div>
                 {voiceUrl && <audio controls src={voiceUrl} className="w-full" />}
-                <p className="text-muted-foreground text-sm">
+                <p className="text-muted-foreground text-[13px]">
                   it lives in this tab until it's sent — a reload loses it.
                 </p>
                 <button
                   type="button"
                   onClick={() => void startVoice()}
-                  className="text-primary text-sm underline underline-offset-4">
+                  className="text-cobalt text-[13px] font-medium hover:underline">
                   ● record it again instead
                 </button>
               </div>
@@ -945,8 +940,10 @@ export function RecordPage() {
                 onRetryContext={() => setCtxAttempt((n) => n + 1)}
               />
 
-              <div className="space-y-2">
-                <Label htmlFor="record-title">Title</Label>
+              <div className="space-y-1.5">
+                <Label htmlFor="record-title" className="text-muted-foreground text-xs">
+                  Title
+                </Label>
                 <Input
                   id="record-title"
                   value={title}
@@ -957,24 +954,24 @@ export function RecordPage() {
                 />
               </div>
 
-              <Button type="button" className="h-[46px] w-full" onClick={() => void sendVoice()}>
+              <Button type="button" size="lg" className="w-full" onClick={() => void sendVoice()}>
                 Send to Handback
               </Button>
 
               {discarding ? (
-                <p className="text-sm">
+                <p className="text-[13px]">
                   <span className="text-muted-foreground">discard this voice note? </span>
                   <button
                     type="button"
                     onClick={discardVoice}
-                    className="text-destructive underline underline-offset-4">
+                    className="text-destructive font-medium hover:underline">
                     yes, discard
                   </button>
                   <span className="text-muted-foreground"> · </span>
                   <button
                     type="button"
                     onClick={() => setDiscarding(false)}
-                    className="text-muted-foreground underline underline-offset-4">
+                    className="text-muted-foreground hover:underline">
                     keep
                   </button>
                 </p>
@@ -982,7 +979,7 @@ export function RecordPage() {
                 <button
                   type="button"
                   onClick={() => setDiscarding(true)}
-                  className="text-muted-foreground hover:text-destructive text-sm underline underline-offset-4">
+                  className="text-muted-foreground hover:text-destructive text-[13px] hover:underline">
                   discard
                 </button>
               )}
@@ -991,9 +988,14 @@ export function RecordPage() {
             <>
               <div className="space-y-3">
                 <div className="flex items-baseline justify-between gap-3">
-                  <p className="text-muted-foreground font-mono text-xs tracking-widest uppercase">
+                  <p className="text-[13px] font-semibold">
                     {takes.length} {takes.length === 1 ? 'take' : 'takes'}
-                    {kind === 'human' && ' · video for a person'}
+                    {kind === 'human' && (
+                      <span className="text-muted-foreground font-normal">
+                        {' '}
+                        · video for a person
+                      </span>
+                    )}
                   </p>
                   <p className="text-muted-foreground font-mono text-xs">
                     {kind === 'human'
@@ -1003,7 +1005,7 @@ export function RecordPage() {
                 </div>
                 <TakeList takes={takes} onDelete={(take) => void removeTake(take)} busy={false} />
                 {recovered && (
-                  <p className="text-muted-foreground text-sm">
+                  <p className="text-muted-foreground text-[13px]">
                     one of these was still recording when the tab closed — it was rebuilt from what
                     reached disk, so it may stop a moment early.
                   </p>
@@ -1011,7 +1013,7 @@ export function RecordPage() {
                 <button
                   type="button"
                   onClick={() => void startTake()}
-                  className="text-primary text-sm underline underline-offset-4">
+                  className="text-cobalt text-[13px] font-medium hover:underline">
                   ● add another recording
                 </button>
               </div>
@@ -1025,8 +1027,10 @@ export function RecordPage() {
                 onRetryContext={() => setCtxAttempt((n) => n + 1)}
               />
 
-              <div className="space-y-2">
-                <Label htmlFor="record-title">Title</Label>
+              <div className="space-y-1.5">
+                <Label htmlFor="record-title" className="text-muted-foreground text-xs">
+                  Title
+                </Label>
                 <Input
                   id="record-title"
                   value={title}
@@ -1038,31 +1042,31 @@ export function RecordPage() {
               </div>
 
               {kind === 'human' ? (
-                <Button type="button" className="h-[46px] w-full" onClick={() => void enterEdit()}>
+                <Button type="button" size="lg" className="w-full" onClick={() => void enterEdit()}>
                   Tighten it up
                 </Button>
               ) : (
-                <Button type="button" className="h-[46px] w-full" onClick={() => void send()}>
+                <Button type="button" size="lg" className="w-full" onClick={() => void send()}>
                   Send to Handback
                 </Button>
               )}
 
               {discarding ? (
-                <p className="text-sm">
+                <p className="text-[13px]">
                   <span className="text-muted-foreground">
                     discard {takes.length} {takes.length === 1 ? 'take' : 'takes'}?{' '}
                   </span>
                   <button
                     type="button"
                     onClick={() => void discard()}
-                    className="text-destructive underline underline-offset-4">
+                    className="text-destructive font-medium hover:underline">
                     yes, discard
                   </button>
                   <span className="text-muted-foreground"> · </span>
                   <button
                     type="button"
                     onClick={() => setDiscarding(false)}
-                    className="text-muted-foreground underline underline-offset-4">
+                    className="text-muted-foreground hover:underline">
                     keep
                   </button>
                 </p>
@@ -1070,28 +1074,26 @@ export function RecordPage() {
                 <button
                   type="button"
                   onClick={() => setDiscarding(true)}
-                  className="text-muted-foreground hover:text-destructive text-sm underline underline-offset-4">
+                  className="text-muted-foreground hover:text-destructive text-[13px] hover:underline">
                   discard
                 </button>
               )}
             </>
           )}
 
-          {recordError && <p className="text-destructive text-sm">{recordError}</p>}
+          {recordError && <p className="text-destructive text-[13px]">{recordError}</p>}
         </section>
       )}
 
       {recording && kind === 'voice' && (
-        <section className="border-border bg-muted/20 flex flex-col items-center gap-4 rounded-md border px-6 py-12 text-center">
-          <p className="text-muted-foreground font-mono text-xs tracking-widest uppercase">
-            listening
-          </p>
-          <p className="font-display text-4xl font-semibold tabular-nums">{mmss(voiceElapsed)}</p>
-          <p className="text-muted-foreground max-w-md text-sm leading-relaxed">
+        <section className="bg-card flex flex-col items-center gap-4 rounded-lg border p-4 py-12 text-center">
+          <p className="text-muted-foreground text-[13px] font-medium">Listening</p>
+          <p className="font-mono text-4xl font-medium tabular-nums">{mmss(voiceElapsed)}</p>
+          <p className="text-muted-foreground max-w-md text-[13px] leading-relaxed">
             Say what's wrong the way you'd tell a colleague — what you did, what you expected, what
             happened instead. Product names help; your agent reads every word.
           </p>
-          <Button type="button" className="h-[46px] w-full max-w-xs" onClick={stopVoice}>
+          <Button type="button" size="lg" className="w-full max-w-xs" onClick={stopVoice}>
             Stop
           </Button>
         </section>
@@ -1126,7 +1128,7 @@ export function RecordPage() {
           )}
 
           {!pip.supported && (
-            <p className="text-muted-foreground font-mono text-xs">
+            <p className="text-muted-foreground text-[13px]">
               keep this tab open — the recording happens here, not on the server
             </p>
           )}
@@ -1136,28 +1138,26 @@ export function RecordPage() {
       {phase === 'edit' && (
         <section className="space-y-6">
           <div className="flex items-baseline justify-between gap-3">
-            <p className="text-muted-foreground font-mono text-xs tracking-widest uppercase">
-              The tight edit
-            </p>
+            <p className="text-[13px] font-semibold">The tight edit</p>
             <button
               type="button"
               onClick={() => setPhase('review')}
-              className="text-muted-foreground text-sm underline underline-offset-4">
+              className="text-muted-foreground text-[13px] hover:underline">
               ← back to the takes
             </button>
           </div>
 
           {editPrep.status === 'loading' && (
-            <p className="text-muted-foreground font-mono text-sm">{editPrep.detail}</p>
+            <p className="text-muted-foreground font-mono text-[13px]">{editPrep.detail}</p>
           )}
 
           {editPrep.status === 'failed' && (
-            <div className="border-border border-l-destructive bg-card space-y-3 rounded-md border border-l-2 p-5">
-              <p className="text-sm leading-relaxed">{editPrep.detail}</p>
+            <div className="border-border border-l-destructive bg-card space-y-3 rounded-lg border border-l-2 p-5">
+              <p className="text-[13px] leading-relaxed">{editPrep.detail}</p>
               <button
                 type="button"
                 onClick={() => void enterEdit()}
-                className="text-primary text-sm underline underline-offset-4">
+                className="text-cobalt text-[13px] font-medium hover:underline">
                 try again
               </button>
             </div>
@@ -1179,11 +1179,12 @@ export function RecordPage() {
               />
               <Button
                 type="button"
-                className="h-[46px] w-full"
+                size="lg"
+                className="w-full"
                 onClick={() => void renderAndSend()}>
                 Render &amp; send
               </Button>
-              <p className="text-muted-foreground font-mono text-xs">
+              <p className="text-muted-foreground text-[13px]">
                 renders the tight cut as an MP4 right here, then uploads it — the raw takes never
                 leave this machine
               </p>
@@ -1199,7 +1200,7 @@ export function RecordPage() {
               to {destinationName} · {sendTitle}
             </p>
           </div>
-          <ul className="divide-border divide-y">
+          <ul className="divide-border/60 divide-y">
             {(['render', 'upload'] as const).map((stage) => {
               const active = humanProgress?.stage === stage
               const done = stage === 'render' && humanProgress?.stage === 'upload'
@@ -1207,20 +1208,25 @@ export function RecordPage() {
                 <li
                   key={stage}
                   className={cn(
-                    'flex items-center gap-3 py-2.5 font-mono text-sm',
+                    'flex items-center gap-3 py-2.5 text-[13px]',
                     active ? 'text-foreground' : 'text-muted-foreground'
                   )}>
                   <span
                     className={cn(
-                      'size-2 shrink-0 rounded-full',
-                      done ? 'bg-approve' : active ? 'bg-cobalt' : 'border-border border'
-                    )}
-                  />
+                      'flex size-[18px] shrink-0 items-center justify-center rounded-full border-[1.5px]',
+                      done
+                        ? 'bg-approve border-approve'
+                        : active
+                          ? 'border-cobalt'
+                          : 'border-input'
+                    )}>
+                    {active && <span className="bg-cobalt size-2 rounded-full" />}
+                  </span>
                   <span className="min-w-0 flex-1 truncate">
                     {stage === 'render' ? 'rendering the tight cut' : 'uploading'}
                   </span>
                   {active && humanProgress && (
-                    <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
+                    <span className="text-muted-foreground shrink-0 font-mono text-xs tabular-nums">
                       {humanProgress.detail ?? ''}
                       {humanProgress.detail && humanProgress.pct >= 0 && ' · '}
                       {humanProgress.pct >= 0 && `${Math.round(humanProgress.pct * 100)}%`}
@@ -1230,7 +1236,7 @@ export function RecordPage() {
               )
             })}
           </ul>
-          <p className="text-muted-foreground font-mono text-xs">
+          <p className="text-muted-foreground text-[13px]">
             keep this tab open — the work happens here, not on the server
           </p>
           {humanProgress?.stage === 'render' && (
@@ -1257,7 +1263,7 @@ export function RecordPage() {
             progress={progress}
             rows={kind === 'voice' ? VOICE_RECORD_ROWS : RECORD_ROWS}
           />
-          <p className="text-muted-foreground font-mono text-xs">
+          <p className="text-muted-foreground text-[13px]">
             keep this tab open — the work happens here, not on the server
           </p>
           {!isCommitted(progress) && (
@@ -1270,12 +1276,12 @@ export function RecordPage() {
 
       {phase === 'done' && result && (
         <section className="space-y-6">
-          <div className="border-approve/40 bg-approve-wash space-y-3 rounded-md border p-5">
-            <div className="flex items-center gap-3">
+          <div className="border-approve/40 bg-approve-wash space-y-3 rounded-lg border p-5">
+            <div className="flex items-center gap-2.5">
               <span className="bg-approve size-2 shrink-0 rounded-full" />
-              <p className="font-display text-2xl font-semibold">Handed back.</p>
+              <p className="text-lg font-semibold tracking-tight">Handed back.</p>
             </div>
-            <p className="text-sm font-medium">{sendTitle}</p>
+            <p className="text-[13px] font-medium">{sendTitle}</p>
             <p className="text-muted-foreground font-mono text-xs">
               {kind === 'agent'
                 ? `${result.frameCount} keyframes · ${result.lineCount} lines · ${mmss(result.durationMs)}`
@@ -1284,7 +1290,7 @@ export function RecordPage() {
           </div>
 
           {!result.transcribed && (
-            <p className="text-muted-foreground text-sm">
+            <p className="text-muted-foreground text-[13px]">
               shipped without a transcript — either nothing was said, or the server's transcription
               is off right now
             </p>
@@ -1294,9 +1300,7 @@ export function RecordPage() {
               attach anything the narration referenced before walking away. */}
           {kind !== 'human' && (
             <div className="space-y-2">
-              <p className="text-muted-foreground font-mono text-xs tracking-widest uppercase">
-                Attachments
-              </p>
+              <p className="text-[13px] font-semibold">Attachments</p>
               <AttachmentsPanel walkthroughId={result.walkthroughId} poll />
             </div>
           )}
@@ -1357,21 +1361,19 @@ export function RecordPage() {
       )}
 
       {phase === 'failed' && (
-        <section className="border-border border-l-destructive bg-card space-y-3 rounded-md border border-l-2 p-5">
-          <p className="text-muted-foreground font-mono text-xs tracking-widest uppercase">
-            Didn't make it
-          </p>
+        <section className="border-border border-l-destructive bg-card space-y-3 rounded-lg border border-l-2 p-5">
+          <p className="text-[13px] font-semibold">Didn't make it</p>
           {isTokenLimitError(failure) ? (
             <TokenLimitNotice />
           ) : (
-            <p className="text-sm leading-relaxed">{failure}</p>
+            <p className="text-[13px] leading-relaxed">{failure}</p>
           )}
-          <p className="text-muted-foreground text-sm">
+          <p className="text-muted-foreground text-[13px]">
             {kind === 'voice'
               ? 'The note is still in this tab — nothing was lost.'
               : 'The takes are still on this machine — nothing was lost.'}
           </p>
-          <p className="text-sm">
+          <p className="text-[13px]">
             <button
               type="button"
               onClick={() =>
@@ -1381,14 +1383,14 @@ export function RecordPage() {
                     ? renderAndSend()
                     : send())
               }
-              className="text-primary underline underline-offset-4">
+              className="text-cobalt font-medium hover:underline">
               try again
             </button>
             <span className="text-muted-foreground"> · </span>
             <button
               type="button"
               onClick={() => setPhase(kind === 'human' && editState ? 'edit' : 'review')}
-              className="text-muted-foreground underline underline-offset-4">
+              className="text-muted-foreground hover:underline">
               {kind === 'human' && editState
                 ? 'back to the edit'
                 : kind === 'voice'

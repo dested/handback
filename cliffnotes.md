@@ -1,7 +1,7 @@
 # Handback — CliffNotes
 
 > Living map of the project. Read this before any coding session.
-> Last updated: 2026-09-02. Visual language → `ui.md` · why → `decisions.md` ·
+> Last updated: 2026-09-13 (Asana-shaped redesign — plans/2026-09-12-asana-redesign.md). Visual language → `ui.md` · why → `decisions.md` ·
 > log → `updates.md`.
 >
 > **2026-08-23 mega-wave** (plans/2026-08-23-fable5-mega-wave.md): sidebar app
@@ -11,7 +11,10 @@
 > evidence screenshots on `post_result` · notify-on-result/question/health ·
 > watch-page comments · /usage · /upgrade (pro is admin-granted) · extension
 > 1.9.0 intent chips — superseded by **1.10.0, PUBLISHED 2026-08-25** (outbox background
-> upload + JPEG 0.8 + speaker plumbing; zipped on macOS with `zip -r`, see the publish gotcha).
+> upload + JPEG 0.8 + speaker plumbing; zipped on macOS with `zip -r`, see the publish gotcha)
+> → **1.11.0 built 2026-09-12, UNPUBLISHED — needs a load-unpacked test first**: capture,
+> transcription and upload all run in the offscreen document, so closing the panel never stops
+> a take (see "The panel is a window" gotcha; plans/2026-09-12-panel-and-app-handback.md).
 >
 > **Naming:** the product noun is **walkthrough** (renamed from "gripe" 2026-08-01, owner's
 > directive on record). Older log entries below say "gripe" historically — same object. The word
@@ -244,23 +247,26 @@ prisma/schema.prisma    better-auth models + Team(ownerId, seatLimit)/Membership
 src/
   app/
     routes.tsx          All routes + loaders (appLoader guards session, prefetches orgs.mine)
-    layout.tsx          Shell: marketing chrome vs app chrome. SpaceSwitcher dropdown (Personal
-                        first, then teams, "New team…" modal gated on teams.entitlements); the
-                        Team nav renders only on a team space
+    layout.tsx          Shell (2026-09-13 redesign): marketing chrome vs app chrome. App chrome =
+                        sticky 52px TopBar (wordmark, search → /app?q=, ● Record, Upgrade, Avatar
+                        menu w/ Usage·Admin·Sign out) over [Sidebar 232px | content]. Sidebar:
+                        Walkthroughs·Projects·Teams·Connect, live Projects group (→ /app?project=),
+                        Spaces group (→ /app?space=), Capture group, footer Usage/Upgrade/Admin.
+                        /app and /walkthroughs/* are full-bleed; other pages max-w-6xl
     home.tsx            Landing page (assembles src/components/landing/*)
     sign-in/up.tsx      Auth cards (better-auth client flows)
-    app.tsx             InboxPage (route /app, header reads "Walkthroughs"): a card GRID of every
-                        walkthrough you can reach + a light filter toolbar (search · status
-                        segments with mono counts · Space/Project popover selects that only appear
-                        when you have >1 space / any projects). One `walkthroughs.inbox` query,
-                        client-side filtering. No provisioning state — Personal always exists
-    walkthrough.tsx     WalkthroughPage: THE REVIEW DESK (2026-08-24 rethink — assembles
-                        src/components/viewer/desk/*): full-bleed masthead over
-                        [tab rail | work]; state-driven hero tab; the review is TABBED
-                        (exchange 3rd column deleted 2026-08-24pm — Conversation tab + Edit
-                        with AI tab + sign-off/answer on the Overview hero). Modes: editing
-                        (CloudEditor), human (edit→share, no desk), child task (TaskBrief +
-                        SignOff/AnswerForm + Conversation). App sidebar forced to icon rail here
+    app.tsx             /app (2026-09-13 redesign): LIST + BOARD views over one `walkthroughs.inbox`
+                        query, filters are URL params (view/status/space/project/q/w — see ui.md),
+                        grouped Needs your call · Processing · Open · Done (inbox/groups.ts); the
+                        `w` param opens the right-hand WalkthroughPane (viewer/pane) beside the list.
+                        Deep search via walkthroughs.search stays. No localStorage filter memory
+    walkthrough.tsx     WalkthroughPage (2026-09-13 redesign): crumb + DetailHeader (Approve /
+                        Send back / Copy brief / ⋯) + Tabs (Overview · Recording · Frames · Console ·
+                        Brief · report.md · Tasks · Edit with AI). Overview = the SAME
+                        `WalkthroughDetail` body the /app pane renders (viewer/pane/detail.tsx);
+                        the Recording tab owns the single VideoStage (Overview seeks jump to it).
+                        Modes: editing (CloudEditor), human (FinalCut/edit→share), child (detail
+                        body with TaskBrief). The desk's masthead/rail/overview-tab are DELETED
     projects.tsx        Projects list + create (origin-hints field removed from the UI)
     team.tsx            Members / Invites for team spaces (seat line, owner-only role select +
                         ownership transfer); a lone personal card otherwise. No guests
@@ -321,15 +327,18 @@ src/
                         AND the viewer's re-transcribe control (recording-tab.tsx)
                         so a stuck user can revoke where they are, not on a buried settings page
     legal.tsx           LegalPage/Section/Terms/Notice — shared chrome for /privacy + /terms
-    inbox/              card.tsx — THE /app walkthrough card (WalkthroughCard + InboxCard type):
-                        keyframe thumbnail for agent-kind-with-frames, a paper title-card set in
-                        type (kind + big mono duration) otherwise; status chip, space·project,
-                        uploader·time, mono duration/errors/expiry, whole-card stretched Link, and
-                        a per-card ⋯ menu whose one job is Rename (arms the inline title editor,
-                        usePopover from viewer/overflow-menu). Filter state + toolbar live in
-                        app.tsx. (rail.tsx — the old filter rail — DELETED 2026-08-12)
-    ui/                 button, card, input, label, sidebar (shadcn new-york style, no asChild;
-                        sidebar is hand-rolled — no radix — collapse persisted, mobile overlay)
+    inbox/              /app's views (card.tsx DELETED 2026-09-13): types.ts (InboxCard = the
+                        inbox wire item, incl. `score {fixed,total}|null` from the newest result's
+                        outcomes), groups.ts (Group + groupOf + GROUPS order), list-view.tsx (the
+                        grouped 13px table: ✓-circle approve, inline rename, score bar, hydration-
+                        gated age), board-view.tsx (4 columns, HTML5 drag → setStatus open/resolved,
+                        optimistic), row-menu.tsx (Rename · Mark resolved/Reopen · Open full page)
+    ui/                 button (variants default/outline/ghost/approve/destructive/link; h-8),
+                        card, input, label, sidebar (hand-rolled — no radix — collapse persisted,
+                        mobile overlay; SidebarMenuLink takes icon | swatch, trailing, active) +
+                        the redesign's primitives: status-pill (StatusPill + STATUS_INK — THE only
+                        status colours), project-tag (ProjectTag + projectColor(id)), avatar, tabs,
+                        chip, page-header
     phone/              guide, clip-list (+AddClips/voice note), destination (one grouped
                         control), kind (KindControl — the 2-way agent/person picker shared by
                         /upload + /phone manual intake; /record keeps its own 3-way), stages
@@ -339,14 +348,17 @@ src/
                         final-cta · demo-shot.tsx (a keyframe as SVG) + demo-data.ts (the one
                         demo walkthrough) + mock.tsx (Pane/ContactSheet/Filmstrip/PlayerStrip/
                         RecorderPanelMock — the hero's extension panel)
-    viewer/             desk/ is THE viewer (2026-08-24 rethink, plans/2026-08-23-viewer-rethink.md):
-                        masthead (crumb·title·StatusChip·intent pill·project·Copy-brief-when-open·⋯;
-                        suggested-title use/dismiss row) · status-chip (dot+word, popover) ·
-                        rail (vertical tabs w/ counts + refine control footer; horizontal <lg) ·
-                        overview-tab (state-driven hero + the reviewer's ACTION inline:
-                        refining progress / digest+key points / THE VERDICT w/ per-point
-                        outcomes + SignOff card / question + AnswerForm / signed-off+Keep) ·
-                        key-points (the table, seek chips) · conversation (ONE thread: notes+
+    viewer/             pane/ is THE detail surface (2026-09-13 redesign, plans/2026-09-12-asana-
+                        redesign.md): index.tsx (WalkthroughPane — fetches get, polls while
+                        refining, drives useWalkthroughMedia; the /app?w= host) · detail.tsx
+                        (WalkthroughDetail — title, fields, video [pane only], What you said, key-
+                        point checklist, result card, question+AnswerForm, Done line, Activity;
+                        agent/human/child branches) · header.tsx (DetailHeader: Approve, Send back
+                        popover, Copy brief/ShareControl, OverflowMenu, Open full page, ×) ·
+                        fields.tsx (StatusChip, project picker, intent, recorded by, agent, parts) ·
+                        key-points-checklist.tsx · result-card.tsx.
+                        desk/ keeps the deep tabs + review pieces: status-chip (StatusPill trigger
+                        + popover) · key-points (types; table unused) · conversation (ONE thread: notes+
                         comments+activity+refine lines + a single comment box; NO assistant,
                         NO sign-off) · review-actions (SignOff card + AnswerForm+voice, rendered
                         on the Overview hero; self-guarding) · assistant (AssistantTab — the
@@ -361,6 +373,7 @@ src/
                         brief-tab (refined brief rendered; report.md fallback) · tasks-tab
                         (SplitChildren + gated SplitPanel) · use-walkthrough-media (recordings/
                         frames/player/staged-deletes hook) · use-voice-answer · types.
+                        DELETED 2026-09-13: masthead, rail, overview-tab (folded into pane/).
                         DELETED 2026-08-24: walkthrough-header, agent-view, agent-answer,
                         assistant-panel, refine-panel, comments-panel, status-control; then
                         exchange (the single merged pane) DELETED 2026-08-24pm — split into
@@ -433,8 +446,10 @@ src/
                         mediabunny/WebCodecs, hardware encode, odd-dimension canvas fallback),
                         transcript.ts (edited-clock line re-timing, shared by both send paths),
                         transfer.ts (XHR GET/PUT with byte progress + 3-try retry)
+    time.ts             shortDate / relativeTime / expiresTag / mmss — UTC + hydration-safe
     trpc.tsx / auth-client.ts / utils.ts
-  styles/app.css        ALL design tokens (light only) + .rule/.stamp/.ink-underline utilities
+  styles/app.css        ALL design tokens (light only, hex; 2026-09-13 work-tool palette — see
+                        ui.md) + .rule/.stamp(no tilt)/.ink-underline utilities
 public/                 manifest.webmanifest (PWA: standalone, share_target, shortcut) · sw.js
                         (share-POST stash ONLY — caches nothing, keep it that way) · icons/
                         (return-mark PWA icons, regenerate via `node cli/make-pwa-icons.mjs`) ·
@@ -442,14 +457,14 @@ public/                 manifest.webmanifest (PWA: standalone, share_target, sho
                         (scripts/make-og.mjs, Playwright); og:image:width/height in index.html
                         must match dsf×viewport) · sitemap.xml · robots.txt (Sitemap: line)
 e2e/                    smoke.spec.ts + committed screenshots (landing, sign-up, app flow)
-index.html              SSR template; Google Fonts (Fraunces/Libre Franklin/IBM Plex Mono);
+index.html              SSR template; Google Fonts (Inter + JetBrains Mono);
                         manifest + apple-touch-icon links
 Dockerfile              DRYDOCK-OWNED — regenerated on every wire/re-wire, never hand-edit
 drydock.yaml            DRYDOCK-OWNED — the deploy manifest (portal is source of truth)
 .github/workflows/
   drydock.yml           DRYDOCK-OWNED — OIDC build → ECR → predeploy → ECS deploy on push to main
 extension/              Handback Recorder — the Chrome MV3 extension (own npm workspace)
-  public/manifest.json  MV3: sidePanel + activeTab/scripting/storage/tabs; hotkey Alt+Shift+D
+  public/manifest.json  MV3: sidePanel + activeTab/scripting/storage/tabs/offscreen; hotkey Alt+Shift+D
   src/lib/              Shared contracts: types, messages (worker protocol), timeline math,
                         db (IndexedDB 'handback-recorder', v2 adds the `outbox` store),
                         bundle (buildFileSet — the in-memory gripe file set, moved out of
@@ -459,20 +474,26 @@ extension/              Handback Recorder — the Chrome MV3 extension (own npm 
                         context (GET /api/ingest/context), walkthroughs (GET /api/ingest/walkthroughs
                         — the workspace's queue, read back into the panel's home screen)
   src/background/       Service worker: hotkeys, dock routing, IndexedDB writes, strip docking,
-                        offscreen-doc lifecycle (ensureOffscreen/kickDrain + onStartup resume)
-  src/offscreen/        THE UPLOADER (1.10.0): drains the outbox oldest-first — buildFileSet
-                        → pushGripe — so "send to Handback" enqueues and returns; panel
-                        follows along via `outbox:changed` broadcasts (sidepanel/Outbox.tsx)
+                        offscreen-doc lifecycle (ensureOffscreen/kickDrain + onStartup resume),
+                        red REC badge + action-click routing while a take runs. Returns `false`
+                        for every `capture:*` / `transcribe:*` message — those are the
+                        offscreen document's to answer
+  src/offscreen/        THE ENGINE (1.11.0): recorder.ts (screen+mic capture — getDisplayMedia
+                        runs HERE, no gesture needed; Web Audio mix + dedup, see the audio
+                        gotcha), transcription.ts (the post-take queue: transcribe.ts
+                        → transcribeCloud.ts / transcribeWorker.ts, then polish.ts; broadcasts
+                        `transcribe:update`), and the uploader (drains the outbox oldest-first,
+                        WAITING for the session's transcripts first — buildFileSet → pushGripe).
+                        Broadcasts `capture:update` / `capture:done` / `transcribe:update` /
+                        `outbox:changed`; the panel only mirrors
   src/content/          On-page dock (d/c/s keys), ink drawing, click ripples, telemetry;
                         injected.js relay
-  src/sidepanel/        Panel app: Home.tsx (the nothing-open screen = the workspace: destination
-                        row + switcher, the workspace's queue with status/project filters, sessions
-                        still on this machine), recorder (getDisplayMedia incl. system audio + raw
-                        mic, Web Audio mix + dedup — see the audio gotcha), transcription
-                        (transcribeCloud.ts → the workspace; transcribeWorker.ts → on-device),
-                        polish.ts (the cleanup pass, after transcription), Parts list
-                        (the review screen — one card per recording, see the gotcha),
-                        grids contact sheets, App.tsx orchestration
+  src/sidepanel/        Panel app — a VIEW, owns no media: Home.tsx (the nothing-open screen = the
+                        workspace: destination row + switcher, the workspace's queue with
+                        status/project filters, sessions still on this machine), App.tsx
+                        orchestration (`capture:start` → offscreen raises Chrome's picker;
+                        mirrors the live readout and the transcription queue), Parts list (the review screen — one card per
+                        recording, see the gotcha), Outbox.tsx (the strip), grids contact sheets
   scripts/              make-icons, copy-ort, prune-dist, preview.mjs + preview/ (layout harness)
 ```
 
@@ -488,9 +509,9 @@ extension/              Handback Recorder — the Chrome MV3 extension (own npm 
 | `/docs` | **How Handback works** — the loop, the hosted `claude mcp add` line, all six MCP tools, teams, FAQ. Public, legal-page chrome, linked from marketing nav + footer | `src/app/docs.tsx` |
 | `POST /api/client-error` | Browser error beacon (prod only) → alert email pipeline; per-IP rate-limited | `server/alerts.ts` |
 | `POST /api/stripe/webhook` | Stripe billing webhook — raw-body signature verify → reconcile the customer's entitlements from live subscriptions | `server/stripe-webhook.ts` |
-| `/app` | **Walkthroughs** — ALL spaces as a card GRID (not a list), light filter toolbar (search · status segments w/ mono counts · Space/Project popover selects, shown only when >1 space / any projects) over one `walkthroughs.inbox` query, client-side filtered. Cards carry a keyframe thumbnail (agent kind) or a paper title-card; rename lives in a per-card ⋯ menu via `walkthroughs.rename` | `src/app/app.tsx` + `src/components/inbox/card.tsx` |
+| `/app` | **Walkthroughs** — List (`?view=list`, default) and Board (`?view=board`) over one `walkthroughs.inbox` query, grouped Needs your call · Processing · Open · Done; filters are URL params (`status`, `space`, `project`, `q`); `?w=<id>` opens the detail pane beside the list. Row ✓ approves, ⋯ = rename / resolve / reopen; Board drag → status | `src/app/app.tsx` + `src/components/inbox/*` + `src/components/viewer/pane/*` |
 | `/upload` | Desktop intake: drop a clip → **for an agent** (distill) or **for a person** (ships whole, `kind: 'human'`, edit in the viewer) → upload (reuses capture lib + phone components) | `src/app/upload.tsx` |
-| `/walkthroughs/:walkthroughId` | The viewer (`/gripes/:id` 302s here) | `src/app/walkthrough.tsx` |
+| `/walkthroughs/:walkthroughId` | The full detail page: header + tabs, Overview is the same body as the /app pane (`/gripes/:id` 302s here) | `src/app/walkthrough.tsx` + `src/components/viewer/pane/*` |
 | `/projects` · `/team` | Projects (ALL spaces, grouped; create w/ space select) · "Teams" — every team (roster/invites/seats per team, New team lives HERE) | `src/app/{projects,team}.tsx` |
 | `/connect` | Connect a coding agent — one button mints a token and fills in `claude mcp add`; tokens/disconnect are reference below | `src/app/connect.tsx` |
 | `/record` | **Record with no extension** — live `getDisplayMedia` capture in the page. Kind picker: **for an agent** (distill pipeline), **for a person** (pristine 30 fps capture → transcript-first editor → mediabunny MP4 render → share link), or **just talk** (mic-only voice note, in-memory, through the phone distill pipeline). Multi-take, crash-recoverable, optional always-on-top Document PiP HUD | `src/app/record.tsx` |
@@ -679,7 +700,7 @@ reaches the container on a plain push.
   `src/lib/pwa.ts` — change both together. `externally_connectable` etc. are unaffected; the
   phone token lives in `localStorage handback.phone.token` and re-mints itself on 401.
 - **The web recorder is the extension's engine minus the content script, and the gap is a fixed
-  list.** `src/lib/capture/live.ts` is a port of `extension/src/sidepanel/recorder.ts` — same picker
+  list.** `src/lib/capture/live.ts` is a port of `extension/src/offscreen/recorder.ts` — same picker
   constraints, same 64×64 dedup, same Web Audio mix + mic-only shadow, same length-scaled
   `frameBudget`, same chunk-to-IDB persistence. What a page cannot have, because it comes from
   scripts injected into the *recorded* origin: console/network `events` (so `errorCount` is always
@@ -743,12 +764,13 @@ reaches the container on a plain push.
   from Recorder ≤1.1.0 and stores it as `errorCount`, so don't delete that fallback until the
   Web Store build is past 1.1.0 everywhere.
 - **A take's audio is three sources, two artifacts** (extension 1.7.0, 2026-08-12): the webm's one
-  audio track is app/system audio (getDisplayMedia `audio` + `systemAudio:'include'`) mixed with a
+  audio track is app/system audio (getDisplayMedia `audio` + `systemAudio:'include'`, now called
+  from the offscreen document) mixed with a
   RAW mic (AEC/NS/AGC off, so the room and second voices survive — headphones assumed) through a
   Web Audio graph, because MediaRecorder silently records only the first audio track it's handed.
   Transcription must NOT hear that mix: takes with system audio run a mic-only shadow recorder
   whose chunks (`<id>:micchunk:*`) are crash-persisted like the video's and assembled into
-  `<id>:mic`, which `runWhisper` prefers over `<id>:video`. Keep the three lifecycles in sync —
+  `<id>:mic`, which `offscreen/transcription.ts` prefers over `<id>:video`. Keep the three lifecycles in sync —
   delete (db.ts), recover (background), finish/cancel (recorder.ts) all know both chunk families.
   Chrome only offers "share audio" on tab/entire-screen pickers (never a window) and its absence
   is silent — so the PickGate 'choosing' screen carries a dark ShareDialogMock portrait pointing
@@ -775,14 +797,39 @@ reaches the container on a plain push.
   decisions.md 2026-08-25). finish() writes an `OutboxEntry` (IDB `outbox`, target
   server+token SNAPSHOTTED), closes the session, and returns — the offscreen doc drains the
   queue sequentially (buildFileSet in lib/bundle.ts → pushGripe) and the panel's OutboxStrip
-  renders queued/uploading/failed(retry)/done(link + copy-brief) off `outbox:changed`
-  broadcasts. Blobs delete never — the session outlives the upload; a failed entry retries
+  renders queued/waiting-for-transcript/uploading/failed(retry)/done(**view your handback →** +
+  copy-brief + "Handback is processing it") off `outbox:changed`
+  broadcasts. Since 1.11.0 the drain **waits for the session's queued transcripts before it
+  bundles** (`OutboxEntry.waiting = 'transcript'`, `waitForTranscripts()` in
+  offscreen/transcription.ts) — send is never disabled and never ships the live dictation.
+  Blobs delete never — the session outlives the upload; a failed entry retries
   safely because re-declaring a slug replaces wholesale. A fresh offscreen doc re-queues
   entries stuck 'uploading' (the old uploader died); `onStartup` resumes a queue a browser
   restart interrupted. Don't put an upload back in the panel, and don't let two uploads run
   at once — they fight for the same wifi.
+- **The panel is a window, not the worker (extension 1.11.0, decisions.md 2026-09-12).** The
+  side panel owns no media. Record → the panel sends `offscreen:ensure` (background) then
+  `capture:start {id, lang, scope, pristine}` → the offscreen document's `Recorder` calls
+  **`getDisplayMedia` itself** (Chrome allows it there with no user gesture — that is what the
+  DISPLAY_MEDIA reason exists for) and the panel opens the row with `recording:start`. **Do NOT
+  pick in the panel and hand a `chrome.desktopCapture` stream id over**: a stream id can only be
+  consumed by the document that requested it, and the offscreen document aborts with "Error
+  starting tab capture" (Screenity documents the same wall) — 1.11.0's first build shipped that
+  and failed on Windows. Live readout = `capture:update` broadcasts (`update: null` = ended);
+  `capture:state` on mount reattaches a reopened panel mid-take (and orphan recovery MUST wait
+  for that answer — before it, a `recording` row is indistinguishable from an orphan). Stop from
+  anywhere (panel button, dock `s` → `recording:stop`, Chrome's own bar → track `ended`) lands in
+  the offscreen `stopCapture()` (idempotent), which finishes the take, **enqueues transcription
+  itself**, and broadcasts `capture:done`. The background flips the badge to red **REC** and sets
+  `openPanelOnActionClick:false` while recording so the toolbar icon can only OPEN the panel
+  (`chrome.action.onClicked` → `sidePanel.open`), re-synced on worker restart. **Background must
+  `return false` for `capture:*` and `transcribe:*`** — a second `sendResponse` from it would win
+  the race and the panel would read a bogus `{ok:true}`. Offscreen reasons: BLOBS + USER_MEDIA +
+  DISPLAY_MEDIA. Untested on a real Chrome as of 2026-09-12 — Web Speech dictation now runs in
+  the offscreen document too; if `webkitSpeechRecognition` proves unavailable there, the live
+  ticker degrades to `listening…` and the post-take transcript still lands.
 - **The keyframe cap is length-scaled, and it lives in two places.** `frameBudget(durationMs)`
-  (`extension/src/sidepanel/recorder.ts`) is 40 frames/min clamped to **[150, 600]** per *take* —
+  (`extension/src/offscreen/recorder.ts`) is 40 frames/min clamped to **[150, 600]** per *take* —
   applied once in `finish()`, after dedup, as a **uniform** thin with nothing carved out of it
   (the `reason === 'mark'` exemption went with the mark feature, 2026-08-01); survivors are
   renumbered ascending (`t` survives, so transcript citations stay valid). It was a flat 150 until 2026-07-31. Server-side, `briefFrameLimit()`

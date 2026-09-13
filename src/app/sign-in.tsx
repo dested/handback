@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useRevalidator, useSearchParams } from 'react-router-dom'
-import { ReturnMark } from '~/components/logo'
+import { Wordmark } from '~/components/logo'
 import { authClient } from '~/lib/auth-client'
 import { clearIdentity } from '~/lib/space'
 import { Button } from '~/components/ui/button'
@@ -47,16 +47,20 @@ export function SignInPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-sm px-6 py-20 md:py-28">
-      <ReturnMark className="h-6" />
-      <h1 className="font-display mt-6 text-3xl font-semibold tracking-tight">Welcome back</h1>
-      <p className="text-muted-foreground mt-2 text-sm">
-        Sign in to pick up the walkthroughs waiting on you.
-      </p>
+    <div className="mx-auto w-full max-w-sm px-6 py-16">
+      <Link to="/" aria-label="Handback home" className="flex justify-center">
+        <Wordmark />
+      </Link>
       <div className="bg-card mt-8 rounded-lg border p-6">
-        <form onSubmit={onSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="email">Email</Label>
+        <h1 className="text-xl font-semibold tracking-tight">Welcome back</h1>
+        <p className="text-muted-foreground mt-1.5 text-[13px]">
+          Sign in to pick up the walkthroughs waiting on you.
+        </p>
+        <form onSubmit={onSubmit} className="mt-5 space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="email" className="text-muted-foreground text-xs">
+              Email
+            </Label>
             <Input
               id="email"
               type="email"
@@ -66,12 +70,14 @@ export function SignInPage() {
               autoComplete="email"
             />
           </div>
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <div className="flex items-baseline justify-between">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password" className="text-muted-foreground text-xs">
+                Password
+              </Label>
               <Link
                 to="/forgot-password"
-                className="text-muted-foreground hover:text-foreground text-xs underline-offset-4 hover:underline">
+                className="text-cobalt text-[13px] font-medium hover:underline">
                 Forgot it?
               </Link>
             </div>
@@ -84,13 +90,13 @@ export function SignInPage() {
               autoComplete="current-password"
             />
           </div>
-          {error && <p className="text-destructive text-sm">{error}</p>}
-          <Button type="submit" className="w-full" disabled={loading}>
+          {error && <p className="text-destructive text-[13px]">{error}</p>}
+          <Button type="submit" size="lg" className="w-full" disabled={loading}>
             {loading ? 'Signing in…' : 'Sign in'}
           </Button>
         </form>
       </div>
-      <p className="text-muted-foreground mt-6 text-sm">
+      <p className="text-muted-foreground mt-6 text-center text-[13px]">
         No account?{' '}
         <Link
           to={
@@ -100,7 +106,7 @@ export function SignInPage() {
                 ? `/sign-up?next=${encodeURIComponent(next)}`
                 : '/sign-up'
           }
-          className="text-primary underline-offset-4 hover:underline">
+          className="text-cobalt font-medium hover:underline">
           Create one
         </Link>
       </p>

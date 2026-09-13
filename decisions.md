@@ -2,6 +2,30 @@
 
 > ADR-lite: what was decided, why, what was rejected. Append-only.
 
+## 2026-09-12 — The recorder panel is a window; the offscreen document is the engine
+**Why:** closing the side panel (X, toolbar icon, focus change) silently killed the recording
+because the panel owned `getDisplayMedia` + `MediaRecorder` (owner: "first, I need to be able
+to minimize this"). Capture, transcription and upload now all run in the offscreen document:
+the offscreen document calls `getDisplayMedia` itself (no gesture needed there — the
+DISPLAY_MEDIA reason), the panel just sends `capture:start` and mirrors `capture:*` /
+`transcribe:*` broadcasts. Badge reads red `REC`; the toolbar click can only open the panel
+mid-take. Send never blocks and never ships the live dictation — it enqueues, and the drain waits
+for the session's transcripts before bundling. Ships as 1.11.0 after a load-unpacked test.
+**Rejected:** keeping capture in the panel and warning before close (the panel can't intercept
+its own close); a "minimize" that hides the panel body but keeps the document (Chrome closes the
+side panel document outright); moving capture to the service worker (no DOM, no MediaRecorder);
+a `chrome.desktopCapture` stream id picked in the panel and consumed offscreen (Chrome binds
+the id to the requesting document; the offscreen doc aborts with "Error starting tab capture" —
+tried first, failed on Windows).
+
+## 2026-09-12 — Resolved IS the archive; the app redesign is a design canvas before code
+**Why:** owner asked for mark-resolved + archive like a board. `resolved` already leaves the open
+board and auto-expires after 30 days, so the card menu gets Mark resolved / Reopen and no fifth
+status. The look-and-feel rework ("really rethink… give me a mock-up in design… go crazy") ships
+as three directions on a Claude Design canvas; code starts from the row the owner picks.
+**Rejected:** a separate `archived` status (a second retention rule for the same behaviour);
+restyling the app in code first (explicitly against the ask).
+
 ## 2026-08-24 — Billing is Stripe Checkout + Customer Portal; entitlements reconcile FROM Stripe
 **Why:** billing finally exists (owner: "wire this fully… make sure it's bulletproof"). The paid
 plans are the locked $29 Pro / $49 Business, sold as two Stripe recurring prices via **hosted
@@ -1071,3 +1095,20 @@ the declare rate limit, degrade-to-nothing like polish.
 **Rejected:** attachments in the declare file list (would fork the mirrored pipeline four ways);
 human-kind attachments (the watch page has no surface for them — reopen if wanted); metering the
 detection pass (cost is noise next to transcription).
+## 2026-09-13 — The Asana-shaped redesign: one detail body, URL-param filters, Done = archive
+**Why:** Sal rejected the editorial paper ("built for an accountant") and the three canvas
+directions ("too cute… ASANA. WE'RE REPLACING ASANA"). The product is the tool you keep open
+all day, so the shell is topbar + sidebar, `/app` is List + Board over one `walkthroughs.inbox`
+query, and a walkthrough opens as a right-hand pane (`?w=`) beside the list. The pane body
+(`viewer/pane/detail.tsx`, `WalkthroughDetail`) IS the Overview tab of `/walkthroughs/:id` —
+one component, two hosts — so the review actions (Approve, Send back, key-point checklist,
+result card, Activity) can never drift between the two. Filters are URL params
+(`view|status|space|project|q|w`) so the sidebar/topbar link into them and a URL is a
+shareable view; nothing lives in localStorage. Groups are Needs your call · Processing · Open ·
+Done, and **resolved = Done = the archive** (collapsed, clears after 30 days) — no separate
+"archive" verb. Status colours exist only in `StatusPill`/`STATUS_INK`; project colours only
+in `projectColor(id)`. Inter + JetBrains Mono replace Fraunces/Libre Franklin/Plex; hex tokens
+replace the oklch paper palette. The extension panel mirrors the same tokens on system fonts.
+**Rejected:** keeping the desk (masthead + rail + tabbed hero) as a second detail surface; a
+card grid or dashboard on `/app`; localStorage filter memory; a separate archive status; a
+fifth status hue; dark mode (still forbidden); serif/stamp/editorial motifs.

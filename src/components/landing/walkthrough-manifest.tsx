@@ -124,7 +124,7 @@ function Card({
 }) {
   return (
     <div className={cn('flex min-w-0 flex-col', className)}>
-      <h3 className="font-display text-xl font-semibold tracking-tight">{title}</h3>
+      <h3 className="text-base font-semibold tracking-tight">{title}</h3>
       <p className="text-muted-foreground mt-1.5 mb-4 text-sm leading-relaxed">{blurb}</p>
       <Pane label={file} meta={meta} className="flex-1 shadow-sm">
         {children}

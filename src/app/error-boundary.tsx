@@ -1,4 +1,5 @@
 import { Link, isRouteErrorResponse, useRouteError } from 'react-router-dom'
+import { Wordmark } from '~/components/logo'
 import { buttonVariants } from '~/components/ui/button'
 
 // Root route ErrorBoundary. React Router renders this in place of the layout
@@ -20,24 +21,26 @@ export function RouteErrorBoundary() {
 
   return (
     <>
-      <header className="border-b">
-        <nav className="mx-auto flex max-w-5xl items-center px-6 py-4">
-          <Link to="/" className="font-semibold">
-            handback
+      <header className="bg-card border-b">
+        <nav className="mx-auto flex h-[60px] max-w-6xl items-center px-6">
+          <Link to="/" aria-label="Handback home">
+            <Wordmark />
           </Link>
         </nav>
       </header>
-      <main className="mx-auto flex max-w-5xl flex-col items-start gap-4 px-6 py-16">
-        <h1 className="text-5xl font-bold tracking-tight">{title}</h1>
-        <p className="text-muted-foreground">{message}</p>
-        {import.meta.env.DEV && error instanceof Error && error.stack && (
-          <pre className="bg-muted text-muted-foreground max-w-full overflow-auto rounded-md p-4 text-xs">
-            {error.stack}
-          </pre>
-        )}
-        <Link to="/" className={buttonVariants()}>
-          Back home
-        </Link>
+      <main className="mx-auto w-full max-w-6xl px-6 py-16">
+        <div className="bg-card max-w-md rounded-lg border p-6">
+          <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
+          <p className="text-muted-foreground mt-1.5 font-mono text-[13px]">{message}</p>
+          {import.meta.env.DEV && error instanceof Error && error.stack && (
+            <pre className="bg-muted text-muted-foreground mt-4 max-w-full overflow-auto rounded-md p-4 text-xs">
+              {error.stack}
+            </pre>
+          )}
+          <Link to="/" className={buttonVariants({ className: 'mt-5' })}>
+            Back home
+          </Link>
+        </div>
       </main>
     </>
   )

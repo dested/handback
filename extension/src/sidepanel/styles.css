@@ -1,57 +1,53 @@
 /*
  * Handback Recorder — panel styles. LIGHT ONLY: no dark mode, nothing orange.
- * Same language as the web app (repo ui.md): warm paper, near-black ink, one
- * cobalt accent, hairline rules, mono for timecodes. Fonts are system-stack
- * here — an extension panel must not fetch webfonts.
+ * The work-tool idiom, mirrored from the web app (repo ui.md): white surface,
+ * near-black ink, one cobalt accent, hairline borders, 6–10px radii, no shadows
+ * except the popover, the four status inks, mono for timecodes. Fonts are the
+ * system stack — an extension panel must not fetch webfonts.
  */
 :root {
-  /* Paper + ink */
-  --paper: #fbfaf7;
+  /* Surface + ink */
+  --paper: #f7f8fa;
   --card: #ffffff;
-  --ink: #23262e;
-  --muted: #6b7078;
-  --border: #e6e4dd;
+  --ink: #1f2229;
+  --muted: #6b7280;
+  --border: #e6e7eb;
+  --input: #d9dbe1;
 
   /* The reviewer's pen */
   --cobalt: #2f56d8;
-  --cobalt-wash: #eef1fc;
+  --cobalt-wash: #e9edfb;
 
   /* Status inks (match the web app exactly) */
-  --review: #7a3fc0;
-  --review-wash: #f3ecfb;
-  --approve: #22795a;
-  --approve-wash: #e9f5ef;
-  --danger: #c23b3b;
+  --review: #6b45d6;
+  --review-wash: #efe9fb;
+  --approve: #128a3c;
+  --approve-wash: #e4f4ea;
+  --danger: #c8322b;
 
-  /* Type */
-  --font-body:
-    'Segoe UI', system-ui, -apple-system, sans-serif;
+  /* Type — system stack; a panel must not fetch webfonts. */
+  --font-body: 'Segoe UI', system-ui, -apple-system, sans-serif;
   --font-mono: 'Cascadia Mono', 'Consolas', ui-monospace, monospace;
 
-  /* Scale — stepped up at 480/760px by the media queries below */
-  --fs-0: 11px;
-  --fs-1: 12px;
-  --fs-2: 13px;
-  --fs-3: 15px;
-  --fs-4: 18px;
+  /* Scale — fixed at every width. Only --gap steps up. */
+  --fs-0: 12px;
+  --fs-1: 13px;
+  --fs-2: 14px;
+  --fs-3: 16px;
+  --fs-4: 20px;
   --gap: 10px;
-  --radius: 6px;
+  --radius: 8px;
+  --radius-sm: 6px;
 }
 
 @media (min-width: 480px) {
   :root {
-    --fs-0: 12px;
-    --fs-1: 13px;
-    --fs-2: 14px;
-    --fs-3: 16px;
-    --fs-4: 20px;
     --gap: 12px;
   }
 }
 
 @media (min-width: 760px) {
   :root {
-    --fs-4: 22px;
     --gap: 14px;
   }
 }
@@ -68,7 +64,7 @@ body,
 }
 
 body {
-  background: var(--paper);
+  background: var(--card);
   color: var(--ink);
   font-family: var(--font-body);
   font-size: var(--fs-2);

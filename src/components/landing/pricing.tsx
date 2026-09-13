@@ -1,3 +1,4 @@
+import { Check } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { buttonVariants } from '~/components/ui/button'
 import { cn } from '~/lib/utils'
@@ -13,11 +14,8 @@ type Tier = {
   cta: string
   to?: string
   href?: string
+  /** The highlighted plan — cobalt top border and the "Most popular" chip. */
   featured?: boolean
-  /** Label in the corner of the card. */
-  badge?: string
-  /** Priced, but not billable yet — the plan is coming soon. */
-  soon?: boolean
 }
 
 // Billing is live: the paid plans check out through Stripe. Their CTAs go to
@@ -63,17 +61,17 @@ const tiers: Tier[] = [
 
 export function Pricing() {
   return (
-    <Section id="pricing" className="rule py-20 md:py-28">
+    <Section id="pricing">
       <SectionLabel>Pricing</SectionLabel>
       <SectionHeading>Priced per reviewer, not per walkthrough.</SectionHeading>
-      <p className="text-muted-foreground mt-4 max-w-xl text-sm leading-relaxed">
+      <p className="text-muted-foreground mt-4 max-w-xl text-[15px]">
         The free tier is live today — record, and every walkthrough comes back refined. Upgrade to
         Pro or Business whenever you need more room; cancel anytime.
       </p>
       <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {tiers.map((tier) => {
           const ctaClass = cn(
-            buttonVariants({ variant: tier.featured ? 'default' : 'outline' }),
+            buttonVariants({ variant: tier.featured ? 'default' : 'outline', size: 'lg' }),
             'mt-6 w-full'
           )
           return (
@@ -81,36 +79,24 @@ export function Pricing() {
               key={tier.name}
               className={cn(
                 'bg-card flex flex-col rounded-lg border p-6',
-                tier.featured && 'border-cobalt'
+                tier.featured && 'border-t-cobalt border-t-2'
               )}>
               <div className="flex items-center justify-between gap-2">
-                <h3 className="font-display text-lg font-semibold tracking-tight">{tier.name}</h3>
-                {tier.badge && (
-                  <span
-                    className={cn(
-                      'rounded-full px-2 py-0.5 font-mono text-[0.65rem] tracking-[0.1em] uppercase',
-                      tier.featured
-                        ? 'bg-cobalt-wash text-cobalt'
-                        : 'text-muted-foreground bg-muted'
-                    )}>
-                    {tier.badge}
+                <h3 className="text-base font-semibold">{tier.name}</h3>
+                {tier.featured && (
+                  <span className="bg-cobalt-wash text-cobalt rounded-md px-2 py-0.5 text-xs font-medium">
+                    Most popular
                   </span>
                 )}
               </div>
-              {/* A price nobody is charged yet sits in muted ink, not full black. */}
-              <p
-                className={cn(
-                  'font-display mt-5 text-3xl font-semibold tracking-tight',
-                  tier.soon && 'text-muted-foreground'
-                )}>
-                {tier.price}
-              </p>
+              <p className="mt-5 text-3xl font-semibold tracking-tight">{tier.price}</p>
               {/* nbsp keeps all four price blocks on one baseline */}
-              <p className="text-muted-foreground mt-1 font-mono text-xs">{tier.unit ?? ' '}</p>
-              <p className="text-foreground/80 mt-4 font-mono text-xs">{tier.quota}</p>
-              <p className="text-muted-foreground mt-2 flex-1 text-sm leading-relaxed">
-                {tier.blurb}
+              <p className="text-muted-foreground mt-1 text-[13px]">{tier.unit ?? ' '}</p>
+              <p className="mt-4 flex items-start gap-2 text-[15px]">
+                <Check className="text-cobalt mt-0.5 size-4 shrink-0" />
+                <span>{tier.quota}</span>
               </p>
+              <p className="text-muted-foreground mt-2 flex-1 text-[15px]">{tier.blurb}</p>
               {tier.href ? (
                 <a href={tier.href} className={ctaClass}>
                   {tier.cta}

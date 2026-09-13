@@ -57,7 +57,7 @@ export function AgentView() {
           </Pane>
 
           <div>
-            <h3 className="font-display text-xl font-semibold tracking-tight">Three tools</h3>
+            <h3 className="text-base font-semibold tracking-tight">Three tools</h3>
             <dl className="mt-4 space-y-3">
               {TOOLS.map(([name, what]) => (
                 <div key={name}>
@@ -88,9 +88,7 @@ export function AgentView() {
 function Block({ block }: { block: ReportBlock }) {
   switch (block.kind) {
     case 'h1':
-      return (
-        <h3 className="font-display mt-0 text-2xl font-semibold tracking-tight">{block.text}</h3>
-      )
+      return <h3 className="mt-0 text-xl font-semibold tracking-tight">{block.text}</h3>
 
     case 'meta':
       return (
@@ -114,14 +112,10 @@ function Block({ block }: { block: ReportBlock }) {
       )
 
     case 'h2':
-      return (
-        <h4 className="font-display mt-6 text-lg font-semibold tracking-tight">{block.text}</h4>
-      )
+      return <h4 className="mt-6 text-base font-semibold tracking-tight">{block.text}</h4>
 
     case 'h3':
-      return (
-        <h4 className="font-display mt-7 text-base font-semibold tracking-tight">{block.text}</h4>
-      )
+      return <h4 className="mt-7 text-sm font-semibold tracking-tight">{block.text}</h4>
 
     case 'p':
       return (

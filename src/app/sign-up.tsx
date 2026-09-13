@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useRevalidator, useSearchParams } from 'react-router-dom'
-import { ReturnMark } from '~/components/logo'
+import { Wordmark } from '~/components/logo'
 import { authClient } from '~/lib/auth-client'
 import { clearIdentity } from '~/lib/space'
 import { useTRPC } from '~/lib/trpc'
@@ -53,20 +53,22 @@ export function SignUpPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-sm px-6 py-20 md:py-28">
-      <ReturnMark className="h-6" />
-      <h1 className="font-display mt-6 text-3xl font-semibold tracking-tight">
-        Create your account
-      </h1>
-      <p className="text-muted-foreground mt-2 text-sm">
-        {inviteQuery.data
-          ? `Then you'll join ${inviteQuery.data.teamName}.`
-          : 'Record a walkthrough, hand it to your agent, sign off on the fix.'}
-      </p>
+    <div className="mx-auto w-full max-w-sm px-6 py-16">
+      <Link to="/" aria-label="Handback home" className="flex justify-center">
+        <Wordmark />
+      </Link>
       <div className="bg-card mt-8 rounded-lg border p-6">
-        <form onSubmit={onSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="name">Name</Label>
+        <h1 className="text-xl font-semibold tracking-tight">Create your account</h1>
+        <p className="text-muted-foreground mt-1.5 text-[13px]">
+          {inviteQuery.data
+            ? `Then you'll join ${inviteQuery.data.teamName}.`
+            : 'Record a walkthrough, hand it to your agent, sign off on the fix.'}
+        </p>
+        <form onSubmit={onSubmit} className="mt-5 space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="name" className="text-muted-foreground text-xs">
+              Name
+            </Label>
             <Input
               id="name"
               value={name}
@@ -75,8 +77,10 @@ export function SignUpPage() {
               autoComplete="name"
             />
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="email">Email</Label>
+          <div className="space-y-1.5">
+            <Label htmlFor="email" className="text-muted-foreground text-xs">
+              Email
+            </Label>
             <Input
               id="email"
               type="email"
@@ -86,8 +90,10 @@ export function SignUpPage() {
               autoComplete="email"
             />
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="password">Password</Label>
+          <div className="space-y-1.5">
+            <Label htmlFor="password" className="text-muted-foreground text-xs">
+              Password
+            </Label>
             <Input
               id="password"
               type="password"
@@ -98,17 +104,17 @@ export function SignUpPage() {
               autoComplete="new-password"
             />
           </div>
-          {error && <p className="text-destructive text-sm">{error}</p>}
-          <Button type="submit" className="w-full" disabled={loading}>
+          {error && <p className="text-destructive text-[13px]">{error}</p>}
+          <Button type="submit" size="lg" className="w-full" disabled={loading}>
             {loading ? 'Creating account…' : 'Create account'}
           </Button>
         </form>
       </div>
-      <p className="text-muted-foreground mt-6 text-sm">
+      <p className="text-muted-foreground mt-6 text-center text-[13px]">
         Already have an account?{' '}
         <Link
           to={inviteId ? `/sign-in?invite=${encodeURIComponent(inviteId)}` : '/sign-in'}
-          className="text-primary underline-offset-4 hover:underline">
+          className="text-cobalt font-medium hover:underline">
           Sign in
         </Link>
       </p>

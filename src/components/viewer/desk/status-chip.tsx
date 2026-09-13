@@ -1,26 +1,18 @@
-// The walkthrough's triage status, read twice — a 7px dot and the word — in the
-// three fixed inks (open cobalt, in_review violet, resolved green) plus the
-// deliberately quiet grey for needs_info. A member clicks it to open a popover of
-// all four statuses; a non-member (a platform admin looking in) gets a static
-// readout, since every mutation would 403 anyway.
+// The walkthrough's triage status as a StatusPill. A member clicks it to open a
+// popover of all four statuses; a non-member (a platform admin looking in) gets a
+// static pill, since every mutation would 403 anyway.
 
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { STATUS_INK, StatusPill } from '~/components/ui/status-pill'
 import { useTRPC } from '~/lib/trpc'
 import { cn } from '~/lib/utils'
 import { usePopover } from '../overflow-menu'
 import type { Walkthrough, WalkthroughStatus } from '../types'
 
-const STATUS: Record<WalkthroughStatus, { label: string; dot: string; text: string }> = {
-  open: { label: 'open', dot: 'bg-cobalt', text: 'text-cobalt' },
-  in_review: { label: 'in review', dot: 'bg-review', text: 'text-review' },
-  needs_info: { label: 'needs info', dot: 'bg-muted-foreground', text: 'text-muted-foreground' },
-  resolved: { label: 'resolved', dot: 'bg-approve', text: 'text-approve' },
-}
-
 const ORDER: WalkthroughStatus[] = ['open', 'in_review', 'needs_info', 'resolved']
 
 function asStatus(value: string): WalkthroughStatus {
-  return value in STATUS ? (value as WalkthroughStatus) : 'open'
+  return ORDER.find((status) => status === value) ?? 'open'
 }
 
 export function StatusChip({ walkthrough }: { walkthrough: Walkthrough }) {
@@ -40,21 +32,13 @@ export function StatusChip({ walkthrough }: { walkthrough: Walkthrough }) {
     trpc.walkthroughs.setStatus.mutationOptions({ onSettled: invalidate })
   )
 
-  // In-flight variables stand in for the server's answer, so the chip reads as
+  // In-flight variables stand in for the server's answer, so the pill reads as
   // written the instant it's clicked and snaps back on its own if the write fails.
   const status = asStatus(
     setStatus.isPending ? (setStatus.variables?.status ?? walkthrough.status) : walkthrough.status
   )
-  const meta = STATUS[status]
 
-  if (!walkthrough.viewerIsMember) {
-    return (
-      <span className={cn('inline-flex items-center gap-1.5 text-sm font-medium', meta.text)}>
-        <span className={cn('size-[7px] shrink-0 rounded-full', meta.dot)} />
-        {meta.label}
-      </span>
-    )
-  }
+  if (!walkthrough.viewerIsMember) return <StatusPill status={status} />
 
   function choose(next: WalkthroughStatus) {
     setOpen(false)
@@ -63,37 +47,32 @@ export function StatusChip({ walkthrough }: { walkthrough: Walkthrough }) {
   }
 
   return (
-    <div ref={ref} className="relative">
+    <div ref={ref} className="relative inline-flex">
       <button
         type="button"
         aria-label="Status"
         aria-expanded={open}
         disabled={setStatus.isPending}
         onClick={() => setOpen(!open)}
-        className={cn(
-          'inline-flex items-center gap-1.5 text-sm font-medium transition-opacity disabled:opacity-60',
-          meta.text
-        )}>
-        <span className={cn('size-[7px] shrink-0 rounded-full', meta.dot)} />
-        {meta.label}
+        className="transition-opacity disabled:opacity-60">
+        <StatusPill status={status} />
       </button>
 
       {open && (
-        <div className="bg-card border-border absolute left-0 z-20 mt-2 min-w-40 rounded-md border p-1 shadow-sm">
+        <div className="bg-card border-border absolute left-0 top-full z-30 mt-1.5 min-w-40 rounded-md border p-1 shadow-sm">
           {ORDER.map((value) => {
-            const active = value === status
-            const s = STATUS[value]
+            const ink = STATUS_INK[value]
             return (
               <button
                 key={value}
                 type="button"
                 className={cn(
-                  'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent/50',
-                  active && 'bg-cobalt-wash text-cobalt'
+                  'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[13px] hover:bg-accent/50',
+                  value === status && 'bg-cobalt-wash text-cobalt'
                 )}
                 onClick={() => choose(value)}>
-                <span className={cn('size-[7px] shrink-0 rounded-full', s.dot)} />
-                {s.label}
+                <span className={cn('size-[7px] shrink-0 rounded-full', ink.dot)} />
+                {ink.label}
               </button>
             )
           })}

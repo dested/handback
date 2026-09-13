@@ -5,11 +5,15 @@
 // Any member of a team may create and rename its projects — the server allows
 // it, so the page offers it without a role check. Rosters live on /team.
 
-import { useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { MoreHorizontal } from 'lucide-react'
 import { Button } from '~/components/ui/button'
 import { Input } from '~/components/ui/input'
 import { Label } from '~/components/ui/label'
+import { PageHeader } from '~/components/ui/page-header'
+import { projectColor } from '~/components/ui/project-tag'
+import { usePopover } from '~/components/viewer/overflow-menu'
 import { useTRPC } from '~/lib/trpc'
 import { cn } from '~/lib/utils'
 
@@ -30,9 +34,11 @@ type TeamRow = { id: string; name: string }
 const PERSONAL_KEY = 'personal'
 
 const SELECT = cn(
-  'border-input bg-background text-foreground h-9 rounded-md border px-2 text-sm shadow-xs',
-  'outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]'
+  'border-input bg-card text-foreground h-8 rounded-md border px-2.5 text-[13px]',
+  'outline-none focus-visible:border-ring focus-visible:ring-ring focus-visible:ring-2'
 )
+
+const TH = 'text-muted-foreground border-border border-b px-3 py-1.5 text-left text-xs font-medium'
 
 function plural(n: number, word: string) {
   return `${n} ${word}${n === 1 ? '' : 's'}`
@@ -102,23 +108,23 @@ export function ProjectsPage() {
   const teams = teamsQuery.data ?? []
   const groups = groupBySpace(projects, teams)
   const loaded = projectsQuery.isSuccess && teamsQuery.isSuccess
+  const multiSpace = groups.length > 1
 
   return (
-    <div className="max-w-4xl space-y-10">
-      <header className="flex flex-wrap items-end justify-between gap-4">
-        <div className="space-y-1.5">
-          <h1 className="font-display text-4xl font-semibold tracking-tight">Projects</h1>
-          <p className="text-muted-foreground font-mono text-xs">
-            {plural(projects.length, 'project')} across {plural(groups.length, 'space')}
-          </p>
-        </div>
-        <Button
-          type="button"
-          variant={creating ? 'outline' : 'default'}
-          onClick={() => setCreating((c) => !c)}>
-          {creating ? 'Cancel' : 'New project'}
-        </Button>
-      </header>
+    <div className="space-y-6">
+      <PageHeader
+        title="Projects"
+        meta={`${plural(projects.length, 'project')} across ${plural(groups.length, 'space')}`}
+        className="px-0"
+        actions={
+          <Button
+            type="button"
+            variant={creating ? 'outline' : 'default'}
+            onClick={() => setCreating((c) => !c)}>
+            {creating ? 'Cancel' : 'New project'}
+          </Button>
+        }
+      />
 
       {creating && (
         <NewProjectPanel
@@ -130,94 +136,288 @@ export function ProjectsPage() {
         />
       )}
 
-      {projectsQuery.isPending && <p className="text-muted-foreground text-sm">Loading…</p>}
+      {projectsQuery.isPending && <p className="text-muted-foreground text-[13px]">Loading…</p>}
       {projectsQuery.isError && (
-        <p className="text-destructive text-sm">{projectsQuery.error.message}</p>
+        <p className="text-destructive text-[13px]">{projectsQuery.error.message}</p>
       )}
 
       {loaded && projects.length === 0 ? (
-        <p className="text-muted-foreground max-w-xl text-sm leading-relaxed">
+        <p className="text-muted-foreground max-w-xl text-[13px] leading-relaxed">
           Nothing filed yet. A project is the folder a walkthrough lands in — name one after the
           surface it covers, and every recording sent to it from the recorder gathers in one place.
         </p>
       ) : (
-        groups.map((group) => (
-          <section key={group.teamId ?? PERSONAL_KEY}>
-            <h2 className="text-muted-foreground font-mono text-xs tracking-[0.14em] uppercase">
-              {group.name}
-            </h2>
-            <div className="rule mt-2" />
-            {group.projects.length === 0 ? (
-              <p className="text-muted-foreground py-3 text-sm">No projects in this space yet.</p>
-            ) : (
-              <div className="divide-border divide-y">
-                {group.projects.map((p) => (
-                  <div key={p.id} className="py-3">
-                    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                      <p className="font-medium">{p.name}</p>
-                      <p className="text-muted-foreground font-mono text-xs">
-                        {p.slug} · {plural(p.walkthroughCount, 'walkthrough')}
-                      </p>
-                      <button
-                        type="button"
-                        className="text-muted-foreground hover:text-foreground font-mono text-xs"
-                        onClick={() => {
-                          saveInstructions.reset()
-                          setInstructionsId(instructionsId === p.id ? null : p.id)
-                        }}>
-                        {p.instructions ? 'instructions' : 'add instructions'}
-                      </button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="text-muted-foreground ml-auto"
-                        onClick={() => {
-                          // A failed save's error belongs to the row it happened
-                          // on, not to whichever editor opens next.
-                          update.reset()
-                          setEditingId(editingId === p.id ? null : p.id)
-                        }}>
-                        Rename
-                      </Button>
-                    </div>
-                    {editingId === p.id && (
-                      <ProjectEditor
-                        project={p}
-                        pending={update.isPending}
-                        error={update.isError ? update.error.message : null}
-                        onSave={(name) =>
-                          update.mutate({ teamId: p.teamId, projectId: p.id, name })
-                        }
-                        onCancel={() => setEditingId(null)}
-                      />
-                    )}
-                    {instructionsId === p.id && (
-                      <InstructionsEditor
-                        project={p}
-                        pending={saveInstructions.isPending}
-                        error={saveInstructions.isError ? saveInstructions.error.message : null}
-                        onSave={(instructions) =>
-                          saveInstructions.mutate({
-                            teamId: p.teamId,
-                            projectId: p.id,
-                            // update REQUIRES name — pass the current one through
-                            // so an instructions save never renames the project.
-                            name: p.name,
-                            instructions,
-                          })
-                        }
-                        onCancel={() => setInstructionsId(null)}
-                      />
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-        ))
+        loaded && (
+          <table className="w-full border-collapse text-[13px]">
+            <thead>
+              <tr>
+                <th className={TH} style={{ width: '46%' }}>
+                  Project
+                </th>
+                <th className={TH}>Space</th>
+                <th className={TH}>Walkthroughs</th>
+                <th className={cn(TH, 'text-right')} />
+              </tr>
+            </thead>
+            <tbody>
+              {groups.map((group) => (
+                <Fragment key={group.teamId ?? PERSONAL_KEY}>
+                  {multiSpace && (
+                    <tr>
+                      <td colSpan={4} className="border-border h-9 border-b px-3">
+                        <span className="font-semibold">{group.name}</span>
+                        <span className="text-muted-foreground ml-1.5 font-normal">
+                          {group.projects.length}
+                        </span>
+                      </td>
+                    </tr>
+                  )}
+                  {group.projects.length === 0
+                    ? multiSpace && (
+                        <tr>
+                          <td
+                            colSpan={4}
+                            className="text-muted-foreground border-border/60 border-b px-3 py-3">
+                            No projects in this space yet.
+                          </td>
+                        </tr>
+                      )
+                    : group.projects.map((p) => (
+                        <ProjectRowView
+                          key={p.id}
+                          project={p}
+                          editing={editingId === p.id}
+                          editingInstructions={instructionsId === p.id}
+                          renamePending={update.isPending}
+                          renameError={
+                            editingId === p.id && update.isError ? update.error.message : null
+                          }
+                          instructionsPending={saveInstructions.isPending}
+                          instructionsError={
+                            instructionsId === p.id && saveInstructions.isError
+                              ? saveInstructions.error.message
+                              : null
+                          }
+                          onRename={() => {
+                            // A failed save's error belongs to the row it happened on,
+                            // not to whichever editor opens next.
+                            update.reset()
+                            setInstructionsId(null)
+                            setEditingId(p.id)
+                          }}
+                          onEditInstructions={() => {
+                            saveInstructions.reset()
+                            setEditingId(null)
+                            setInstructionsId(p.id)
+                          }}
+                          onSaveName={(name) =>
+                            update.mutate({ teamId: p.teamId, projectId: p.id, name })
+                          }
+                          onCancelName={() => setEditingId(null)}
+                          onSaveInstructions={(instructions) =>
+                            saveInstructions.mutate({
+                              teamId: p.teamId,
+                              projectId: p.id,
+                              // update REQUIRES name — pass the current one through so
+                              // an instructions save never renames the project.
+                              name: p.name,
+                              instructions,
+                            })
+                          }
+                          onCancelInstructions={() => setInstructionsId(null)}
+                        />
+                      ))}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        )
       )}
     </div>
+  )
+}
+
+function ProjectRowView({
+  project,
+  editing,
+  editingInstructions,
+  renamePending,
+  renameError,
+  instructionsPending,
+  instructionsError,
+  onRename,
+  onEditInstructions,
+  onSaveName,
+  onCancelName,
+  onSaveInstructions,
+  onCancelInstructions,
+}: {
+  project: ProjectRow
+  editing: boolean
+  editingInstructions: boolean
+  renamePending: boolean
+  renameError: string | null
+  instructionsPending: boolean
+  instructionsError: string | null
+  onRename: () => void
+  onEditInstructions: () => void
+  onSaveName: (name: string) => void
+  onCancelName: () => void
+  onSaveInstructions: (instructions: string | null) => void
+  onCancelInstructions: () => void
+}) {
+  return (
+    <>
+      <tr className="group border-border/60 border-b">
+        <td className="px-3 py-2">
+          <div className="flex items-center gap-2.5">
+            <i
+              className="size-2 shrink-0 rounded-[2px]"
+              style={{ background: projectColor(project.id) }}
+            />
+            <div className="min-w-0">
+              {editing ? (
+                <InlineName
+                  name={project.name}
+                  pending={renamePending}
+                  onSave={onSaveName}
+                  onCancel={onCancelName}
+                />
+              ) : (
+                <p className="truncate font-medium">{project.name}</p>
+              )}
+              <p className="text-muted-foreground truncate font-mono text-xs">{project.slug}</p>
+            </div>
+          </div>
+        </td>
+        <td className="text-muted-foreground px-3 py-2">{project.spaceName}</td>
+        <td className="px-3 py-2 font-mono text-xs tabular-nums">{project.walkthroughCount}</td>
+        <td className="px-3 py-2 text-right">
+          <ProjectMenu
+            hasInstructions={project.instructions !== null}
+            onRename={onRename}
+            onEditInstructions={onEditInstructions}
+          />
+        </td>
+      </tr>
+      {renameError && (
+        <tr>
+          <td colSpan={4} className="text-destructive px-3 pb-2 text-[13px]">
+            {renameError}
+          </td>
+        </tr>
+      )}
+      {editingInstructions && (
+        <tr>
+          <td colSpan={4} className="px-3 pb-3">
+            <InstructionsEditor
+              project={project}
+              pending={instructionsPending}
+              error={instructionsError}
+              onSave={onSaveInstructions}
+              onCancel={onCancelInstructions}
+            />
+          </td>
+        </tr>
+      )}
+    </>
+  )
+}
+
+/** The per-row ⋯ menu: rename in place, or open the instructions editor. */
+function ProjectMenu({
+  hasInstructions,
+  onRename,
+  onEditInstructions,
+}: {
+  hasInstructions: boolean
+  onRename: () => void
+  onEditInstructions: () => void
+}) {
+  const { open, setOpen, ref } = usePopover()
+  const ITEM =
+    'hover:bg-accent/50 flex w-full items-center rounded-sm px-2 py-1.5 text-left text-[13px]'
+  return (
+    <div ref={ref} className="relative inline-block">
+      <button
+        type="button"
+        aria-label="More actions"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        className={cn(
+          'text-muted-foreground hover:bg-accent/50 hover:text-foreground inline-flex size-7 items-center justify-center rounded-full transition-colors',
+          'opacity-0 focus-visible:opacity-100 group-hover:opacity-100',
+          open && 'opacity-100'
+        )}>
+        <MoreHorizontal className="size-4" />
+      </button>
+      {open && (
+        <div className="bg-card border-border absolute right-0 z-20 mt-1 w-48 rounded-md border p-1 shadow-sm">
+          <button
+            type="button"
+            className={ITEM}
+            onClick={() => {
+              setOpen(false)
+              onRename()
+            }}>
+            Rename
+          </button>
+          <button
+            type="button"
+            className={ITEM}
+            onClick={() => {
+              setOpen(false)
+              onEditInstructions()
+            }}>
+            {hasInstructions ? 'Edit instructions' : 'Add instructions'}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** The name cell turned editable — Enter saves, Escape backs out. */
+function InlineName({
+  name,
+  pending,
+  onSave,
+  onCancel,
+}: {
+  name: string
+  pending: boolean
+  onSave: (name: string) => void
+  onCancel: () => void
+}) {
+  const [value, setValue] = useState(name)
+  const trimmed = value.trim()
+
+  function save() {
+    if (pending || trimmed === '' || trimmed === name) {
+      onCancel()
+      return
+    }
+    onSave(trimmed)
+  }
+
+  return (
+    <Input
+      autoFocus
+      value={value}
+      aria-label={`Name for ${name}`}
+      onChange={(e) => setValue(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          save()
+        } else if (e.key === 'Escape') {
+          onCancel()
+        }
+      }}
+      onBlur={save}
+      autoComplete="off"
+      className="h-7"
+    />
   )
 }
 
@@ -233,124 +433,60 @@ function NewProjectPanel({ teams, onCreated }: { teams: TeamRow[]; onCreated: ()
   const sorted = [...teams].sort((a, b) => a.name.localeCompare(b.name))
 
   return (
-    <section className="max-w-xl">
-      <h2 className="text-muted-foreground font-mono text-xs tracking-[0.14em] uppercase">
-        New project
-      </h2>
-      <div className="rule mt-2" />
-      <form
-        className="space-y-4 pt-4"
-        onSubmit={(e) => {
-          e.preventDefault()
-          if (!trimmed || create.isPending) return
-          create.mutate({
-            teamId: spaceKey === PERSONAL_KEY ? null : spaceKey,
-            name: trimmed,
-          })
-        }}>
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="min-w-48 flex-1 space-y-2">
-            <Label htmlFor="project-name">Name</Label>
-            <Input
-              id="project-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Checkout"
-              autoComplete="off"
-              maxLength={80}
-              autoFocus
-              required
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="project-space">Space</Label>
-            <select
-              id="project-space"
-              className={SELECT}
-              value={spaceKey}
-              onChange={(e) => setSpaceKey(e.target.value)}>
-              <option value={PERSONAL_KEY}>Personal</option>
-              {sorted.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <Button type="submit" disabled={create.isPending || !trimmed}>
-            {create.isPending ? 'Creating…' : 'Create project'}
-          </Button>
+    <form
+      className="bg-card border-border max-w-xl space-y-4 rounded-lg border p-5"
+      onSubmit={(e) => {
+        e.preventDefault()
+        if (!trimmed || create.isPending) return
+        create.mutate({
+          teamId: spaceKey === PERSONAL_KEY ? null : spaceKey,
+          name: trimmed,
+        })
+      }}>
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="min-w-48 flex-1 space-y-1.5">
+          <Label htmlFor="project-name" className="text-muted-foreground text-xs">
+            Name
+          </Label>
+          <Input
+            id="project-name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Checkout"
+            autoComplete="off"
+            maxLength={80}
+            autoFocus
+            required
+          />
         </div>
-        <p className="text-muted-foreground text-sm">
-          A folder for related walkthroughs — the recorder picks one when it sends.
-        </p>
-        {create.isError && <p className="text-destructive text-sm">{create.error.message}</p>}
-      </form>
-    </section>
-  )
-}
-
-/** Inline editor for one project: its display name. The slug never moves. */
-function ProjectEditor({
-  project,
-  pending,
-  error,
-  onSave,
-  onCancel,
-}: {
-  project: { id: string; name: string }
-  pending: boolean
-  error: string | null
-  onSave: (name: string) => void
-  onCancel: () => void
-}) {
-  const [name, setName] = useState(project.name)
-  const trimmed = name.trim()
-
-  function save() {
-    if (pending || trimmed === '') return
-    onSave(trimmed)
-  }
-
-  return (
-    <div className="mt-3 max-w-md space-y-2">
-      <div className="flex items-center gap-2">
-        <Input
-          autoFocus
-          value={name}
-          aria-label={`Name for ${project.name}`}
-          onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault()
-              save()
-            } else if (e.key === 'Escape') {
-              onCancel()
-            }
-          }}
-          autoComplete="off"
-        />
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          disabled={pending || trimmed === ''}
-          onClick={save}>
-          {pending ? 'Saving…' : 'Save'}
-        </Button>
-        <Button type="button" size="sm" variant="ghost" onClick={onCancel}>
-          Cancel
+        <div className="space-y-1.5">
+          <Label htmlFor="project-space" className="text-muted-foreground text-xs">
+            Space
+          </Label>
+          <select
+            id="project-space"
+            className={SELECT}
+            value={spaceKey}
+            onChange={(e) => setSpaceKey(e.target.value)}>
+            <option value={PERSONAL_KEY}>Personal</option>
+            {sorted.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <Button type="submit" disabled={create.isPending || !trimmed}>
+          {create.isPending ? 'Creating…' : 'Create'}
         </Button>
       </div>
-      {error && <p className="text-destructive text-sm">{error}</p>}
-    </div>
+      <p className="text-muted-foreground text-[13px]">
+        A folder for related walkthroughs — the recorder picks one when it sends.
+      </p>
+      {create.isError && <p className="text-destructive text-[13px]">{create.error.message}</p>}
+    </form>
   )
 }
-
-const TEXTAREA = cn(
-  'border-input bg-background text-foreground w-full rounded-md border px-3 py-2 text-sm shadow-xs',
-  'outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]'
-)
 
 /**
  * Standing context an agent gets prepended to every brief it pulls from this
@@ -371,6 +507,11 @@ function InstructionsEditor({
   onCancel: () => void
 }) {
   const [text, setText] = useState(project.instructions ?? '')
+  const ref = useRef<HTMLTextAreaElement | null>(null)
+
+  useEffect(() => {
+    ref.current?.focus()
+  }, [])
 
   function save() {
     if (pending) return
@@ -379,9 +520,9 @@ function InstructionsEditor({
   }
 
   return (
-    <div className="mt-3 max-w-xl space-y-2">
+    <div className="bg-secondary border-border max-w-xl space-y-2 rounded-lg border p-4">
       <textarea
-        autoFocus
+        ref={ref}
         rows={3}
         value={text}
         aria-label={`Instructions for ${project.name}`}
@@ -390,7 +531,7 @@ function InstructionsEditor({
           if (e.key === 'Escape') onCancel()
         }}
         placeholder="Standing context for agents pulling from this project — repo path, conventions, how to verify."
-        className={TEXTAREA}
+        className="border-input bg-card focus-visible:border-ring focus-visible:ring-ring w-full rounded-md border px-2.5 py-2 text-[13px] outline-none focus-visible:ring-2"
       />
       <div className="flex items-center gap-2">
         <Button type="button" size="sm" variant="outline" disabled={pending} onClick={save}>
@@ -400,7 +541,7 @@ function InstructionsEditor({
           Cancel
         </Button>
       </div>
-      {error && <p className="text-destructive text-sm">{error}</p>}
+      {error && <p className="text-destructive text-[13px]">{error}</p>}
     </div>
   )
 }

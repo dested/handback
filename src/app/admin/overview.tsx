@@ -28,7 +28,7 @@ export function AdminOverviewPage() {
 
       {overview.data && (
         <>
-          <div className="flex flex-wrap gap-x-10 gap-y-4">
+          <div className="flex flex-wrap gap-3">
             <StatTile label="Users" value={overview.data.counts.users} />
             <StatTile label="Teams" value={overview.data.counts.teams} />
             <StatTile label="Projects" value={overview.data.counts.projects} />
@@ -36,7 +36,7 @@ export function AdminOverviewPage() {
             <StatTile label="Storage" value={fmtBytes(overview.data.counts.bytes)} />
           </div>
 
-          <div className="flex flex-wrap gap-x-10 gap-y-4">
+          <div className="flex flex-wrap gap-3">
             <StatTile
               label="Open"
               value={<span className="text-cobalt">{overview.data.counts.open}</span>}

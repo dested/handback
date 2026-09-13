@@ -16,6 +16,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, Copy, Terminal } from 'lucide-react'
 import { Button } from '~/components/ui/button'
 import { Input } from '~/components/ui/input'
+import { PageHeader } from '~/components/ui/page-header'
 import { Step, autoTokenName } from '~/components/setup-step'
 import { TokenLimitNotice, TokenManager, isTokenLimitError } from '~/components/token-manager'
 import { useCopy } from '~/components/viewer/use-copy'
@@ -34,6 +35,16 @@ const AGENTS: Array<{ id: Agent; label: string; soon: boolean }> = [
 
 /** A token this page minted, held in memory only — reload and the raw value is gone. */
 type Minted = { token: string; id: string; name: string }
+
+/** The green "it's live" chip — a StatusPill in the approve ink. */
+function ConnectedChip({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="bg-approve-wash text-approve inline-flex h-[22px] items-center gap-1.5 rounded-md px-2 text-xs font-medium whitespace-nowrap">
+      <i className="bg-approve size-[7px] rounded-full" />
+      {children}
+    </span>
+  )
+}
 
 export function ConnectPage() {
   const [agent, setAgent] = useState<Agent>('claude-code')
@@ -61,33 +72,26 @@ export function ConnectPage() {
   const [minted, setMinted] = useState<Minted | null>(null)
 
   return (
-    <div className="max-w-3xl space-y-12">
-      <header className="space-y-4">
-        <p className="text-cobalt font-mono text-xs tracking-widest uppercase">
-          Are you the engineer who fixes these?
-        </p>
-        <h1 className="font-display text-4xl font-semibold tracking-tight">
-          Connect your coding agent
-        </h1>
-        <p className="text-muted-foreground text-base leading-relaxed">
-          Every walkthrough here was recorded for you: someone walked through the problem out loud,
-          and the recorder wrote it up as a brief. One button below, one paste into your terminal,
-          and your agent can pull that brief — narration, keyframes, console errors and all — fix
-          the thing, and hand it back for a human to sign off.
-        </p>
-      </header>
+    <div className="max-w-3xl">
+      <PageHeader title="Connect your coding agent" className="px-0" />
+      <p className="text-muted-foreground mt-3 max-w-2xl leading-relaxed">
+        Every walkthrough here was recorded for you: someone walked through the problem out loud,
+        and the recorder wrote it up as a brief. One button below, one paste into your terminal, and
+        your agent can pull that brief — narration, keyframes, console errors and all — fix the
+        thing, and hand it back for a human to sign off.
+      </p>
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="mt-6 flex flex-wrap items-center gap-2">
         {AGENTS.map((a) => (
           <button
             key={a.id}
             type="button"
             onClick={() => setAgent(a.id)}
             className={cn(
-              'flex items-center gap-2 rounded-full border px-4 py-1.5 text-sm font-medium transition-colors',
+              'inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-[13px] font-medium transition-colors',
               agent === a.id
                 ? 'border-cobalt bg-cobalt-wash text-cobalt'
-                : 'border-border text-muted-foreground hover:text-foreground'
+                : 'border-input text-muted-foreground hover:text-foreground'
             )}>
             {a.label}
             {a.soon && (
@@ -99,18 +103,20 @@ export function ConnectPage() {
         ))}
       </div>
 
-      {agent === 'codex' ? (
-        <CodexSoon />
-      ) : (
-        <ClaudeCodeSteps
-          origin={origin}
-          isWindows={isWindows}
-          minted={minted}
-          onMinted={setMinted}
-          tokenCount={connection.data?.tokenCount ?? 0}
-          lastUsedAt={connection.data?.lastUsedAt ?? null}
-        />
-      )}
+      <div className="mt-6">
+        {agent === 'codex' ? (
+          <CodexSoon />
+        ) : (
+          <ClaudeCodeSteps
+            origin={origin}
+            isWindows={isWindows}
+            minted={minted}
+            onMinted={setMinted}
+            tokenCount={connection.data?.tokenCount ?? 0}
+            lastUsedAt={connection.data?.lastUsedAt ?? null}
+          />
+        )}
+      </div>
 
       <ToolReference />
       {agent === 'claude-code' && <WorkOne />}
@@ -144,7 +150,7 @@ function ClaudeCodeSteps({
   const command = mcpCommand(origin, minted?.token ?? TOKEN_PLACEHOLDER, isWindows)
 
   return (
-    <div className="space-y-12">
+    <div className="space-y-4">
       <Step
         n="01"
         title="Add Handback to Claude Code"
@@ -317,7 +323,7 @@ function TokenAftercare({ minted }: { minted: Minted }) {
             maxLength={80}
             autoComplete="off"
             aria-label="Token name"
-            className="h-8 max-w-64 text-sm"
+            className="h-8 max-w-64"
           />
           <Button type="submit" variant="outline" size="sm" disabled={rename.isPending}>
             {rename.isPending ? 'Saving…' : 'Save'}
@@ -338,7 +344,7 @@ function TokenAftercare({ minted }: { minted: Minted }) {
           Filed as <span className="text-foreground font-medium">{saved}</span>.{' '}
           <button
             type="button"
-            className="text-primary underline underline-offset-4"
+            className="text-cobalt underline underline-offset-4"
             onClick={() => setRenaming(true)}>
             Rename
           </button>
@@ -357,13 +363,13 @@ function TokenAftercare({ minted }: { minted: Minted }) {
  */
 function Disconnect({ origin }: { origin: string }) {
   return (
-    <section className="border-border border-t pt-6">
-      <h2 className="font-display text-xl font-semibold">Disconnecting</h2>
-      <p className="text-muted-foreground mt-2 text-sm leading-relaxed">
+    <section className="mt-10">
+      <h2 className="text-base font-semibold">Disconnecting</h2>
+      <p className="text-muted-foreground mt-1 text-sm leading-relaxed">
         Two separate steps, and you usually want both.
       </p>
 
-      <div className="mt-5 space-y-6">
+      <div className="bg-card border-border mt-4 space-y-6 rounded-lg border p-5">
         <div>
           <h3 className="text-sm font-semibold">1. Remove the server from Claude Code</h3>
           <p className="text-muted-foreground mt-1 text-sm">
@@ -413,13 +419,13 @@ function Disconnect({ origin }: { origin: string }) {
             here to cut it off entirely.
           </p>
         </div>
-      </div>
 
-      <p className="text-muted-foreground mt-6 text-sm">
-        Nothing here deletes walkthroughs. Both steps are about access to{' '}
-        <span className="font-mono text-xs">{origin}/mcp</span>, not about the recordings
-        themselves.
-      </p>
+        <p className="text-muted-foreground text-sm">
+          Nothing here deletes walkthroughs. Both steps are about access to{' '}
+          <span className="font-mono text-xs">{origin}/mcp</span>, not about the recordings
+          themselves.
+        </p>
+      </div>
     </section>
   )
 }
@@ -427,21 +433,22 @@ function Disconnect({ origin }: { origin: string }) {
 /** Not a setup step — the first thing worth saying once setup is done. */
 function WorkOne() {
   return (
-    <section className="border-border border-t pt-6">
-      <h2 className="font-display text-xl font-semibold">Putting it to work</h2>
-      <p className="text-muted-foreground mt-2 text-sm leading-relaxed">
+    <section className="mt-10">
+      <h2 className="text-base font-semibold">Putting it to work</h2>
+      <p className="text-muted-foreground mt-1 text-sm leading-relaxed">
         A walkthrough carries its own instructions — report.md is written for an agent, not for a
         person. Say something like this and it takes it from there.
       </p>
-      <div className="mt-5">
+      <div className="bg-card border-border mt-4 space-y-3 rounded-lg border p-5">
         <PromptBlock>
           Pull the newest open walkthrough from handback, read its report.md, and fix it. Set it to
           in_review when the fix is up.
         </PromptBlock>
+        <p className="text-muted-foreground text-sm">
+          Or hand it a specific one — every walkthrough page has a copyable prompt with its id in
+          it.
+        </p>
       </div>
-      <p className="text-muted-foreground mt-3 text-sm">
-        Or hand it a specific one — every walkthrough page has a copyable prompt with its id in it.
-      </p>
     </section>
   )
 }
@@ -454,7 +461,7 @@ function CopyRow({ value }: { value: string }) {
         readOnly
         value={value}
         onFocus={(e) => e.currentTarget.select()}
-        className="border-input bg-background h-9 min-w-0 flex-1 rounded-md border px-2 font-mono text-xs"
+        className="border-input bg-card h-8 min-w-0 flex-1 rounded-md border px-2.5 font-mono text-xs"
       />
       <Button type="button" variant="outline" size="sm" onClick={() => void copy(value)}>
         {copied ? <Check /> : <Copy />}
@@ -472,11 +479,7 @@ function CopyRow({ value }: { value: string }) {
 function CommandBlock({ command, inert = false }: { command: string; inert?: boolean }) {
   const { copied, copy } = useCopy()
   return (
-    <div
-      className={cn(
-        'border-border bg-card relative rounded-md border',
-        inert && 'bg-muted/30 opacity-60'
-      )}>
+    <div className={cn('border-border bg-secondary rounded-md border', inert && 'opacity-60')}>
       <div className="border-border text-muted-foreground flex items-center gap-2 border-b px-3 py-2">
         <Terminal className="size-3.5" />
         <span className="font-mono text-xs">terminal</span>
@@ -487,7 +490,7 @@ function CommandBlock({ command, inert = false }: { command: string; inert?: boo
             type="button"
             variant="outline"
             size="sm"
-            className="ml-auto h-7"
+            className="ml-auto"
             onClick={() => void copy(command)}>
             {copied ? <Check /> : <Copy />}
             {copied ? 'Copied' : 'Copy'}
@@ -496,7 +499,7 @@ function CommandBlock({ command, inert = false }: { command: string; inert?: boo
       </div>
       <pre
         className={cn(
-          'overflow-x-auto p-4 font-mono text-xs leading-relaxed',
+          'overflow-x-auto p-3 font-mono text-[13px] leading-relaxed',
           // A placeholder command must not be selectable-and-pasteable either;
           // dimming alone still leaves a drag-select waiting to go wrong.
           inert && 'select-none'
@@ -512,7 +515,7 @@ function PromptBlock({ children }: { children: React.ReactNode }) {
   const [node, setNode] = useState<HTMLQuoteElement | null>(null)
   const { copied, copy } = useCopy()
   return (
-    <div className="border-cobalt/30 bg-cobalt-wash/40 flex items-start gap-3 rounded-md border border-dashed p-4">
+    <div className="border-cobalt/30 bg-cobalt-wash/40 flex items-start gap-3 rounded-md border border-dashed p-3">
       <span className="text-cobalt font-mono text-sm">›</span>
       <blockquote ref={setNode} className="min-w-0 flex-1 text-sm leading-relaxed">
         {children}
@@ -521,7 +524,7 @@ function PromptBlock({ children }: { children: React.ReactNode }) {
         type="button"
         variant="ghost"
         size="sm"
-        className="h-7 shrink-0"
+        className="shrink-0"
         onClick={() => void copy(node?.textContent ?? '')}>
         {copied ? <Check /> : <Copy />}
       </Button>
@@ -538,16 +541,16 @@ function ConnectionStatus({
 }) {
   if (lastUsedAt) {
     return (
-      <div className="border-approve/40 bg-approve-wash mt-4 flex items-center gap-3 rounded-md border p-4">
-        <span className="bg-approve size-2 shrink-0 rounded-full" />
-        <p className="text-approve text-sm font-medium">
-          An agent reached Handback {relativeTime(lastUsedAt)}. You're connected.
-        </p>
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <ConnectedChip>Connected</ConnectedChip>
+        <span className="text-muted-foreground text-sm">
+          An agent reached Handback {relativeTime(lastUsedAt)}.
+        </span>
       </div>
     )
   }
   return (
-    <div className="border-border bg-muted/40 mt-4 flex items-center gap-3 rounded-md border p-4">
+    <div className="bg-secondary border-border mt-4 flex items-center gap-3 rounded-md border p-3">
       <span className="bg-muted-foreground/40 size-2 shrink-0 animate-pulse rounded-full" />
       <p className="text-muted-foreground text-sm">
         {tokenCount === 0
@@ -572,13 +575,13 @@ function relativeTime(iso: string): string {
 
 function CodexSoon() {
   return (
-    <div className="border-border bg-card rounded-xl border p-8">
-      <h2 className="font-display text-2xl font-semibold">OpenAI Codex — soon</h2>
-      <p className="text-muted-foreground mt-3 text-sm leading-relaxed">
+    <div className="border-border bg-card rounded-lg border p-5">
+      <h2 className="text-base font-semibold">OpenAI Codex — soon</h2>
+      <p className="text-muted-foreground mt-2 text-sm leading-relaxed">
         Handback speaks MCP over plain HTTP, which is the same protocol Codex is growing support
         for. We're testing the setup end to end before we put instructions here, because a
         half-working connect flow is worse than none. If Codex is what your team runs,{' '}
-        <a className="text-primary underline underline-offset-4" href="mailto:sal@dested.com">
+        <a className="text-cobalt underline underline-offset-4" href="mailto:sal@dested.com">
           tell us
         </a>{' '}
         — it moves up the list.
@@ -604,13 +607,13 @@ const TOOLS: Array<{ name: string; does: string }> = [
 
 function ToolReference() {
   return (
-    <section className="border-border border-t pt-6">
-      <h2 className="font-display text-xl font-semibold">What your agent gets</h2>
-      <p className="text-muted-foreground mt-2 text-sm">
+    <section className="mt-10">
+      <h2 className="text-base font-semibold">What your agent gets</h2>
+      <p className="text-muted-foreground mt-1 text-sm">
         Three tools. They read and write every space your token's owner belongs to — each
         walkthrough carries a <code className="font-mono text-xs">space</code> field.
       </p>
-      <dl className="mt-5 space-y-3">
+      <dl className="bg-card border-border mt-4 space-y-3 rounded-lg border p-5">
         {TOOLS.map((t) => (
           <div key={t.name} className="grid gap-1 sm:grid-cols-[14rem_1fr] sm:gap-4">
             <dt className="text-cobalt font-mono text-xs">{t.name}</dt>

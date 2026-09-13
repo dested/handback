@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ReturnMark } from '~/components/logo'
+import { Wordmark } from '~/components/logo'
 import { authClient } from '~/lib/auth-client'
 import { Button } from '~/components/ui/button'
 import { Input } from '~/components/ui/input'
@@ -31,37 +31,40 @@ export function ForgotPasswordPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-sm px-6 py-20 md:py-28">
-      <ReturnMark className="h-6" />
-      <h1 className="font-display mt-6 text-3xl font-semibold tracking-tight">
-        Forgot your password
-      </h1>
-      {sent ? (
-        <>
-          <p className="text-muted-foreground mt-2 text-sm">
-            If there's an account for <span className="text-foreground font-medium">{email}</span>,
-            a reset link is on its way. It's good for one hour.
-          </p>
-          <p className="text-muted-foreground mt-6 text-sm">
-            Nothing arrived? Check spam, then{' '}
-            <button
-              type="button"
-              className="text-cobalt font-medium hover:underline"
-              onClick={() => setSent(false)}>
-              try a different address
-            </button>
-            .
-          </p>
-        </>
-      ) : (
-        <>
-          <p className="text-muted-foreground mt-2 text-sm">
-            Give us the address you signed up with and we'll send a link to set a new password.
-          </p>
-          <div className="bg-card mt-8 rounded-lg border p-6">
-            <form onSubmit={onSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
+    <div className="mx-auto w-full max-w-sm px-6 py-16">
+      <Link to="/" aria-label="Handback home" className="flex justify-center">
+        <Wordmark />
+      </Link>
+      <div className="bg-card mt-8 rounded-lg border p-6">
+        <h1 className="text-xl font-semibold tracking-tight">Forgot your password</h1>
+        {sent ? (
+          <>
+            <p className="text-muted-foreground mt-1.5 text-[13px]">
+              If there's an account for{' '}
+              <span className="text-foreground font-medium">{email}</span>, a reset link is on its
+              way. It's good for one hour.
+            </p>
+            <p className="text-muted-foreground mt-4 text-[13px]">
+              Nothing arrived? Check spam, then{' '}
+              <button
+                type="button"
+                className="text-cobalt font-medium hover:underline"
+                onClick={() => setSent(false)}>
+                try a different address
+              </button>
+              .
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="text-muted-foreground mt-1.5 text-[13px]">
+              Give us the address you signed up with and we'll send a link to set a new password.
+            </p>
+            <form onSubmit={onSubmit} className="mt-5 space-y-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="email" className="text-muted-foreground text-xs">
+                  Email
+                </Label>
                 <Input
                   id="email"
                   type="email"
@@ -71,15 +74,15 @@ export function ForgotPasswordPage() {
                   autoComplete="email"
                 />
               </div>
-              {error && <p className="text-destructive text-sm">{error}</p>}
-              <Button type="submit" className="w-full" disabled={loading}>
+              {error && <p className="text-destructive text-[13px]">{error}</p>}
+              <Button type="submit" size="lg" className="w-full" disabled={loading}>
                 {loading ? 'Sending…' : 'Send the link'}
               </Button>
             </form>
-          </div>
-        </>
-      )}
-      <p className="text-muted-foreground mt-6 text-sm">
+          </>
+        )}
+      </div>
+      <p className="text-muted-foreground mt-6 text-center text-[13px]">
         Remembered it?{' '}
         <Link className="text-cobalt font-medium hover:underline" to="/sign-in">
           Sign in

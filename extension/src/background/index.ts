@@ -44,6 +44,8 @@ const SETTINGS = 'settings';
 const RECORDING_ACTIVE = 'recordingActive';
 /** Origin of the tab being recorded — scopes the on-page dock to that app's tabs. */
 const RECORDING_ORIGIN = 'recordingOrigin';
+/** The recording badge's red — a red, never orange (ui.md). Distinct from COBALT so REC reads as live. */
+const RECORDING_RED = '#c8322b';
 
 chrome.runtime.onInstalled.addListener((details) => {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
@@ -172,8 +174,13 @@ async function ensureOffscreen(): Promise<void> {
   try {
     await chrome.offscreen.createDocument({
       url: 'offscreen.html',
-      reasons: [chrome.offscreen.Reason.BLOBS],
-      justification: 'Assemble and upload finished walkthroughs without blocking the panel',
+      reasons: [
+        chrome.offscreen.Reason.BLOBS,
+        chrome.offscreen.Reason.USER_MEDIA,
+        chrome.offscreen.Reason.DISPLAY_MEDIA,
+      ],
+      justification:
+        'Record the screen and microphone, transcribe, and upload walkthroughs while the side panel is closed',
     });
     const stuck = (await listOutbox()).filter((e) => e.state === 'uploading');
     for (const entry of stuck) await putOutbox({ ...entry, state: 'queued', progress: undefined });
@@ -189,8 +196,18 @@ async function kickDrain(): Promise<void> {
   chrome.runtime.sendMessage({ type: 'upload:drain' }).catch(() => {});
 }
 
-/** The toolbar icon is the only surface a closed panel has: it says a gripe is open and how full it is. */
+/**
+ * The toolbar icon is the only surface a closed panel has. While a take is
+ * recording it says so in red — the whole point of moving capture offscreen is
+ * that it keeps going with the panel shut, and the badge is how you know. Idle,
+ * it falls back to a cobalt count of what the open gripe holds.
+ */
 async function updateBadge() {
+  if (await kv.get<boolean>(RECORDING_ACTIVE)) {
+    await chrome.action.setBadgeText({ text: 'REC' });
+    await chrome.action.setBadgeBackgroundColor({ color: RECORDING_RED });
+    return;
+  }
   const session = await activeSession();
   const count = session?.recCount ?? 0;
   await chrome.action.setBadgeText({ text: count ? String(count) : '' });
@@ -290,6 +307,11 @@ async function drawLive() {
 async function setRecordingActive(active: boolean, origin = '') {
   await kv.set(RECORDING_ACTIVE, active);
   await kv.set(RECORDING_ORIGIN, active ? origin : '');
+  // While recording, a toolbar click must OPEN the panel, never toggle it shut —
+  // closing the panel no longer stops the take, but a human who closed it by
+  // accident and can't find the Stop button is worse than one who just reopens it.
+  // The onClicked listener below does the open; this is what routes the click there.
+  await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: !active }).catch(() => {});
   const { drawStart } = await getSettings();
   const tabs = await chrome.tabs.query({});
   for (const tab of tabs) {
@@ -305,7 +327,29 @@ async function setRecordingActive(active: boolean, origin = '') {
       if (await ensureContentScript(id)) await tellTab(id, command);
     })();
   }
+  await updateBadge();
 }
+
+/**
+ * A restarted service worker forgets the panel behaviour, so a take that was
+ * running when it died would let a click toggle the panel shut again. Re-sync it
+ * from the recording flag the moment the worker loads.
+ */
+function syncPanelBehavior() {
+  void kv
+    .get<boolean>(RECORDING_ACTIVE)
+    .then((active) => chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: !active }))
+    .catch(() => {});
+}
+syncPanelBehavior();
+
+/**
+ * Fires only while `openPanelOnActionClick` is false — i.e. while recording — so
+ * a click that would otherwise toggle the panel opens it instead.
+ */
+chrome.action.onClicked.addListener((tab) => {
+  if (tab.windowId !== undefined) void chrome.sidePanel.open({ windowId: tab.windowId }).catch(() => {});
+});
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.status !== 'complete') return;
@@ -322,6 +366,14 @@ chrome.commands.onCommand.addListener((command) => {
 });
 
 chrome.runtime.onMessage.addListener((message: Request, _sender, sendResponse) => {
+  // capture:* and transcribe:* are answered by the offscreen document; if the
+  // background also called sendResponse, its {ok:true} would win the race and the
+  // panel would read a bogus success for a recording or a transcription that never ran.
+  if (
+    typeof message?.type === 'string' &&
+    (message.type.startsWith('capture:') || message.type.startsWith('transcribe:'))
+  )
+    return false;
   (async () => {
     switch (message.type) {
       case 'settings:get':
@@ -469,8 +521,8 @@ chrome.runtime.onMessage.addListener((message: Request, _sender, sendResponse) =
         });
         await putSession({ ...session, recCount: index, updatedAt: now });
         await kv.set(ACTIVE_SESSION, session.id);
+        // setRecordingActive flips the badge to REC and re-routes the toolbar click.
         await setRecordingActive(true, message.origin);
-        await updateBadge();
         await broadcast();
         return { sessionId: session.id, index };
       }
@@ -543,6 +595,9 @@ chrome.runtime.onMessage.addListener((message: Request, _sender, sendResponse) =
           micChunks: 0,
           meta: { ...rec.meta, durationMs: last ? last.t : rec.meta.durationMs },
         });
+        // A recovered take means the live capture is gone — the offscreen doc that
+        // held it died with the worker. Stop the toolbar saying REC and re-arm the click.
+        await setRecordingActive(false);
         await broadcast();
         return { ok: true };
       }
@@ -615,12 +670,19 @@ chrome.runtime.onMessage.addListener((message: Request, _sender, sendResponse) =
         // Meant for the offscreen document; the background only needs to not
         // treat it as unknown.
         return { ok: true };
+      case 'offscreen:ensure': {
+        // The panel asks for this right before capture:start, so the offscreen
+        // document is up to receive the stream id.
+        await ensureOffscreen();
+        return { ok: true };
+      }
       case 'recording:event':
       case 'recording:pointer':
       case 'recording:force':
       case 'recording:stop':
-        // The side panel consumes these via its own onMessage listener; the
-        // background only needs to not treat them as unknown.
+        // The offscreen document consumes these via its own onMessage listener
+        // (it owns the recorder now); the background only needs to not treat them
+        // as unknown.
         return { ok: true };
       default:
         return { ok: false };

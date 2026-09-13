@@ -15,6 +15,7 @@ import { Check, Copy } from 'lucide-react'
 import { Step, autoTokenName } from '~/components/setup-step'
 import { TokenLimitNotice, isTokenLimitError } from '~/components/token-manager'
 import { Button } from '~/components/ui/button'
+import { PageHeader } from '~/components/ui/page-header'
 import { useCopy } from '~/components/viewer/use-copy'
 import { useTRPC } from '~/lib/trpc'
 
@@ -219,6 +220,16 @@ function readLinkResult(response: unknown): LinkResult {
 
 type Phase = 'idle' | 'linking' | 'linked' | 'failed'
 
+/** The green "it's live" chip — a StatusPill in the approve ink. */
+function LinkedChip({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="bg-approve-wash text-approve inline-flex h-[22px] items-center gap-1.5 rounded-md px-2 text-xs font-medium whitespace-nowrap">
+      <i className="bg-approve size-[7px] rounded-full" />
+      {children}
+    </span>
+  )
+}
+
 export function RecorderPage() {
   // window is absent during SSR; render the production host, then correct it on
   // mount so a local dev session shows its own origin.
@@ -273,73 +284,75 @@ export function RecorderPage() {
   const latest = release.data?.version ?? null
 
   return (
-    <div className="max-w-3xl space-y-12">
-      <header className="space-y-4">
-        <p className="text-cobalt font-mono text-xs tracking-widest uppercase">
-          Are you the one who saw it break?
-        </p>
-        <h1 className="font-display text-4xl font-semibold tracking-tight">Set up the recorder</h1>
-        <p className="text-muted-foreground text-base leading-relaxed">
-          The Handback Recorder is a Chrome extension: hit record, walk through the problem out
-          loud, and the recording, transcript, and console errors land in your Handback inbox as a
-          brief an agent can act on.
-        </p>
-        {/* The escape hatch, said before the install steps rather than after —
-            somebody who won't install an extension should not have to read two
-            numbered steps to find that out. */}
-        <p className="text-muted-foreground text-sm leading-relaxed">
-          Don't want to install anything?{' '}
-          <Link to="/record" className="text-primary underline underline-offset-4">
-            Record straight from this site
-          </Link>{' '}
-          instead — same keyframes, same transcript, same report. Only the on-page extras (drawing,
-          console errors, click keyframes) need the extension.
-        </p>
-      </header>
+    <div className="max-w-3xl">
+      <PageHeader title="Set up the recorder" className="px-0" />
+      <p className="text-muted-foreground mt-3 leading-relaxed">
+        The Handback Recorder is a Chrome extension: hit record, walk through the problem out loud,
+        and the recording, transcript, and console errors land in your Handback inbox as a brief an
+        agent can act on.
+      </p>
+      {/* The escape hatch, said before the install steps rather than after —
+          somebody who won't install an extension should not have to read two
+          numbered steps to find that out. */}
+      <p className="text-muted-foreground mt-3 text-sm leading-relaxed">
+        Don't want to install anything?{' '}
+        <Link to="/record" className="text-cobalt underline underline-offset-4">
+          Record straight from this site
+        </Link>{' '}
+        instead — same keyframes, same transcript, same report. Only the on-page extras (drawing,
+        console errors, click keyframes) need the extension.
+      </p>
 
-      {inChrome === false && <NotChromeNotice />}
-      <Step
-        n="01"
-        title="Install the extension"
-        blurb="Chrome only. It records the tab, your narration, and the console together, and only while you're recording.">
-        {/* Once the extension answers a ping, the how-to-install steps have
-            served their purpose — they collapse rather than sitting under a
-            green "it's installed" banner telling you to install it. Still
-            reachable, because updating means walking them again. */}
-        <div className="space-y-4">
-          {presence ? (
-            <>
-              <PresenceIndicator presence={presence} checked={checked} latest={latest} />
-              <details className="group">
-                <summary className="text-muted-foreground hover:text-foreground cursor-pointer list-none text-sm underline decoration-dotted underline-offset-4 marker:content-['']">
-                  Reinstall or update it
-                </summary>
-                <div className="mt-4">
-                  <InstallInstructions />
-                </div>
-              </details>
-            </>
-          ) : (
-            <>
-              <InstallInstructions />
-              {inChrome !== false && (
-                <PresenceIndicator presence={presence} checked={checked} latest={latest} />
-              )}
-            </>
-          )}
+      {inChrome === false && (
+        <div className="mt-6">
+          <NotChromeNotice />
         </div>
-      </Step>
+      )}
 
-      <Step
-        n="02"
-        title="Link the recorder"
-        blurb={
-          isLinked(presence, origin)
-            ? 'Linked. Pick your destination in the recorder panel when you send.'
-            : 'One click hands the recorder a key to your account — no tokens to copy. Pick where each recording goes (Personal or a team) in the panel when you send.'
-        }>
-        <LinkStep origin={origin} presence={presence} extensionId={extensionId} />
-      </Step>
+      <div className="mt-6 space-y-4">
+        <Step
+          n="01"
+          title="Install the extension"
+          blurb="Chrome only. It records the tab, your narration, and the console together, and only while you're recording.">
+          {/* Once the extension answers a ping, the how-to-install steps have
+              served their purpose — they collapse rather than sitting under a
+              green "it's installed" banner telling you to install it. Still
+              reachable, because updating means walking them again. */}
+          <div className="space-y-4">
+            {presence ? (
+              <>
+                <PresenceIndicator presence={presence} checked={checked} latest={latest} />
+                <details className="group">
+                  <summary className="text-muted-foreground hover:text-foreground cursor-pointer list-none text-sm underline decoration-dotted underline-offset-4 marker:content-['']">
+                    Reinstall or update it
+                  </summary>
+                  <div className="mt-4">
+                    <InstallInstructions />
+                  </div>
+                </details>
+              </>
+            ) : (
+              <>
+                <InstallInstructions />
+                {inChrome !== false && (
+                  <PresenceIndicator presence={presence} checked={checked} latest={latest} />
+                )}
+              </>
+            )}
+          </div>
+        </Step>
+
+        <Step
+          n="02"
+          title="Link the recorder"
+          blurb={
+            isLinked(presence, origin)
+              ? 'Linked. Pick your destination in the recorder panel when you send.'
+              : 'One click hands the recorder a key to your account — no tokens to copy. Pick where each recording goes (Personal or a team) in the panel when you send.'
+          }>
+          <LinkStep origin={origin} presence={presence} extensionId={extensionId} />
+        </Step>
+      </div>
 
       <Recording />
     </div>
@@ -418,7 +431,7 @@ function LinkStep({
   // The banner distinguishes "was already linked when you arrived" from "you
   // just linked it", so it stays keyed to phase. The *button* must not: the
   // moment linking succeeds the action is done, and offering a primary
-  // "Link the recorder" under a green "Linked." banner reads as a failed click.
+  // "Link the recorder" under a green "Linked." chip reads as a failed click.
   // presence lags a poll tick behind, so phase carries it until it catches up.
   const linkedHere = detectedHere || phase === 'linked'
   const alreadyHere = detectedHere && phase === 'idle'
@@ -427,28 +440,27 @@ function LinkStep({
   return (
     <div className="space-y-4">
       {linkedElsewhere && (
-        <div className="border-review/40 bg-review-wash text-review rounded-md border p-4 text-sm">
+        <div className="border-review/40 bg-review-wash text-review rounded-md border p-3 text-sm">
           The recorder is linked to <span className="font-mono text-xs">{presence.serverUrl}</span>.
           Linking here points it at this server instead.
         </div>
       )}
 
       {alreadyHere && (
-        <div className="border-approve/40 bg-approve-wash flex items-center gap-3 rounded-md border p-4">
-          <span className="bg-approve size-2 shrink-0 rounded-full" />
-          <p className="text-approve text-sm font-medium">
-            Linked. Pick your destination in the recorder panel when you send.
-          </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <LinkedChip>Linked</LinkedChip>
+          <span className="text-muted-foreground text-sm">
+            Pick your destination in the recorder panel when you send.
+          </span>
         </div>
       )}
 
       {phase === 'linked' && (
-        <div className="border-approve/40 bg-approve-wash flex items-center gap-3 rounded-md border p-4">
-          <span className="bg-approve size-2 shrink-0 rounded-full" />
-          <p className="text-approve text-sm font-medium">
-            Linked. Pick your destination in the recorder panel when you send. You can close this
-            page.
-          </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <LinkedChip>Linked</LinkedChip>
+          <span className="text-muted-foreground text-sm">
+            Pick your destination in the recorder panel when you send. You can close this page.
+          </span>
         </div>
       )}
 
@@ -470,7 +482,7 @@ function LinkStep({
       {alreadyHere && (
         <p className="text-muted-foreground text-sm">
           Re-linking mints a fresh token; the old one keeps working until you revoke it under{' '}
-          <Link to="/connect" className="text-primary underline underline-offset-4">
+          <Link to="/connect" className="text-cobalt underline underline-offset-4">
             Your API tokens
           </Link>
           .
@@ -478,12 +490,12 @@ function LinkStep({
       )}
 
       {phase === 'failed' && minted && (
-        <div className="border-border bg-card space-y-3 rounded-md border p-4">
+        <div className="border-border bg-card space-y-3 rounded-lg border p-4">
           <p className="text-sm">
             The extension didn't answer, but your token was created — paste it into the extension's
             settings (server <span className="font-mono text-xs">{origin}</span>), or revoke it
             under{' '}
-            <Link to="/connect" className="text-primary underline underline-offset-4">
+            <Link to="/connect" className="text-cobalt underline underline-offset-4">
               Your API tokens
             </Link>
             .
@@ -513,7 +525,7 @@ function InstallInstructions() {
           href={STORE_URL}
           target="_blank"
           rel="noreferrer"
-          className="bg-primary text-primary-foreground inline-flex h-9 items-center gap-2 rounded-md px-4 text-sm font-medium hover:opacity-90">
+          className="bg-cobalt inline-flex h-8 items-center gap-2 rounded-md px-3 text-[13px] font-medium text-white hover:bg-cobalt/90">
           Add to Chrome
         </a>
         <p className="text-muted-foreground mt-3 text-sm">
@@ -532,7 +544,7 @@ function InstallInstructions() {
         <li className="flex gap-3">
           <span className="text-cobalt font-mono text-xs leading-5">1</span>
           <span>
-            <a href={DOWNLOAD_URL} className="text-primary underline underline-offset-4">
+            <a href={DOWNLOAD_URL} className="text-cobalt underline underline-offset-4">
               Download <code className="font-mono text-xs">handback-recorder.zip</code>
             </a>{' '}
             and unzip it.
@@ -557,7 +569,6 @@ function InstallInstructions() {
   )
 }
 
-/** The page's heartbeat: green the instant the extension answers a ping. */
 /**
  * Nothing installed from a zip ever updates itself — that's the one thing the
  * Web Store would do for us. So the page does it: the extension reports its
@@ -576,6 +587,7 @@ function isOutdated(installed: string, latest: string): boolean {
   return false
 }
 
+/** The page's heartbeat: green the instant the extension answers a ping. */
 function PresenceIndicator({
   presence,
   checked,
@@ -589,18 +601,16 @@ function PresenceIndicator({
     const stale = latest ? isOutdated(presence.version, latest) : false
     return (
       <div className="space-y-3">
-        <div className="border-approve/40 bg-approve-wash flex items-center gap-3 rounded-md border p-4">
-          <span className="bg-approve size-2 shrink-0 rounded-full" />
-          <p className="text-approve text-sm font-medium">
-            Handback Recorder {presence.version} is installed.
-          </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <LinkedChip>Installed</LinkedChip>
+          <span className="text-muted-foreground text-sm">Handback Recorder {presence.version}</span>
         </div>
         {stale && (
-          <div className="border-review/40 bg-review-wash rounded-md border p-4 text-sm">
+          <div className="border-review/40 bg-review-wash rounded-md border p-3 text-sm">
             <p className="text-review font-medium">Version {latest} is available.</p>
             <p className="text-muted-foreground mt-1">
               A zip install doesn't update itself.{' '}
-              <a href={DOWNLOAD_URL} className="text-primary underline underline-offset-4">
+              <a href={DOWNLOAD_URL} className="text-cobalt underline underline-offset-4">
                 Download {latest}
               </a>
               , then hit reload on the extension at{' '}
@@ -615,7 +625,7 @@ function PresenceIndicator({
   return (
     <div
       aria-busy={!checked}
-      className="border-border bg-muted/40 flex items-center gap-3 rounded-md border p-4">
+      className="bg-secondary border-border flex items-center gap-3 rounded-md border p-3">
       <span className="bg-muted-foreground/40 size-2 shrink-0 animate-pulse rounded-full" />
       <p className="text-muted-foreground text-sm">
         Waiting to spot the extension… it shows up here the moment it's installed. Installed it
@@ -631,49 +641,51 @@ function PresenceIndicator({
  */
 function Recording() {
   return (
-    <section className="border-border border-t pt-6">
-      <h2 className="font-display text-xl font-semibold">Then just record</h2>
-      <p className="text-muted-foreground mt-2 text-sm leading-relaxed">
+    <section className="mt-10">
+      <h2 className="text-base font-semibold">Then just record</h2>
+      <p className="text-muted-foreground mt-1 text-sm leading-relaxed">
         Setup is done — the rest happens in the panel.
       </p>
-      <ul className="text-muted-foreground mt-5 space-y-2 text-sm">
-        <li className="flex gap-2">
-          <span className="text-cobalt">·</span>
-          <span>
-            Pin it: puzzle-piece icon in Chrome's toolbar → pin <strong>Handback Recorder</strong>,
-            then click it to open the side panel.
-          </span>
-        </li>
-        <li className="flex gap-2">
-          <span className="text-cobalt">·</span>
-          <span>
-            Hit <strong>Record</strong>, pick the tab or screen, and talk — say what you expected
-            and what happened instead. <code className="font-mono text-xs">Alt+Shift+D</code> draws
-            on the page in ink.
-          </span>
-        </li>
-        <li className="flex gap-2">
-          <span className="text-cobalt">·</span>
-          <span>
-            Hit <strong>Send to Handback</strong> when you're done — the walkthrough lands in the
-            inbox here, ready for an agent.
-          </span>
-        </li>
-      </ul>
-      <p className="text-muted-foreground mt-5 text-sm leading-relaxed">
-        Not at a desk? Your phone records its own screen — open{' '}
-        <Link to="/phone" className="text-primary underline-offset-4 hover:underline">
-          handback.dev/phone
-        </Link>{' '}
-        there and hand walkthroughs back from anywhere.
-      </p>
+      <div className="bg-card border-border mt-4 rounded-lg border p-5">
+        <ul className="text-muted-foreground space-y-2 text-sm">
+          <li className="flex gap-2">
+            <span className="text-cobalt">·</span>
+            <span>
+              Pin it: puzzle-piece icon in Chrome's toolbar → pin <strong>Handback Recorder</strong>
+              , then click it to open the side panel.
+            </span>
+          </li>
+          <li className="flex gap-2">
+            <span className="text-cobalt">·</span>
+            <span>
+              Hit <strong>Record</strong>, pick the tab or screen, and talk — say what you expected
+              and what happened instead. <code className="font-mono text-xs">Alt+Shift+D</code>{' '}
+              draws on the page in ink.
+            </span>
+          </li>
+          <li className="flex gap-2">
+            <span className="text-cobalt">·</span>
+            <span>
+              Hit <strong>Send to Handback</strong> when you're done — the walkthrough lands in the
+              inbox here, ready for an agent.
+            </span>
+          </li>
+        </ul>
+        <p className="text-muted-foreground mt-4 text-sm leading-relaxed">
+          Not at a desk? Your phone records its own screen — open{' '}
+          <Link to="/phone" className="text-cobalt underline-offset-4 hover:underline">
+            handback.dev/phone
+          </Link>{' '}
+          there and hand walkthroughs back from anywhere.
+        </p>
+      </div>
     </section>
   )
 }
 
 function NotChromeNotice() {
   return (
-    <div className="border-border bg-muted/40 rounded-md border p-4">
+    <div className="bg-secondary border-border rounded-md border p-3">
       <p className="text-muted-foreground text-sm">
         This page can only talk to the extension from Chrome. Open{' '}
         <span className="font-mono text-xs">handback.dev/recorder</span> in Chrome to finish setup.
@@ -690,7 +702,7 @@ function CopyRow({ value }: { value: string }) {
         readOnly
         value={value}
         onFocus={(e) => e.currentTarget.select()}
-        className="border-input bg-background h-9 min-w-0 flex-1 rounded-md border px-2 font-mono text-xs"
+        className="border-input bg-card h-8 min-w-0 flex-1 rounded-md border px-2.5 font-mono text-xs"
       />
       <Button type="button" variant="outline" size="sm" onClick={() => void copy(value)}>
         {copied ? <Check /> : <Copy />}

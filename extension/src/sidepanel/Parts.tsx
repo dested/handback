@@ -3,7 +3,7 @@ import { blobs } from '../lib/db';
 import { mmss, plural } from '../lib/format';
 import { send } from '../lib/messages';
 import { saveTake } from './save';
-import type { Recording, Session } from '../lib/types';
+import type { Recording, Session, TranscribeProgress } from '../lib/types';
 import { sessionKind } from '../lib/types';
 
 /**
@@ -23,6 +23,7 @@ export function Parts({
   recordings,
   busy,
   transcribing,
+  progress,
   onAdd,
   onSay,
 }: {
@@ -30,8 +31,10 @@ export function Parts({
   recordings: Recording[];
   /** Recording or uploading: nothing may be deleted, and no part may be added. */
   busy: boolean;
-  /** Recording ids still queued for transcription. */
+  /** Recording ids still queued for transcription; `transcribing[0]` is the one running now. */
   transcribing: string[];
+  /** The running take's transcription progress, for its per-part bar. */
+  progress: TranscribeProgress | null;
   onAdd: () => void;
   onSay: (text: string) => void;
 }) {
@@ -64,13 +67,14 @@ export function Parts({
           n={i + 1}
           busy={busy}
           transcribing={transcribing.includes(rec.id)}
+          progress={transcribing[0] === rec.id ? progress : null}
           onSay={onSay}
         />
       ))}
 
       {!live && (
         <button
-          className="rec ghost parts-add"
+          className="parts-add"
           disabled={busy}
           title={
             busy
@@ -79,8 +83,7 @@ export function Parts({
           }
           onClick={onAdd}
         >
-          <span className="dot" />
-          {empty ? 'record the first part' : 'record another part'}
+          {empty ? '+ Record the first part' : '+ Record another part'}
         </button>
       )}
     </div>
@@ -93,6 +96,7 @@ function PartCard({
   n,
   busy,
   transcribing,
+  progress,
   onSay,
 }: {
   session: Session;
@@ -100,6 +104,7 @@ function PartCard({
   n: number;
   busy: boolean;
   transcribing: boolean;
+  progress: TranscribeProgress | null;
   onSay: (text: string) => void;
 }) {
   /** The part's own recorded length — the seek denominator and the head-row clock. */
@@ -281,12 +286,21 @@ function PartCard({
   // The duration hack briefly reports a garbage currentTime; the display clamps it.
   const clockMs = Math.min(Math.max(playhead, 0), durMs);
   const errors = rec.meta.events.filter((e) => e.level === 'error').length;
+  // Only upload/download stages report a real fraction; the rest slide indeterminate.
+  const pct =
+    progress && (progress.stage === 'upload' || progress.stage === 'download') ? progress.pct : -1;
+  // The transcript's state, for agent walkthroughs only — a human video isn't transcribed.
+  const transcriptState = transcribing
+    ? 'writing the transcript'
+    : lines.length > 0
+      ? 'transcript ready'
+      : '';
 
   const meta = [
-    human ? 'full-rate video' : `${plural(rec.meta.frames.length, 'frame')} captured`,
+    human ? 'full-rate video' : plural(rec.meta.frames.length, 'keyframe'),
     errors > 0 ? plural(errors, 'console error') : '',
     rec.interrupted ? 'recovered after the panel closed' : '',
-    transcribing ? 'transcribing…' : '',
+    human ? '' : transcriptState,
   ]
     .filter(Boolean)
     .join(' · ');
@@ -304,10 +318,26 @@ function PartCard({
           </span>
         ) : (
           <>
-            <span className="part-n">
-              part {n} · {mmss(durMs)}
+            {/* The first keyframe when this machine still holds it, else a plain
+                slot — the card reads as a clip either way. */}
+            <span className="part-thumb">
+              {posterUrl && <img src={posterUrl} alt="" draggable={false} />}
             </span>
-            <span className="part-sp" />
+            <span className="part-id">
+              <span className="part-n">
+                Part {n} · {mmss(durMs)}
+              </span>
+              <span className="part-meta">{meta}</span>
+            </span>
+            {transcribing ? (
+              pct >= 0 ? (
+                <span className="part-pct">{Math.round(pct)}%</span>
+              ) : null
+            ) : !human && lines.length > 0 ? (
+              <span className="part-done" title="Transcript ready">
+                ✓
+              </span>
+            ) : null}
             <button
               className="part-save"
               title={`Save part ${n}'s video to this computer`}
@@ -330,6 +360,12 @@ function PartCard({
           </>
         )}
       </div>
+
+      {transcribing && (
+        <div className={`part-prog${pct < 0 ? ' indeterminate' : ''}`}>
+          <i style={pct >= 0 ? { width: `${pct}%` } : undefined} />
+        </div>
+      )}
 
       <div
         className={`part-well${videoUrl ? '' : ' poster'}`}
@@ -382,8 +418,6 @@ function PartCard({
           </span>
         </div>
       )}
-
-      <div className="part-meta">{meta}</div>
 
       <div className="part-script">
         <div className="part-script-head">

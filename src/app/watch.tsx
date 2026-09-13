@@ -7,10 +7,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
-import { Button } from '~/components/ui/button'
+import { Button, buttonVariants } from '~/components/ui/button'
 import { useTranscriptFile } from '~/components/viewer/final-cut'
 import { dateTime, mmss } from '~/components/viewer/format'
-import { SectionHead } from '~/components/viewer/section-head'
 import { TranscriptPanel } from '~/components/viewer/transcript-panel'
 import type { TakeRecording } from '~/components/viewer/types'
 import { useSingleVideoPlayer } from '~/components/viewer/use-segment-player'
@@ -42,22 +41,22 @@ export function WatchPage() {
 
   if (shareToken && shared.isPending) {
     return (
-      <div className="mx-auto w-full max-w-5xl px-6 py-16">
-        <p className="text-muted-foreground text-sm">Loading…</p>
+      <div className="mx-auto w-full max-w-3xl px-6 py-16">
+        <p className="text-muted-foreground text-[13px]">Loading…</p>
       </div>
     )
   }
 
   if (!walkthrough) {
     return (
-      <div className="mx-auto w-full max-w-5xl px-6 py-16">
-        <div className="bg-card max-w-md space-y-3 rounded-md border p-6">
-          <h1 className="font-display text-xl font-semibold">This link isn't live</h1>
-          <p className="text-muted-foreground text-sm">
+      <div className="mx-auto w-full max-w-3xl px-6 py-16">
+        <div className="bg-card max-w-md space-y-3 rounded-lg border p-6">
+          <h1 className="text-xl font-semibold tracking-tight">This link isn't live</h1>
+          <p className="text-muted-foreground text-[13px]">
             The recording was unshared, or the link was mistyped. Ask whoever sent it for a fresh
             one.
           </p>
-          <Link to="/" className="text-cobalt text-sm hover:underline">
+          <Link to="/" className="text-cobalt text-[13px] font-medium hover:underline">
             What's Handback?
           </Link>
         </div>
@@ -68,10 +67,10 @@ export function WatchPage() {
   const finalUrl = urlByPath.get('final.mp4')
 
   return (
-    <div className="mx-auto w-full max-w-4xl space-y-8 px-6 py-10">
-      <div className="space-y-2 text-center">
-        <h1 className="font-display text-3xl font-semibold">{walkthrough.title}</h1>
-        <p className="text-muted-foreground font-mono text-sm">
+    <div className="mx-auto w-full max-w-3xl space-y-8 px-6 py-10">
+      <div className="space-y-1.5 text-center">
+        <h1 className="text-xl font-semibold tracking-tight">{walkthrough.title}</h1>
+        <p className="text-muted-foreground font-mono text-[13px]">
           {dateTime(walkthrough.recordedAt)} · {mmss(walkthrough.durationMs)}
         </p>
       </div>
@@ -81,16 +80,14 @@ export function WatchPage() {
           <VideoStage player={player} maxHeightClass="max-h-[620px]" />
           {walkthrough.downloadUrl && (
             <p className="text-center">
-              <a
-                href={walkthrough.downloadUrl}
-                className="text-cobalt font-mono text-sm underline underline-offset-4">
-                Download the video
+              <a href={walkthrough.downloadUrl} className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+                Download
               </a>
             </p>
           )}
           {transcript && transcript.length > 0 && (
-            <div className="mx-auto max-w-2xl space-y-2 text-left">
-              <SectionHead>transcript</SectionHead>
+            <div className="mx-auto max-w-2xl space-y-2 text-left text-[15px]">
+              <h2 className="text-[13px] font-semibold">Transcript</h2>
               <TranscriptPanel
                 lines={transcript}
                 activeMs={player.outputMs}
@@ -101,7 +98,7 @@ export function WatchPage() {
         </>
       ) : (
         walkthrough.takes.map((take) => (
-          <div key={take.id} className="rule pt-8">
+          <div key={take.id} className="border-border border-t pt-8">
             <SharedTake take={take} urlByPath={urlByPath} />
           </div>
         ))
@@ -116,7 +113,7 @@ export function WatchPage() {
         />
       )}
 
-      <p className="rule text-muted-foreground pt-6 text-center text-sm">
+      <p className="border-border text-muted-foreground border-t pt-6 text-center text-[13px]">
         Recorded with Handback →{' '}
         <Link to="/" className="text-cobalt hover:underline">
           handback.dev
@@ -177,11 +174,11 @@ function WatchNotes({
 
   return (
     <div className="mx-auto max-w-2xl space-y-3 text-left">
-      <SectionHead>notes</SectionHead>
+      <h2 className="text-[13px] font-semibold">Notes</h2>
       {comments.length > 0 ? (
         <ul className="space-y-2">
           {comments.map((comment, i) => (
-            <li key={i} className="text-sm leading-relaxed">
+            <li key={i} className="text-[13px] leading-relaxed">
               {comment.atMs !== null && (
                 <span className="text-cobalt font-mono">[{mmss(comment.atMs)}] </span>
               )}
@@ -190,7 +187,7 @@ function WatchNotes({
           ))}
         </ul>
       ) : (
-        <p className="text-muted-foreground text-sm">No notes yet.</p>
+        <p className="text-muted-foreground text-[13px]">No notes yet.</p>
       )}
 
       <form
@@ -212,14 +209,14 @@ function WatchNotes({
           onChange={(e) => setName(e.target.value)}
           placeholder="name"
           aria-label="Your name"
-          className="border-input bg-background focus-visible:border-ring w-32 rounded-md border px-3 py-1.5 text-sm outline-none"
+          className="border-input bg-card focus-visible:border-ring focus-visible:ring-ring h-8 w-32 rounded-md border px-2.5 text-[13px] outline-none focus-visible:ring-2"
         />
         <input
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder="Leave a note…"
           aria-label="Note"
-          className="border-input bg-background focus-visible:border-ring min-w-0 flex-1 rounded-md border px-3 py-1.5 text-sm outline-none"
+          className="border-input bg-card focus-visible:border-ring focus-visible:ring-ring h-8 min-w-0 flex-1 rounded-md border px-2.5 text-[13px] outline-none focus-visible:ring-2"
         />
         <Button
           type="submit"
@@ -228,7 +225,7 @@ function WatchNotes({
           leave a note
         </Button>
       </form>
-      {error && <p className="text-destructive text-sm">{error}</p>}
+      {error && <p className="text-destructive text-[13px]">{error}</p>}
     </div>
   )
 }
@@ -262,8 +259,9 @@ function SharedTake({ take, urlByPath }: { take: SharedTakeRow; urlByPath: Map<s
 
   return (
     <section className="space-y-4">
-      <p className="text-muted-foreground font-mono text-xs tracking-widest uppercase">
-        take {take.index} · {mmss(take.durationMs)}
+      <p className="text-[13px] font-medium">
+        Part {take.index}{' '}
+        <span className="text-muted-foreground font-mono">· {mmss(take.durationMs)}</span>
       </p>
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2">

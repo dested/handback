@@ -9,6 +9,7 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { inferRouterOutputs } from '@trpc/server'
 import type { AppRouter } from '../../../../server/router'
+import { Avatar } from '~/components/ui/avatar'
 import { Button } from '~/components/ui/button'
 import { useTRPC } from '~/lib/trpc'
 import { cn } from '~/lib/utils'
@@ -39,15 +40,6 @@ function activityText(a: Activity): string {
   if (a.action === 'pulled') return `pulled by ${a.tokenName} · ${ago(a.createdAt)}`
   if (a.action === 'result') return `result posted by ${a.tokenName} · ${ago(a.createdAt)}`
   return `marked ${a.detail ?? 'a status'} by ${a.tokenName} · ${ago(a.createdAt)}`
-}
-
-/** The 20px initial chip that fronts a comment. */
-function Chip({ letter }: { letter: string }) {
-  return (
-    <span className="bg-muted flex h-5 w-5 shrink-0 items-center justify-center rounded-full font-mono text-[10px]">
-      {letter}
-    </span>
-  )
 }
 
 /**
@@ -180,10 +172,10 @@ function CommentEntry({
 }) {
   return (
     <div className="flex gap-2.5">
-      <Chip letter={(comment.authorName || '?').charAt(0).toUpperCase()} />
+      <Avatar name={comment.authorName} size="sm" />
       <div className="flex min-w-0 flex-col gap-1">
         <div className="flex flex-wrap items-baseline gap-x-2">
-          <span className="text-muted-foreground font-mono text-[11px]">{comment.authorName}</span>
+          <span className="text-foreground text-xs font-semibold">{comment.authorName}</span>
           {comment.atMs !== null && (
             <button
               type="button"
@@ -340,7 +332,7 @@ export function Conversation({
       {/* The comment box. */}
       {walkthrough.viewerIsMember && (
         <form
-          className="flex gap-2 pt-2"
+          className="border-border bg-card focus-within:border-ring flex items-center gap-2 rounded-lg border p-1.5"
           onSubmit={(e) => {
             e.preventDefault()
             const trimmed = commentText.trim()
@@ -370,10 +362,10 @@ export function Conversation({
             onChange={(e) => setCommentText(e.target.value)}
             placeholder="Add a comment…"
             aria-label="Add a comment"
-            className="border-input bg-card focus-visible:border-ring min-w-0 flex-1 rounded-md border px-3 py-1.5 text-sm outline-none"
+            className="min-w-0 flex-1 bg-transparent px-1.5 text-[13px] outline-none"
           />
           <Button type="submit" disabled={addComment.isPending || !commentText.trim()}>
-            Send
+            Comment
           </Button>
         </form>
       )}

@@ -6,6 +6,7 @@
 // polish once per clip, and the list walks back up with it rather than pretending
 // the first pass finished the job.
 
+import { Check } from 'lucide-react'
 import type { CaptureStage, StageProgress } from '~/lib/capture/types'
 import { cn } from '~/lib/utils'
 
@@ -80,37 +81,62 @@ export function StageList({
   const current = progress ? rows.findIndex((row) => row.stages.includes(progress.stage)) : -1
 
   return (
-    <ul className="divide-border divide-y">
+    <ul className="divide-border/60 divide-y">
       {rows.map((row, i) => {
         const active = i === current
         const done = current > i
         return (
-          <li
-            key={row.label}
-            className={cn(
-              'flex items-center gap-3 py-2.5 font-mono text-sm',
-              active ? 'text-foreground' : 'text-muted-foreground'
-            )}>
-            <span
+          <li key={row.label} className="py-2.5">
+            <div
               className={cn(
-                'size-2 shrink-0 rounded-full',
-                done ? 'bg-approve' : active ? 'bg-cobalt' : 'border-border border'
+                'flex items-center gap-3 text-[13px]',
+                active ? 'text-foreground' : 'text-muted-foreground'
+              )}>
+              <StageDisc done={done} active={active} />
+              <span className="min-w-0 flex-1 truncate">{row.label}</span>
+              {/* The detail is where it is up to; the percentage is how far that
+                  is through the whole run. A row that can say both says both —
+                  a lone percentage is what makes a long stage look wedged. */}
+              {active && progress && (
+                <span className="text-muted-foreground shrink-0 font-mono text-xs tabular-nums">
+                  {progress.detail ?? ''}
+                  {progress.detail && progress.pct >= 0 && ' · '}
+                  {progress.pct >= 0 && `${Math.round(progress.pct * 100)}%`}
+                </span>
               )}
-            />
-            <span className="min-w-0 flex-1 truncate">{row.label}</span>
-            {/* The detail is where it is up to; the percentage is how far that
-                is through the whole run. A row that can say both says both —
-                a lone percentage is what makes a long stage look wedged. */}
-            {active && progress && (
-              <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
-                {progress.detail ?? ''}
-                {progress.detail && progress.pct >= 0 && ' · '}
-                {progress.pct >= 0 && `${Math.round(progress.pct * 100)}%`}
-              </span>
+            </div>
+            {active && progress && progress.pct >= 0 && (
+              <div className="bg-border mt-2 ml-[30px] h-1 overflow-hidden rounded">
+                <div
+                  className="bg-cobalt h-full rounded transition-[width]"
+                  style={{ width: `${Math.round(progress.pct * 100)}%` }}
+                />
+              </div>
             )}
           </li>
         )
       })}
     </ul>
+  )
+}
+
+/** The lead marker: a filled green ✓ once a row is done, a cobalt ring while it
+ *  is running, a hairline ring before. */
+function StageDisc({ done, active }: { done: boolean; active: boolean }) {
+  if (done) {
+    return (
+      <span className="bg-approve border-approve flex size-[18px] shrink-0 items-center justify-center rounded-full border-[1.5px] text-white">
+        <Check className="size-3" />
+      </span>
+    )
+  }
+  return (
+    <span
+      className={cn(
+        'flex size-[18px] shrink-0 items-center justify-center rounded-full border-[1.5px]',
+        active ? 'border-cobalt' : 'border-input'
+      )}>
+      {active && <span className="bg-cobalt size-2 rounded-full" />}
+    </span>
   )
 }
