@@ -12,7 +12,8 @@
 > watch-page comments · /usage · /upgrade (pro is admin-granted) · extension
 > 1.9.0 intent chips — superseded by **1.10.0, PUBLISHED 2026-08-25** (outbox background
 > upload + JPEG 0.8 + speaker plumbing; zipped on macOS with `zip -r`, see the publish gotcha)
-> → **1.11.0 built 2026-09-12, UNPUBLISHED — needs a load-unpacked test first**: capture,
+> → **1.11.0 PUBLISHED 2026-09-13** (releases/recorder/handback-recorder-1.11.0.zip; the Web Store
+> build still needs the store zip uploaded through the dashboard): capture,
 > transcription and upload all run in the offscreen document, so closing the panel never stops
 > a take (see "The panel is a window" gotcha; plans/2026-09-12-panel-and-app-handback.md).
 >

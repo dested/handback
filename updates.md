@@ -7,8 +7,8 @@ Asked: "its not showing me the download 1.11 its just taking me to the chrome st
 store listing the install step showed only Add to Chrome; the zip link lived solely in the
 "Version X is available" nag, which needs the bucket to lead the installed version. Done: an
 "Ahead of the store? Download handback-recorder.zip (latest)" line under Add to Chrome. 1.11.0
-still needs `bun cli/publish-recorder.ts` to reach the bucket (blocked for Claude by the
-permission classifier).
+published to the bucket by Sal (`bun cli/publish-recorder.ts`; the classifier blocks Claude from
+running it). Web Store upload of handback-recorder-store.zip still manual.
 Touched: src/app/recorder.tsx, cliffnotes.md
 
 ## 2026-09-13 — complete redesign: Asana-shaped web, portal, extension
