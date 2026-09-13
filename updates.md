@@ -2,6 +2,15 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-09-13 — /recorder: zip download always reachable
+Asked: "its not showing me the download 1.11 its just taking me to the chrome store". Cause: with a
+store listing the install step showed only Add to Chrome; the zip link lived solely in the
+"Version X is available" nag, which needs the bucket to lead the installed version. Done: an
+"Ahead of the store? Download handback-recorder.zip (latest)" line under Add to Chrome. 1.11.0
+still needs `bun cli/publish-recorder.ts` to reach the bucket (blocked for Claude by the
+permission classifier).
+Touched: src/app/recorder.tsx, cliffnotes.md
+
 ## 2026-09-13 — complete redesign: Asana-shaped web, portal, extension
 Asked: "perfect, go with it, use /fable-opus and build everything. update the entire website,
 portal, and extension, complete redesign of everything." Done (6 Opus waves, per

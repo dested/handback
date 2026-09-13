@@ -327,13 +327,13 @@ export function RecorderPage() {
                     Reinstall or update it
                   </summary>
                   <div className="mt-4">
-                    <InstallInstructions />
+                    <InstallInstructions latest={latest} />
                   </div>
                 </details>
               </>
             ) : (
               <>
-                <InstallInstructions />
+                <InstallInstructions latest={latest} />
                 {inChrome !== false && (
                   <PresenceIndicator presence={presence} checked={checked} latest={latest} />
                 )}
@@ -517,7 +517,7 @@ function LinkStep({
 /** How to get the extension in — the Web Store button once there is a listing,
  *  the three-step zip walk until then. Rendered plainly before it's installed
  *  and behind a disclosure after. */
-function InstallInstructions() {
+function InstallInstructions({ latest }: { latest: string | null }) {
   if (STORE_URL) {
     return (
       <div>
@@ -530,6 +530,18 @@ function InstallInstructions() {
         </a>
         <p className="text-muted-foreground mt-3 text-sm">
           Chrome will ask to confirm — the recorder only runs when you hit Record.
+        </p>
+        {/* The store review lags the bucket by days. The zip is always the newest
+            build, so it stays one click away even once the listing exists. */}
+        <p className="text-muted-foreground mt-3 text-sm">
+          Ahead of the store?{' '}
+          <a href={DOWNLOAD_URL} className="text-cobalt underline underline-offset-4">
+            Download <code className="font-mono text-xs">handback-recorder.zip</code>
+            {latest ? ` (${latest})` : ''}
+          </a>
+          , unzip it, turn on <strong>Developer mode</strong> at{' '}
+          <code className="font-mono text-xs">chrome://extensions</code> and hit{' '}
+          <strong>Load unpacked</strong> on the folder.
         </p>
       </div>
     )

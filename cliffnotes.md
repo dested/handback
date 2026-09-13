@@ -1020,7 +1020,7 @@ reaches the container on a plain push.
   is installed — absence means "not installed", not "not Chrome". If Chrome ever reassigns the store id
   (e.g. a fresh listing), add the new one to `EXTENSION_IDS`.
 - **`STORE_URL` is set** in `src/app/recorder.tsx` (the live listing) → the install step renders the
-  "Add to Chrome" button and the zip/load-unpacked walk collapses behind a disclosure automatically.
+  "Add to Chrome" button with an always-visible "Ahead of the store? Download handback-recorder.zip (latest)" line under it (the bucket leads the store review by days), and the whole install step collapses behind a disclosure once the extension answers a ping.
 - **A push to `main` does NOT ship the extension.** Deploy only moves the web app/server; the
   recorder reaches users through `releases/recorder/` in the bucket. So before (or right after) any
   push that touched `extension/`: bump the version if behavior changed, then
