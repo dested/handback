@@ -3,7 +3,7 @@
 //   claude mcp add --transport http handback https://handback.dev/mcp \
 //     --header "Authorization: Bearer hb_…"
 //
-// Same four tools as the stdio server in `cli/mcp.ts`, over the same
+// The same tools as the stdio server in `cli/mcp.ts`, over the same
 // implementation (`walkthroughs-api.ts`), except nothing has to be installed: no
 // clone, no bun, no repo. That matters because the person who fixes a walkthrough is
 // usually not the person who deployed Handback.
@@ -12,7 +12,7 @@
 // when the response closes. Sessions would pin a client to one process, and
 // this runs behind a load balancer as a single ECS service that gets replaced
 // on every deploy — a session id would be a promise we can't keep. The cost is
-// re-registering four tools per request, which is object allocation.
+// re-registering every tool per request, which is object allocation.
 //
 // Auth is the same `hb_` bearer token as /api/ingest, read off the standard
 // Authorization header, so a token reaches its owner's personal space and every
@@ -28,6 +28,7 @@ import {
   askReviewerQuestion,
   authenticateToken,
   getWalkthroughDetail,
+  getWalkthroughFrames,
   listWalkthroughs,
   postWalkthroughResult,
   requestEvidenceUploads,
@@ -35,7 +36,7 @@ import {
   type TokenAuth,
 } from './walkthroughs-api'
 import { log } from './logger'
-import { formatWalkthrough } from './mcp-format'
+import { formatWalkthrough, FRAMES_PAGE_DEFAULT, FRAMES_PAGE_MAX } from './mcp-format'
 import { rateLimit } from './ratelimit'
 
 const statusSchema = z.enum(WALKTHROUGH_STATUSES)
@@ -115,7 +116,7 @@ function buildServer(auth: TokenAuth): McpServer {
     {
       title: 'Get walkthrough brief',
       description:
-        "Fetch one walkthrough's full brief — a narrated screen recording made by a human in the running app, whether that's a bug, review feedback, or a change request: metadata, the report.md authored for agents, and presigned URLs for every file (video, keyframes, transcript)." +
+        "Fetch one walkthrough's full brief — a narrated screen recording made by a human in the running app, whether that's a bug, review feedback, or a change request: metadata, the report.md authored for agents, and presigned URLs for its files (video, transcript, and the keyframes — every frame for a normal-length walkthrough, a sample for a long one, with get_frames to page the full set)." +
         scope,
       inputSchema: { walkthroughId: z.string().describe('Walkthrough id from list_walkthroughs') },
     },
@@ -123,6 +124,38 @@ function buildServer(auth: TokenAuth): McpServer {
       const walkthrough = await getWalkthroughDetail(auth, walkthroughId)
       if (!walkthrough) return toolError(notFound(walkthroughId))
       return text(formatWalkthrough(walkthrough))
+    }
+  )
+
+  registerTool(
+    mcp,
+    'get_frames',
+    {
+      title: 'Get walkthrough frames',
+      description:
+        `Page the full keyframe set for a walkthrough — presigned image URLs in the order they were recorded. get_walkthrough only carries a sample of frames once a walkthrough runs long; use this to fetch the rest, or all of them, without leaving MCP. Returns { total, offset, limit, returned, nextOffset, frames:[{path,url}] }; keep calling with offset = the previous nextOffset until nextOffset is null. Default ${FRAMES_PAGE_DEFAULT} frames per call, max ${FRAMES_PAGE_MAX}.` +
+        scope,
+      inputSchema: {
+        walkthroughId: z.string().describe('Walkthrough id from list_walkthroughs'),
+        offset: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe('0-based frame index to start at (default 0)'),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(FRAMES_PAGE_MAX)
+          .optional()
+          .describe(`How many frames to return (default ${FRAMES_PAGE_DEFAULT}, max ${FRAMES_PAGE_MAX})`),
+      },
+    },
+    async ({ walkthroughId, offset, limit }) => {
+      const page = await getWalkthroughFrames(auth, walkthroughId, { offset, limit })
+      if (!page) return toolError(notFound(walkthroughId))
+      return text(JSON.stringify(page, null, 2))
     }
   )
 

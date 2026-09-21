@@ -2,6 +2,22 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-09-21 — get_frames MCP tool + adaptive brief frame cap
+Asked: an agent pulling a 600-frame walkthrough over MCP only got 120 frames and had no MCP way to
+the rest, so it fell back to re-cutting frames from the video with ffmpeg. Cause: `formatWalkthrough`
+capped inlined frames at `MAX_BRIEF_FRAMES = 120` and the documented escape hatch was a REST endpoint
+an MCP client can't reach. Done: (1) new **`get_frames`** MCP tool (hosted + stdio) → new
+`getWalkthroughFrames` in walkthroughs-api.ts + `GET /api/ingest/walkthroughs/:id/frames`
+(offset/limit, default 120/max 300, presigns only the window); (2) adaptive cap — ≤600 frames (one
+recording, `FULL_FRAME_THRESHOLD`) ships every frame, past that an even-stride sample spanning the
+whole recording + a pointer to get_frames (was first-120, i.e. only the intro). Omitted-frame lines
+and get_walkthrough/docs descriptions now point at get_frames. typecheck green; adaptive logic
+verified by pure test (600→all, 601→120 even-stride 0…596, 40→all, curated→pointer). Live check
+against handback.localhost blocked — dev server was 404ing every route incl. `/` and `/healthz`
+(pre-existing, needs `bun run dev` restart); production MCP token is stale (401 at /connect).
+Touched: server/mcp-format.ts, server/walkthroughs-api.ts, server/ingest.ts, server/mcp.ts,
+cli/mcp.ts, src/app/docs.tsx, cliffnotes.md
+
 ## 2026-09-13 — /recorder: zip download always reachable
 Asked: "its not showing me the download 1.11 its just taking me to the chrome store". Cause: with a
 store listing the install step showed only Add to Chrome; the zip link lived solely in the

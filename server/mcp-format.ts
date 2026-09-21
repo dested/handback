@@ -70,6 +70,18 @@ const BRIEF_FRAMES_PER_MIN = 8
 const MIN_BRIEF_FRAMES = 30
 const MAX_BRIEF_FRAMES = 120
 
+/** A single recording tops out at this many keyframes (the recorder's per-take
+ *  MAX_FRAME_BUDGET). At or under it — the common one-recording walkthrough — the
+ *  brief lists every frame so an agent can "look at every screenshot" straight
+ *  from the pull. Past it (a multi-take walkthrough), the brief drops to an
+ *  even-stride sample and get_frames pages the rest, rather than dumping hundreds
+ *  of presigned URLs into the report. */
+const FULL_FRAME_THRESHOLD = 600
+
+/** get_frames paging window — the default and hard-max frames one call returns. */
+export const FRAMES_PAGE_DEFAULT = 120
+export const FRAMES_PAGE_MAX = 300
+
 /** `durationMs` arrives through an index signature, so it is `unknown` — a walkthrough
  *  declared without one still gets the floor rather than zero frames. */
 export function briefFrameLimit(durationMs: unknown): number {
@@ -137,7 +149,6 @@ export function formatWalkthrough(walkthrough: FormattableWalkthrough): string {
     missingFiles,
     ...meta
   } = walkthrough
-  const maxFrames = briefFrameLimit(meta.durationMs)
   const curatedFrames = curation?.frames ?? []
 
   // Reviewer-attached files are evidence the narration asked for — pulled out
@@ -180,24 +191,35 @@ export function formatWalkthrough(walkthrough: FormattableWalkthrough): string {
     }
     if (framesOmitted > 0) {
       listLines.push(
-        `(+${framesOmitted} frames omitted — the curated set above is what matters; fetch the rest via the files list of GET /api/ingest/walkthroughs/:id)`
+        `(+${framesOmitted} frames omitted — the curated set above is what matters; call get_frames to page the full set in order)`
       )
     }
   } else {
-    let framesShown = 0
+    // Adaptive: a walkthrough at or under one recording's worth of frames ships
+    // whole, so the agent sees every screenshot without paging. Past that, send an
+    // even-stride sample that spans the whole recording (not just its opening) and
+    // point at get_frames for the rest.
+    const total = listed.reduce((n, f) => (isFrame(f.path) ? n + 1 : n), 0)
+    const target = total <= FULL_FRAME_THRESHOLD ? total : briefFrameLimit(meta.durationMs)
+    let seen = 0
+    let shown = 0
     for (const f of listed) {
       if (isFrame(f.path)) {
-        if (framesShown >= maxFrames) {
+        // Even stride: keep this frame when it lands on the sample grid. When
+        // target === total every frame lands on it, so nothing is dropped.
+        const keep = shown < target && Math.floor((seen * target) / total) === shown
+        seen++
+        if (!keep) {
           framesOmitted++
           continue
         }
-        framesShown++
+        shown++
       }
       listLines.push(`${f.path} — ${f.url}`)
     }
     if (framesOmitted > 0) {
       listLines.push(
-        `(+${framesOmitted} more frames omitted; fetch via files list of GET /api/ingest/walkthroughs/:id)`
+        `(+${framesOmitted} more frames omitted from this sample — call get_frames to page the full set of ${total} in order)`
       )
     }
   }

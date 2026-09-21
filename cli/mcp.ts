@@ -8,11 +8,11 @@
 // contributors working against a local server and for anyone who'd rather their
 // agent talk to a process they can read.
 //
-// Four tools over the token-authed API in server/ingest.ts: list every
+// The tools over the token-authed API in server/ingest.ts: list every
 // walkthrough the token reaches (its owner's personal space plus every team
 // they're in), pull one walkthrough's full brief (report.md + presigned URLs for
-// video/keyframes/transcript), move a walkthrough through review, and post the
-// result a human signs off on.
+// video/keyframes/transcript), page the full keyframe set, move a walkthrough
+// through review, and post the result a human signs off on.
 //
 // stdout is the JSON-RPC channel — nothing but the protocol may be written to
 // it. Diagnostics go to stderr.
@@ -20,7 +20,12 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
-import { formatWalkthrough, type FormattableWalkthrough } from '../server/mcp-format'
+import {
+  formatWalkthrough,
+  FRAMES_PAGE_DEFAULT,
+  FRAMES_PAGE_MAX,
+  type FormattableWalkthrough,
+} from '../server/mcp-format'
 
 const DEFAULT_SERVER = 'https://handback.dev'
 
@@ -120,7 +125,7 @@ registerTool(
   {
     title: 'Get walkthrough brief',
     description:
-      "Fetch one walkthrough's full brief — a narrated screen recording made by a human in the running app, whether that's a bug, review feedback, or a change request: metadata, the report.md authored for agents, and presigned URLs for every file (video, keyframes, transcript).",
+      "Fetch one walkthrough's full brief — a narrated screen recording made by a human in the running app, whether that's a bug, review feedback, or a change request: metadata, the report.md authored for agents, and presigned URLs for its files (video, transcript, and the keyframes — every frame for a normal-length walkthrough, a sample for a long one, with get_frames to page the full set).",
     inputSchema: { walkthroughId: z.string().describe('Walkthrough id from list_walkthroughs') },
   },
   async ({ walkthroughId }) => {
@@ -129,6 +134,42 @@ registerTool(
     )
     if ('error' in result) return result.error
     return text(formatWalkthrough(result.data))
+  }
+)
+
+registerTool(
+  'get_frames',
+  {
+    title: 'Get walkthrough frames',
+    description:
+      `Page the full keyframe set for a walkthrough — presigned image URLs in the order they were recorded. get_walkthrough only carries a sample of frames once a walkthrough runs long; use this to fetch the rest, or all of them. Returns { total, offset, limit, returned, nextOffset, frames:[{path,url}] }; keep calling with offset = the previous nextOffset until nextOffset is null. Default ${FRAMES_PAGE_DEFAULT} frames per call, max ${FRAMES_PAGE_MAX}.`,
+    inputSchema: {
+      walkthroughId: z.string().describe('Walkthrough id from list_walkthroughs'),
+      offset: z
+        .number()
+        .int()
+        .min(0)
+        .optional()
+        .describe('0-based frame index to start at (default 0)'),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(FRAMES_PAGE_MAX)
+        .optional()
+        .describe(`How many frames to return (default ${FRAMES_PAGE_DEFAULT}, max ${FRAMES_PAGE_MAX})`),
+    },
+  },
+  async ({ walkthroughId, offset, limit }) => {
+    const query = new URLSearchParams()
+    if (offset !== undefined) query.set('offset', String(offset))
+    if (limit !== undefined) query.set('limit', String(limit))
+    const qs = query.toString()
+    const result = await api<unknown>(
+      `/walkthroughs/${encodeURIComponent(walkthroughId)}/frames${qs ? `?${qs}` : ''}`
+    )
+    if ('error' in result) return result.error
+    return text(JSON.stringify(result.data, null, 2))
   }
 )
 

@@ -18,6 +18,7 @@
 //
 //   GET  /api/ingest/walkthroughs            finalized walkthroughs the token reaches, newest first
 //   GET  /api/ingest/walkthroughs/:id        one walkthrough's full brief (report.md + presigned files)
+//   GET  /api/ingest/walkthroughs/:id/frames a page of presigned keyframe URLs (offset/limit)
 //   POST /api/ingest/walkthroughs/:id/status open | in_review | resolved
 //
 // And one stateless helper the recorder leans on so it doesn't have to run
@@ -32,6 +33,7 @@ import {
   askReviewerQuestion,
   authenticateToken,
   getWalkthroughDetail,
+  getWalkthroughFrames,
   listWalkthroughs,
   postWalkthroughResult,
   requestEvidenceUploads,
@@ -167,6 +169,15 @@ function pathId(req: Request): string {
   return value?.[0] ?? ''
 }
 
+/** A finite numeric query param, or undefined — the caller then falls back to its
+ *  own default. Tolerates the `string | string[]` Express hands back. */
+function numQuery(value: unknown): number | undefined {
+  const raw = Array.isArray(value) ? value[0] : value
+  if (typeof raw !== 'string') return undefined
+  const n = Number(raw)
+  return Number.isFinite(n) ? n : undefined
+}
+
 export const ingestRouter = Router()
 
 // Recorder ≤1.2.x and older CLIs post /gripes — keep until no old installs
@@ -175,6 +186,7 @@ export const ingestRouter = Router()
 const DECLARE = ['/walkthroughs', '/gripes']
 const FINALIZE = ['/walkthroughs/:id/finalize', '/gripes/:id/finalize']
 const DETAIL = ['/walkthroughs/:id', '/gripes/:id']
+const FRAMES = ['/walkthroughs/:id/frames', '/gripes/:id/frames']
 const STATUS = ['/walkthroughs/:id/status', '/gripes/:id/status']
 
 ingestRouter.use(json({ limit: '10mb' }))
@@ -606,6 +618,22 @@ ingestRouter.get(DECLARE, readLimit, async (req, res) => {
   }
 
   res.json(await listWalkthroughs(auth, parsed?.data, space))
+})
+
+// Page the full keyframe set. The brief (DETAIL) only carries a sample once a
+// walkthrough runs past one recording's worth of frames; this is the paged rest,
+// registered before DETAIL so `:id` never swallows the `/frames` segment.
+ingestRouter.get(FRAMES, readLimit, async (req, res) => {
+  const auth = getAuth(req)
+  const page = await getWalkthroughFrames(auth, pathId(req), {
+    offset: numQuery(req.query.offset),
+    limit: numQuery(req.query.limit),
+  })
+  if (!page) {
+    fail(res, 404, 'Unknown walkthrough')
+    return
+  }
+  res.json(page)
 })
 
 ingestRouter.get(DETAIL, readLimit, async (req, res) => {

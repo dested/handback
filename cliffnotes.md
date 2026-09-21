@@ -507,7 +507,7 @@ extension/              Handback Recorder — the Chrome MV3 extension (own npm 
 | `/join/:inviteId` | Invite accept | `src/app/join.tsx` |
 | `/forgot-password` · `/reset-password` | Password recovery (better-auth emails the link) | `src/app/{forgot,reset}-password.tsx` |
 | `/privacy` · `/terms` | Legal pages (linked from the marketing footer) | `src/app/{privacy,terms}.tsx` |
-| `/docs` | **How Handback works** — the loop, the hosted `claude mcp add` line, all six MCP tools, teams, FAQ. Public, legal-page chrome, linked from marketing nav + footer | `src/app/docs.tsx` |
+| `/docs` | **How Handback works** — the loop, the hosted `claude mcp add` line, all seven MCP tools, teams, FAQ. Public, legal-page chrome, linked from marketing nav + footer | `src/app/docs.tsx` |
 | `POST /api/client-error` | Browser error beacon (prod only) → alert email pipeline; per-IP rate-limited | `server/alerts.ts` |
 | `POST /api/stripe/webhook` | Stripe billing webhook — raw-body signature verify → reconcile the customer's entitlements from live subscriptions | `server/stripe-webhook.ts` |
 | `/app` | **Walkthroughs** — List (`?view=list`, default) and Board (`?view=board`) over one `walkthroughs.inbox` query, grouped Needs your call · Processing · Open · Done; filters are URL params (`status`, `space`, `project`, `q`); `?w=<id>` opens the detail pane beside the list. Row ✓ approves, ⋯ = rename / resolve / reopen; Board drag → status | `src/app/app.tsx` + `src/components/inbox/*` + `src/components/viewer/pane/*` |
@@ -539,13 +539,14 @@ extension/              Handback Recorder — the Chrome MV3 extension (own npm 
 | `POST /walkthroughs` | Declare: metadata + file list → rows + presigned PUT per file. Optional `teamId` targets a team (member-validated; absent = personal), optional `projectId` pins a project in that space (else originHints route it). Re-declaring an existing (space, slug) deletes the old walkthrough + S3 prefix first |
 | `POST /walkthroughs/:id/finalize` | Marks files uploaded + sets `finalizedAt` (list only shows finalized) |
 | `GET /walkthroughs` | List for agents (MCP `list_walkthroughs`): everything the token reaches, `?team=personal\|<id>` filters. Platform-wide when the owner is a platform admin |
-| `GET /walkthroughs/:id` | Detail + `reportMd` text + presigned GET for every file (MCP `get_walkthrough`) |
+| `GET /walkthroughs/:id` | Detail + `reportMd` text + presigned GET for every file (MCP `get_walkthrough`). Note: the *brief* only inlines a frame sample (see §frame cap); the raw JSON here still carries every file |
+| `GET /walkthroughs/:id/frames` | Paged presigned keyframe URLs, chronological, `?offset=&limit=` (default 120, max 300) → `{total,offset,limit,returned,nextOffset,frames[]}` (MCP `get_frames`). The escape hatch when the brief sampled frames |
 | `POST /walkthroughs/:id/status` | open / in_review / resolved (MCP `set_walkthrough_status`) |
 | `POST /walkthroughs/:id/result` | The agent's answer (MCP `post_result`): summary + optional prUrl/filesTouched/body **+ evidence[] (paths from /evidence — flips those rows uploaded, lands on the note)** → review-thread note; auto-flips open → in_review. No `/gripes` alias (nothing old posts it) |
 | `POST /walkthroughs/:id/question` | MCP `ask_reviewer`: agent asks instead of guessing → WalkthroughNote kind 'question', status → needs_info, uploader emailed. No `/gripes` alias |
 | `POST /walkthroughs/:id/evidence` | MCP `attach_evidence`: ≤4 proof screenshots (png/jpeg/webp ≤5 MB) → pending rows + presigned PUTs at `evidence/<ts>-<name>`; cite the paths in post_result |
 
-All five walkthrough routes also answer under the legacy `/gripes*` spellings — same handlers,
+All six walkthrough routes also answer under the legacy `/gripes*` spellings — same handlers,
 same rate-limit keys — because shipped recorders ≤1.2.x still post them. Don't remove the aliases
 until no old install remains.
 | `POST /transcribe` | 16 kHz mono WAV body in, `{segments:[{t,d?,text}]}` out. Stateless — the recorder chunks and offsets. 503 when `GROQ_API_KEY` is unset |
@@ -833,11 +834,17 @@ reaches the container on a plain push.
   (`extension/src/offscreen/recorder.ts`) is 40 frames/min clamped to **[150, 600]** per *take* —
   applied once in `finish()`, after dedup, as a **uniform** thin with nothing carved out of it
   (the `reason === 'mark'` exemption went with the mark feature, 2026-08-01); survivors are
-  renumbered ascending (`t` survives, so transcript citations stay valid). It was a flat 150 until 2026-07-31. Server-side, `briefFrameLimit()`
-  (`server/mcp-format.ts`) caps how many frame URLs the agent's brief *inlines* — 8/min clamped to
-  [30, 120] — which is a display cap only: `gripes.get` presigns every frame regardless. Raising
-  either has real cost: a frame is ~150–300 KB (JPEG quality 0.8 since 2026-08-25 — was 0.9;
-  mirrored in capture/frames.ts and video-to-prompt), against 2 GB/gripe and 20 GB/org.
+  renumbered ascending (`t` survives, so transcript citations stay valid). It was a flat 150 until 2026-07-31. Server-side, `formatWalkthrough()`
+  (`server/mcp-format.ts`) decides how many frame URLs the agent's brief *inlines*, adaptively
+  (2026-09-21): a walkthrough at or under **600** frames — one full recording, `FULL_FRAME_THRESHOLD`,
+  = the recorder's per-take ceiling — ships **every** frame so "look at every screenshot" works
+  straight from the pull; past that it drops to an **even-stride** sample of `briefFrameLimit()`
+  frames (8/min clamped to [30, 120]) spanning the whole recording, and prints a pointer to
+  **`get_frames`** for the rest. Display cap only: the detail JSON still presigns every frame, and
+  `get_frames` (`GET /walkthroughs/:id/frames`, paged) hands back all of them in order — an agent
+  should page frames, never re-cut them from the video. Raising the sample has real cost: a frame is
+  ~150–300 KB (JPEG quality 0.8 since 2026-08-25 — was 0.9; mirrored in capture/frames.ts and
+  video-to-prompt), against 2 GB/gripe and 20 GB/org.
 - **Renaming a column is a SQL job, not a `db push` job.** Predeploy runs `bunx prisma db push`
   **without** `--accept-data-loss` on purpose, so any drop stalls the deploy. Rename in place first
   (`ALTER TABLE "gripe" RENAME COLUMN "old" TO "new"`), then push — it sees no drift. Remember

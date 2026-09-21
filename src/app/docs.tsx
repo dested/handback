@@ -6,7 +6,11 @@ const TOOLS: Array<[string, string]> = [
   ['list_walkthroughs', 'Everything the token can reach, newest first, filterable by status.'],
   [
     'get_walkthrough',
-    'The full brief: report, transcript, contact sheets, keyframes, video — presigned links, short-lived.',
+    'The full brief: report, transcript, contact sheets, keyframes, video — presigned links, short-lived. A long walkthrough carries a keyframe sample; get_frames pages the rest.',
+  ],
+  [
+    'get_frames',
+    'Page the full keyframe set in the order it was recorded — presigned links, offset/limit — for when the brief only inlined a sample.',
   ],
   ['set_walkthrough_status', 'open → in_review → resolved as the work moves.'],
   [

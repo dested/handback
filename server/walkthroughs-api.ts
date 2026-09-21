@@ -25,6 +25,7 @@ import { notifyQuestion, notifyResult } from './notify'
 import { prisma } from './prisma'
 import { expiryFor } from './retention'
 import { getObjectText, isSafePath, walkthroughKey, presignGet, presignPut } from './storage'
+import { FRAMES_PAGE_DEFAULT, FRAMES_PAGE_MAX } from './mcp-format'
 
 export const WALKTHROUGH_STATUSES = ['open', 'in_review', 'needs_info', 'resolved'] as const
 export type WalkthroughStatus = (typeof WALKTHROUGH_STATUSES)[number]
@@ -453,6 +454,63 @@ export async function getWalkthroughDetail(
       quote: s.quote,
       atMs: s.atMs,
     })),
+  }
+}
+
+export type WalkthroughFramesPage = {
+  walkthroughId: string
+  total: number
+  offset: number
+  limit: number
+  returned: number
+  /** Pass as the next call's `offset`; null once this page reached the end. */
+  nextOffset: number | null
+  frames: Array<{ path: string; url: string }>
+}
+
+/**
+ * One page of a walkthrough's keyframes, presigned. get_walkthrough only ever
+ * carries a sample of frames (see mcp-format's cap); this is how an agent pages
+ * the full set — every frame, in the order they were recorded — without leaving
+ * MCP. Frame files sort chronologically by path (`NN-mmss.jpg`, zero-padded), so
+ * list order is timeline order. Only the requested window is presigned, so
+ * paging a long walkthrough doesn't sign frames it will never open. Null on the
+ * same three misses as getWalkthroughDetail (unknown / out of scope / never
+ * finalized).
+ */
+export async function getWalkthroughFrames(
+  auth: TokenAuth,
+  walkthroughId: string,
+  opts: { offset?: number; limit?: number } = {}
+): Promise<WalkthroughFramesPage | null> {
+  const walkthrough = await prisma.walkthrough.findUnique({
+    where: { id: walkthroughId },
+    include: { files: { where: { status: 'uploaded' }, orderBy: { path: 'asc' } } },
+  })
+  if (!walkthrough || !(await inScope(auth, walkthrough)) || !walkthrough.finalizedAt) return null
+  traceAccess(auth, walkthrough.id, 'pulled')
+
+  const space = spaceId({ teamId: walkthrough.teamId, userId: walkthrough.userId })
+  const frameFiles = walkthrough.files.filter((f) => f.path.includes('/frames/'))
+  const total = frameFiles.length
+
+  const offset = Math.min(Math.max(0, Math.floor(opts.offset ?? 0)), total)
+  const limit = Math.min(FRAMES_PAGE_MAX, Math.max(1, Math.floor(opts.limit ?? FRAMES_PAGE_DEFAULT)))
+  const frames = await Promise.all(
+    frameFiles.slice(offset, offset + limit).map(async (f) => ({
+      path: f.path,
+      url: await presignGet(walkthroughKey(space, walkthrough.id, f.path)),
+    }))
+  )
+  const end = offset + frames.length
+  return {
+    walkthroughId: walkthrough.id,
+    total,
+    offset,
+    limit,
+    returned: frames.length,
+    nextOffset: end < total ? end : null,
+    frames,
   }
 }
 
