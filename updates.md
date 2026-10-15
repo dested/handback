@@ -2,6 +2,12 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-10-15 — old vs new capture on three real uploads
+Asked: compare an old walkthrough's result to the new pipeline's. Re-ran Gym, Hometeam, Oct 3 (Personal, iPhone HEVC)
+through 6148dbb in headless Windows Chrome: no regressions; old Hometeam stopped at 1:15 of 4:51, new covers it.
+Page: W:\junk\handback\compare\index.html. Per plans/2026-10-15-video-to-prompt-v2-and-brief.md.
+Touched: plans/2026-10-15-video-to-prompt-v2-and-brief.md
+
 ## 2026-10-15 — web capture on @dested/video-to-prompt 1.1.4
 Asked: move Handback onto the library. /phone, /upload, /record now distill/build through it (format 2 reports,
 change-boxed sheets, WebCodecs); 10 copied modules deleted. Transcribe returns the engine's label; web client

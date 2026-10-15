@@ -84,6 +84,14 @@ fetches image bytes through the presigned URLs the wire body carries.
    would fail applyTranscript's `speaker >= 1`); re-transcribe left a stale engine label; the
    library promised outlines on live-kept frames (fixed in 1.1.4). Left as it was: the human
    MANIFEST lists report.md, which the human path drops (same as before).
+   Old vs new on real uploads: three Personal /phone and /upload walkthroughs (Gym, Hometeam,
+   Oct 3; HEVC from an iPhone) re-run in headless Windows Chrome with the old transcript replayed
+   per 8-minute chunk (the local Groq key is expired) and real Haiku cleanup, briefs rebuilt by
+   `briefFromRecordings` for both sides. No regressions. The old run never picked a frame past
+   1:15 of Hometeam's 4:51 (new covers it all); Gym 285 → 230 frames and sheets 25 → 9 MB; two
+   runs picked identical frames. Page and files: `W:\junk\handback\compare\index.html`.
+   Not migration issues: near-silent audio still reaches Whisper ("Thank you." ×9), and
+   `server/polish.ts` failed one run on a JSON parse of Haiku's reply.
 6. Extension: report and grids from the library. A release needs Sal's OK.
 
 Pushing main deploys through Drydock: that needs Sal's explicit OK.
