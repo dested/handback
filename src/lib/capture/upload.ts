@@ -1,5 +1,5 @@
+import { recDirName } from '@dested/video-to-prompt'
 import { assertAuthorized, authHeaders, explain, finalizePath, INGEST } from './api'
-import { recDirName } from './format'
 import type { Recording, Session } from './types'
 
 /**

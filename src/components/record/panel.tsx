@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { Button } from '~/components/ui/button'
-import { mmss, mmssFile } from '~/lib/capture/format'
+import { mmss, mmssFile } from '@dested/video-to-prompt'
 import type { LiveThumb, LiveUpdate } from '~/lib/capture/live'
 import { AudioMeters } from './hud'
 

@@ -1,7 +1,7 @@
 # Handback — CliffNotes
 
 > Living map of the project. Read this before any coding session.
-> Last updated: 2026-10-15 (agent brief v2 on @dested/video-to-prompt — plans/2026-10-15-video-to-prompt-v2-and-brief.md). Visual language → `ui.md` · why → `decisions.md` ·
+> Last updated: 2026-10-15 (web capture + agent brief v2 on @dested/video-to-prompt — plans/2026-10-15-video-to-prompt-v2-and-brief.md). Visual language → `ui.md` · why → `decisions.md` ·
 > log → `updates.md`.
 >
 > **2026-08-23 mega-wave** (plans/2026-08-23-fable5-mega-wave.md): sidebar app
@@ -422,23 +422,21 @@ src/
     pwa.ts              SW registration, deferred install prompt, share-stash pickup
                         (peekSharedMedia reads WITHOUT deleting; clearSharedMedia is the only
                         delete, called once the walkthrough is uploaded or discarded)
-    capture/            THE phone distill pipeline — a deliberate PORT of the extension's
-                        (see decisions.md 2026-08-02): frames (dedup+budget), grids, audio→WAV,
-                        transcribe/polish clients, report/MANIFEST/recording.json builders,
-                        two-phase upload (XHR PUTs — byte progress + 3-try retry), distill.ts
-                        orchestrator (`kind: 'human'` skips keyframes/sheets/report.md — the
-                        live-upload human contract), pending.ts (the crash-survivable run:
-                        IDB 'handback-phone'; PendingRun.kind, absent = 'agent').
-                        Public surface: types/probe/context/distill/pending. Mirror any extension
-                        pipeline change here. **Its generic half is extracted to
-                        github.com/dested/video-to-prompt (G:\code\video-to-prompt) and will
-                        eventually be consumed from there instead — until then any pipeline change
-                        mirrors THREE ways: here, extension, library (decisions.md 2026-08-06)**
+    capture/            Web capture on @dested/video-to-prompt (decisions.md 2026-10-15). distill.ts =
+                        the library's distill() (keyframes, sheets, report.md/MANIFEST/recording.json)
+                        with Handback's cloud transcriber + polish plugged in, then the upload;
+                        `distillForHandback` is the same run with nothing uploaded. `kind: 'human'`
+                        → `keyframes: false` and report.md dropped. Handback-only modules: api,
+                        transcribe (returns `{segments, label}` — the engine that answered; ranks
+                        speakers per chunk), polish, context, upload (two-phase, XHR PUTs — byte
+                        progress + 3-try retry), pending (crash-survivable run, IDB 'handback-phone').
+                        types.ts re-exports the library's recording shapes.
                         live.ts / live-store.ts / live-upload.ts are the WEB RECORDER (/record):
                         the extension's capture engine ported to a page (no content script, so no
                         events/pointer/click+nav frames), its IDB `handback-web-recorder`, and the
-                        take-set → file-set → upload tail. live.ts imports the dedup constants and
-                        `cellDiff` from frames.ts — one copy on this side of the repo
+                        take-set → library builders → upload tail. live-rule.ts is its 64×64
+                        keep/drop rule (the extension's, unchanged): frames with no change boxes
+                        and no `sampling`, which the library's report reads as "no outlines"
     capture-token.ts    useCaptureToken(kind) — the mint/re-mint-on-401 hb_ token helper shared by
                         /phone, /upload and /record (was copy-pasted in each). Stores `{token,id}`
                         in localStorage `handback.phone.token` (back-compat: an old bare `hb_`
@@ -703,14 +701,12 @@ reaches the container on a plain push.
   /phone therefore rides the OS screen recorders; any "record live in the PWA" idea is dead on
   arrival. **This is a statement about phones, not about the API**: a desktop tab has had screen
   capture for years, which is what `/record` is (`src/lib/capture/live.ts`, 2026-08-12). Don't read
-  this bullet as "the website never captures". `src/lib/capture/` is a deliberate duplicated port of the extension pipeline —
-  **change the pipeline anywhere, mirror it everywhere: capture/, the extension, AND the
-  extracted dested/video-to-prompt library** (decisions.md 2026-08-02 + 2026-08-06) —
-  with ONE legitimate divergence: candidate cadence. The extension samples live at 500 ms
-  (free); the phone seek-steps at a 1 s floor (each candidate costs a real decode on iOS), and
-  its MANIFEST says "1s candidates" accordingly. Phone keyframes are also **best-effort**: a
-  frame-extraction failure degrades the take to zero frames (video + transcript still ship),
-  never fails the run.
+  this bullet as "the website never captures". **/phone and /upload distill through
+  @dested/video-to-prompt** (2026-10-15): pipeline changes go in the library, released as a git
+  tag, then the dep bump here. The extension is still a separate port of the old pipeline
+  (its migration is next), so an extension-side pipeline change still needs thought about the
+  library. Phone keyframes are **best-effort**: a frame-extraction failure degrades the take to
+  zero frames (video + transcript still ship), never fails the run.
   The SW caches nothing and must stay that way (SSR staleness > offline); its share stash
   (IDB `handback-share`/`pending`/`current`) is a contract between `public/sw.js` and
   `src/lib/pwa.ts` — change both together. `externally_connectable` etc. are unaffected; the
@@ -721,10 +717,9 @@ reaches the container on a plain push.
   `frameBudget`, same chunk-to-IDB persistence. What a page cannot have, because it comes from
   scripts injected into the *recorded* origin: console/network `events` (so `errorCount` is always
   0 and polish gets no error context), `pointer` on frames and the crosshair drawn from it, and the
-  `click`/`nav` forced keyframes — leaving `start`/`change`/`beat`, exactly /phone's set. **A fourth
-  client now mirrors the pipeline**: any dedup/report/upload change lands in `src/lib/capture/`, the
-  extension, the video-to-prompt library, AND `live.ts` — though `live.ts` at least imports its
-  dedup constants and `cellDiff` from `frames.ts` rather than copying them, so keep that.
+  `click`/`nav` forced keyframes — leaving `start`/`change`/`beat`. Its frame rule (`live-rule.ts`)
+  is the extension's and moves to the library's Selector together with the extension; its report,
+  sheets and recording.json already come from the library.
   Its IDB is **`handback-web-recorder`**, deliberately not the extension's `handback-recorder`:
   same origin, and the extension's worker owns that schema.
 - **A clip that reached /phone must be un-losable short of explicit discard** (2026-08-02, after
@@ -1238,8 +1233,8 @@ reaches the container on a plain push.
   signed-in APP_PREFIXES path except /admin, which keeps its own shell; both share
   `ui/sidebar` with different `storageKey`s ('handback.appSidebar' / 'handback.adminSidebar').
 - **Intent is web + extension, not the CLI.** cli/push.ts sends no intent (null = untagged is
-  correct); the extension (1.9.0) and the three web intakes send it. The video-to-prompt
-  library mirror does NOT carry the field yet — flagged, not forgotten.
+  correct); the extension (1.9.0) and the three web intakes send it. It rides the declare body
+  (upload.ts), so the video-to-prompt library never needs it.
 - **The e2e landing spec tracks committed reality.** The marketing wave's in-flight hero
   rewrite breaks `landing page renders` until that session commits + re-baselines; the app
   flow asserts the h1 'Walkthroughs' (was 'Inbox' — stale since 2026-08-12).

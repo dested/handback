@@ -27,7 +27,7 @@ import {
 } from '~/components/viewer/timeline'
 import { useSegmentPlayer } from '~/components/viewer/use-segment-player'
 import { VideoStage } from '~/components/viewer/video-stage'
-import { mmss } from '~/lib/capture/format'
+import { mmss } from '@dested/video-to-prompt'
 import type { LiveTake } from '~/lib/capture/live-store'
 import {
   editSegments,

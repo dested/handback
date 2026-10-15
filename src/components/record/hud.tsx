@@ -1,5 +1,5 @@
 import { Button } from '~/components/ui/button'
-import { mmss } from '~/lib/capture/format'
+import { mmss } from '@dested/video-to-prompt'
 import type { LiveUpdate, SourceState } from '~/lib/capture/live'
 import { cn } from '~/lib/utils'
 

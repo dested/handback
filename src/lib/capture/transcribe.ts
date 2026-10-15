@@ -1,5 +1,5 @@
+import { encodeWav, SAMPLE_RATE } from '@dested/video-to-prompt'
 import { assertAuthorized, authHeaders, INGEST } from './api'
-import { SAMPLE_RATE } from './audio'
 import type { TranscriptSegment } from './types'
 
 /**
@@ -11,6 +11,10 @@ import type { TranscriptSegment } from './types'
  * minute, so a half-hour walkthrough would blow past any upload limit in one
  * piece. Each chunk's timings are offset back onto the recording's own clock,
  * which only the caller can do correctly.
+ *
+ * The answer carries the engine that wrote it (the server prefers Deepgram
+ * nova-3 and falls back to Groq's Whisper), so the report can name the one
+ * that actually answered rather than both.
  *
  * Null on any failure, including the 503 a server with no GROQ_API_KEY answers.
  * There is no on-device fallback on a phone, so null means the walkthrough ships
@@ -29,24 +33,33 @@ export interface CloudTranscribeOptions {
   signal?: AbortSignal
 }
 
-const responseShape = (value: unknown): TranscriptSegment[] | null => {
-  if (typeof value !== 'object' || value === null) return null
-  const segments = (value as { segments?: unknown }).segments
-  if (!Array.isArray(segments)) return null
+export interface CloudHeard {
+  segments: TranscriptSegment[]
+  /** The engine that answered, in words. Absent from a server that predates the field. */
+  label?: string
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+const readSegments = (value: unknown): TranscriptSegment[] | null => {
+  if (!isRecord(value) || !Array.isArray(value.segments)) return null
   const out: TranscriptSegment[] = []
-  for (const raw of segments) {
-    if (typeof raw !== 'object' || raw === null) return null
-    const { t, d, text, speaker } = raw as {
-      t?: unknown
-      d?: unknown
-      text?: unknown
-      speaker?: unknown
-    }
+  for (const raw of value.segments) {
+    if (!isRecord(raw)) return null
+    const { t, d, text, speaker } = raw
     if (typeof t !== 'number' || typeof text !== 'string') return null
     const base = typeof d === 'number' ? { t, d, text } : { t, text }
     out.push(typeof speaker === 'number' ? { ...base, speaker } : base)
   }
   return out
+}
+
+/** The server's word for its engine; it lands in the report, so keep it a short line. */
+const readLabel = (value: unknown): string | undefined => {
+  if (!isRecord(value) || typeof value.label !== 'string') return undefined
+  const label = value.label.trim().slice(0, 80)
+  return label || undefined
 }
 
 /**
@@ -77,12 +90,14 @@ function normalizeSpeakers(segments: TranscriptSegment[]): TranscriptSegment[] {
 export async function transcribeInCloud(
   audio: Float32Array,
   opts: CloudTranscribeOptions
-): Promise<TranscriptSegment[] | null> {
+): Promise<CloudHeard | null> {
   const token = opts.token.trim()
   if (!token) return null
 
   const chunks = Math.max(1, Math.ceil(audio.length / CHUNK_SAMPLES))
   const all: TranscriptSegment[] = []
+  // One engine per server in practice; a fallback mid-recording names both.
+  const labels = new Set<string>()
 
   for (let i = 0; i < chunks; i++) {
     const start = i * CHUNK_SAMPLES
@@ -110,50 +125,14 @@ export async function transcribeInCloud(
     } catch {
       return null
     }
-    const segments = responseShape(payload)
+    const segments = readSegments(payload)
     if (!segments) return null
+    const label = readLabel(payload)
+    if (label && segments.length) labels.add(label)
 
-    for (const seg of segments) all.push({ ...seg, t: seg.t + offsetMs })
+    for (const seg of normalizeSpeakers(segments)) all.push({ ...seg, t: seg.t + offsetMs })
     opts.onProgress?.((i + 1) / chunks)
   }
 
-  return all
-}
-
-/**
- * Float32 mono → a 16-bit PCM WAV blob. Hand-rolled because the platform has no
- * encoder and the format's 44-byte header is shorter than any dependency.
- */
-function encodeWav(samples: Float32Array): Blob {
-  const bytes = samples.length * 2
-  const buffer = new ArrayBuffer(44 + bytes)
-  const view = new DataView(buffer)
-
-  const ascii = (offset: number, text: string) => {
-    for (let i = 0; i < text.length; i++) view.setUint8(offset + i, text.charCodeAt(i))
-  }
-
-  ascii(0, 'RIFF')
-  view.setUint32(4, 36 + bytes, true)
-  ascii(8, 'WAVE')
-  ascii(12, 'fmt ')
-  view.setUint32(16, 16, true) // PCM header length
-  view.setUint16(20, 1, true) // format: uncompressed PCM
-  view.setUint16(22, 1, true) // mono
-  view.setUint32(24, SAMPLE_RATE, true)
-  view.setUint32(28, SAMPLE_RATE * 2, true) // byte rate
-  view.setUint16(32, 2, true) // block align
-  view.setUint16(34, 16, true) // bits per sample
-  ascii(36, 'data')
-  view.setUint32(40, bytes, true)
-
-  let offset = 44
-  for (let i = 0; i < samples.length; i++) {
-    // Clamp before scaling: decoded audio can overshoot ±1 and wrap into noise.
-    const clamped = Math.max(-1, Math.min(1, samples[i]))
-    view.setInt16(offset, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true)
-    offset += 2
-  }
-
-  return new Blob([buffer], { type: 'audio/wav' })
+  return labels.size ? { segments: all, label: [...labels].join(' and ') } : { segments: all }
 }

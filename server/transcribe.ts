@@ -63,6 +63,35 @@ const deepgramResponse = z.object({
     .optional(),
 })
 
+/** What one chunk came back as, and which engine wrote it, in words a report can print. */
+export interface Transcribed {
+  segments: Segment[]
+  label: string
+}
+
+const DEEPGRAM_LABEL = 'Deepgram nova-3 (hosted)'
+const GROQ_LABEL = 'Whisper large-v3-turbo (hosted on Groq)'
+
+/**
+ * Whisper sometimes says a line twice: the same words again as the next
+ * segment, starting within a few seconds of the first one ending. Drop the
+ * repeat at the source, so the viewer, transcript.txt and every brief see the
+ * line once. Same rule (and window) as the report builder's in
+ * @dested/video-to-prompt.
+ */
+const ECHO_MS = 5000
+
+export function dropEchoes(segments: Segment[]): Segment[] {
+  const out: Segment[] = []
+  let prev: { text: string; end: number } | undefined
+  for (const seg of segments) {
+    const echo = prev !== undefined && seg.text === prev.text && seg.t - prev.end <= ECHO_MS
+    prev = { text: seg.text, end: seg.t + (seg.d ?? 0) }
+    if (!echo) out.push(seg)
+  }
+  return out
+}
+
 export class TranscribeUnavailable extends Error {}
 export class TranscribeFailed extends Error {}
 
@@ -80,10 +109,12 @@ export async function transcribeChunk(
   // SharedArrayBuffer case that a bare Uint8Array leaves open.
   wav: Uint8Array<ArrayBuffer>,
   language?: string
-): Promise<Segment[]> {
+): Promise<Transcribed> {
   // Deepgram wins when configured — it diarizes; Groq is the fallback.
-  if (env.DEEPGRAM_API_KEY) return transcribeDeepgram(wav, language)
-  return transcribeGroq(wav, language)
+  if (env.DEEPGRAM_API_KEY) {
+    return { segments: await transcribeDeepgram(wav, language), label: DEEPGRAM_LABEL }
+  }
+  return { segments: dropEchoes(await transcribeGroq(wav, language)), label: GROQ_LABEL }
 }
 
 async function transcribeGroq(

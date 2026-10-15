@@ -1,17 +1,15 @@
-import { pad2, mmssFile } from './format'
+import { frameBudget, mmssFile, pad2 } from '@dested/video-to-prompt'
 import {
   BEAT_MS,
   cellDiff,
   DEDUP_THRESHOLD,
   DEDUP_WINDOW,
-  frameBudget,
   JPEG_QUALITY,
   MAX_FRAME_W,
-  PIX_TOL,
   SIG_SIZE,
-} from './frames'
+  toJpeg,
+} from './live-rule'
 import { blobs, putTake, type LiveTake } from './live-store'
-import { toJpeg } from './media'
 import type { RecordingFrame, RecordingMeta } from './types'
 
 /**
@@ -21,7 +19,7 @@ import type { RecordingFrame, RecordingMeta } from './types'
  *
  * What is identical, because it is all plain web platform: the picker call and
  * its constraints, the 64×64 keep/drop decision and every constant it reads
- * (imported from `frames.ts` rather than copied), the 15 s heartbeat, the
+ * (`live-rule.ts`), the 15 s heartbeat, the
  * length-scaled frame budget and its uniform thin, the Web Audio mix of app
  * audio with a raw mic, the mic-only shadow recorder that transcription hears
  * instead of that mix, and chunk-by-chunk persistence so a dead tab loses the

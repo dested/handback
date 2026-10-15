@@ -2,6 +2,14 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-10-15 — web capture on @dested/video-to-prompt 1.1.4
+Asked: move Handback onto the library. /phone, /upload, /record now distill/build through it (format 2 reports,
+change-boxed sheets, WebCodecs); 10 copied modules deleted. Transcribe returns the engine's label; web client
+ranks speakers per chunk (Deepgram's 0-based ids broke applyTranscript); Groq echoes dropped server-side.
+Verified in headless Chromium, nothing uploaded. Per plans/2026-10-15-video-to-prompt-v2-and-brief.md.
+Touched: src/lib/capture/*, server/transcribe.ts, server/ingest.ts, server/router.ts, use-retranscribe.ts,
+use-voice-answer.ts, phone/upload/record + 7 components (imports), package.json, bun.lock
+
 ## 2026-10-15 — brief eval: old vs new, and what it fixed
 Asked: measure the new agent brief (small paid eval, Opus 5.5, fixture). New beat old on the toast (3/3 vs 0/3),
 validation timing and the payment sequence, $0.23 vs $0.28 a run, 4 vs 10 tool calls; $2.85 all in. Fixes it drove:

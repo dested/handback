@@ -36,7 +36,7 @@ import { TokenLimitNotice, isTokenLimitError } from '~/components/token-manager'
 import { useCaptureToken } from '~/lib/capture-token'
 import { fetchContext, type ServerContext } from '~/lib/capture/context'
 import { distillAndUpload } from '~/lib/capture/distill'
-import { mmss } from '~/lib/capture/format'
+import { mmss } from '@dested/video-to-prompt'
 import {
   canRecordScreen,
   isPickerRefusal,

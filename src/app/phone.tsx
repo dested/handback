@@ -32,8 +32,7 @@ import { TokenLimitNotice, isTokenLimitError } from '~/components/token-manager'
 import { useCaptureToken } from '~/lib/capture-token'
 import { fetchContext, type ServerContext } from '~/lib/capture/context'
 import { distillAndUpload } from '~/lib/capture/distill'
-import { mmss } from '~/lib/capture/format'
-import { probeClip } from '~/lib/capture/probe'
+import { mmss, probeClip } from '@dested/video-to-prompt'
 import {
   clearPendingRun,
   loadPendingRun,

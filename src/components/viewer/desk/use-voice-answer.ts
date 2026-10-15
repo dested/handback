@@ -9,7 +9,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useCaptureToken } from '~/lib/capture-token'
-import { decodeMono } from '~/lib/capture/audio'
+import { decodeMono } from '@dested/video-to-prompt'
 import { transcribeInCloud } from '~/lib/capture/transcribe'
 import { mmss } from '../format'
 
@@ -48,7 +48,7 @@ export function useVoiceAnswer(onResult: (text: string) => void) {
         return
       }
       const heard = await withTokenRef.current((token) => transcribeInCloud(audio, { token }))
-      const text = (heard ?? [])
+      const text = (heard?.segments ?? [])
         .map((segment) => segment.text.trim())
         .filter(Boolean)
         .join(' ')

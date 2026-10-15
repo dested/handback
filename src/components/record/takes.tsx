@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { mmss } from '~/lib/capture/format'
+import { mmss } from '@dested/video-to-prompt'
 import type { LiveTake } from '~/lib/capture/live-store'
 import { cn } from '~/lib/utils'
 

@@ -983,10 +983,11 @@ const pointOutcomesSchema = z.array(
 )
 
 // The recorder's frozen spoken-window contract, duplicated from
-// src/lib/capture/report.ts — these four are the recorder's own constants, and
-// walkthroughs.applyTranscript rebuilds each take's recording.json transcript
-// with exactly this math so a re-transcribed take reads identically to a fresh
-// upload. Keep them in step with report.ts if that contract ever moves.
+// @dested/video-to-prompt's report.ts (which does not export them) — these four
+// are the recorders' own constants, and walkthroughs.applyTranscript rebuilds
+// each take's recording.json transcript with exactly this math so a
+// re-transcribed take reads identically to a fresh upload. Keep them in step
+// with the library if that contract ever moves.
 const RETRANSCRIBE_SPEECH_LEAD_MS = 2000
 const RETRANSCRIBE_SPEECH_TAIL_MS = 2500
 const RETRANSCRIBE_WORD_MS = 380
@@ -1012,6 +1013,10 @@ const applyTranscriptTakeSchema = z
   .object({
     takeId: z.string(),
     segments: z.array(applyTranscriptSegmentSchema).max(2000),
+    /** The engine that answered, in the transcribe endpoint's words. Absent from an older client. */
+    label: z.string().trim().min(1).max(120).optional(),
+    /** The cleanup pass rewrote the wording. Absent from an older client. */
+    polished: z.boolean().optional(),
   })
   .strict()
 
@@ -1956,6 +1961,11 @@ const walkthroughsRouter = router({
         parsed.recording.transcript = entries
         parsed.recording.transcriber = 'cloud'
         parsed.recording.transcriptReviewed = false
+        // The old take's engine and cleanup no longer describe these words.
+        if (take.label) parsed.recording.transcriberLabel = take.label
+        else delete parsed.recording.transcriberLabel
+        if (take.polished) parsed.recording.polished = true
+        else if (take.polished === false) delete parsed.recording.polished
         await putObjectText(key, JSON.stringify(parsed, null, 2), 'application/json')
       }
 

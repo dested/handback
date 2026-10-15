@@ -75,8 +75,15 @@ fetches image bytes through the presigned URLs the wire body carries.
    endpoints for the CLI; admin debug keeps rendering the exact brief.
 4. ~~Eval: Opus 5.5 on the fixture, old brief vs new, graded on the four planted complaints, frame
    citations and nothing invented.~~ Done; results below.
-5. Web capture (`src/lib/capture/`: /phone, /upload, /record) onto the library; keep the
-   Handback-only pieces (api, context, pending, upload, transcribe, polish, live-*).
+5. ~~Web capture (`src/lib/capture/`: /phone, /upload, /record) onto the library; keep the
+   Handback-only pieces (api, context, pending, upload, transcribe, polish, live-*).~~ Done on
+   library 1.1.4 (local, not pushed). Verified in headless Chromium against a client-only Vite
+   server: `distillForHandback` (agent + human) and `sendLiveWalkthrough` with declare, PUTs and
+   finalize answered by the test, nothing uploaded. Output in `W:\junk\handback\migration-check\`.
+   Found on the way: the web transcribe client never ranked speakers (Deepgram's 0-based ids
+   would fail applyTranscript's `speaker >= 1`); re-transcribe left a stale engine label; the
+   library promised outlines on live-kept frames (fixed in 1.1.4). Left as it was: the human
+   MANIFEST lists report.md, which the human path drops (same as before).
 6. Extension: report and grids from the library. A release needs Sal's OK.
 
 Pushing main deploys through Drydock: that needs Sal's explicit OK.

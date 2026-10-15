@@ -7,7 +7,7 @@
 // The envelope is computed once per take (a decode is the expensive part) and
 // the cuts are re-derived synchronously every time the tighten slider moves.
 
-import { decodeMono, SAMPLE_RATE } from '../capture/audio'
+import { decodeMono, SAMPLE_RATE } from '@dested/video-to-prompt'
 import type { Cut, TightenOptions } from './edl'
 
 /** Coarse loudness over time. 50 ms windows — syllable-scale, not sample-scale. */

@@ -1,19 +1,23 @@
-import type { EditSegment, EditState } from '../edit/edl'
-import { editedTranscriptLines } from '../edit/transcript'
-import { decodeMono } from './audio'
-import { containerFor } from './container'
-import { recDirName } from './format'
-import { makeGrids, type GridFrame } from './grids'
-import { blobs, putTake, type LiveTake } from './live-store'
-import { polishTranscript } from './polish'
 import {
   buildManifestTxt,
   buildRecordingJson,
   buildReport,
   buildTranscriptTxt,
+  containerFor,
+  decodeMono,
+  makeGrids,
+  mmss,
+  pad2,
+  recDirName,
   sheetFile,
-} from './report'
-import { slugify } from './slug'
+  slugify,
+  type GridFrame,
+} from '@dested/video-to-prompt'
+import type { EditSegment, EditState } from '../edit/edl'
+import { editedTranscriptLines } from '../edit/transcript'
+import { CLOUD_ID, CLOUD_LABEL, megabytes, REPORT_OPTIONS } from './distill'
+import { blobs, putTake, type LiveTake } from './live-store'
+import { polishTranscript } from './polish'
 import { transcribeInCloud } from './transcribe'
 import { contentTypeFor, uploadWalkthrough, type CaptureFile } from './upload'
 import type {
@@ -30,12 +34,11 @@ import type {
  * uploaded walkthrough out.
  *
  * `distill.ts` is the same journey starting one step earlier — it has to pull
- * keyframes out of a finished clip by seek-stepping it. Here the recorder
- * already kept them as it went, exactly like the extension's, so this picks up
- * at the audio and shares everything downstream: the same transcriber and
- * cleanup pass, the same 3×3 contact sheets, the same `report.md`,
- * `MANIFEST.txt` and `rec-NN/recording.json` builders, the same two-phase
- * upload. That is the point — the viewer, `cli/push.ts` and the MCP brief all
+ * keyframes out of a finished clip. Here the recorder already kept them as it
+ * went, exactly like the extension's, so this picks up at the audio and shares
+ * everything downstream: the same transcriber and cleanup pass, and the
+ * library's 3×3 contact sheets and `report.md`, `MANIFEST.txt` and
+ * `rec-NN/recording.json` builders, then the same two-phase upload. That is the point — the viewer, `cli/push.ts` and the MCP brief all
  * read one file set, and it must not matter which door a walkthrough came
  * through.
  */
@@ -61,10 +64,8 @@ export interface LiveUploadOptions {
   signal?: AbortSignal
 }
 
-/** One decimal, no unit — the caller writes the "MB" once for the pair. */
-function megabytes(bytes: number): string {
-  return (bytes / (1024 * 1024)).toFixed(1)
-}
+/** A take with no measured duration still occupies a second of the clock, as in the library's timeline. */
+const MIN_SPAN_MS = 1000
 
 /**
  * Give one take its transcript, if it doesn't already have one: decode the
@@ -88,6 +89,7 @@ export async function ensureTranscript(
   if (!audioSource) return
 
   let transcript: TranscriptSegment[] = []
+  let label: string | undefined
   let takePolished = false
 
   opts.onStage?.('audio', -1)
@@ -101,7 +103,10 @@ export async function ensureTranscript(
     })
     // Megabytes per minute of take; whatever runs next wants the room.
     audio = null
-    if (heard?.length) transcript = heard
+    if (heard?.segments.length) {
+      transcript = heard.segments
+      label = heard.label
+    }
   }
   if (opts.signal?.aborted) throw new Error('cancelled')
 
@@ -117,7 +122,8 @@ export async function ensureTranscript(
 
   take.meta.transcript = transcript
   if (takePolished) take.meta.polished = true
-  take.meta.transcriber = 'groq'
+  take.meta.transcriber = CLOUD_ID
+  take.meta.transcriberLabel = label ?? CLOUD_LABEL
   await putTake(take).catch(() => {})
 }
 
@@ -159,6 +165,8 @@ export async function sendLiveWalkthrough(
   const shipped: LiveTake[] = []
   let transcribed = false
   let polished = false
+  /** Where this take starts on the walkthrough's one clock: the sheets caption frames by it. */
+  let axisStart = 0
 
   for (const [i, take] of ordered.entries()) {
     stop()
@@ -192,7 +200,7 @@ export async function sendLiveWalkthrough(
       if (!blob) continue
       files.push({ path: `${dir}/${frame.file}`, blob, contentType: contentTypeFor(frame.file) })
       kept.push(frame)
-      gridFrames.push({ blob, label: frame.file.split('/').pop() ?? frame.file })
+      gridFrames.push({ blob, label: `${pad2(frame.index)} · ${mmss(axisStart + frame.t)}` })
     }
     if (opts.kind !== 'human') report('frames', i, 1, label)
     stop()
@@ -217,7 +225,6 @@ export async function sendLiveWalkthrough(
         ...take.meta,
         frames: kept,
         transcript,
-        ...(transcript.length ? { transcriber: 'groq' as const } : {}),
         ...(takePolished ? { polished: true } : {}),
         videoFile: container.videoFile,
       },
@@ -235,6 +242,7 @@ export async function sendLiveWalkthrough(
         contentType: container.contentType,
       })
     }
+    axisStart += Math.max(take.meta.durationMs, MIN_SPAN_MS)
   }
 
   stop()
@@ -243,9 +251,9 @@ export async function sendLiveWalkthrough(
   // brief is authored for an agent, and this walkthrough never reaches one.
   if (opts.kind !== 'human') {
     opts.onProgress({ stage: 'build', pct: -1 })
-    files.push(text('report.md', buildReport(session, shipped)))
+    files.push(text('report.md', buildReport(session, shipped, REPORT_OPTIONS)))
   }
-  files.push(text('MANIFEST.txt', buildManifestTxt(session, shipped)))
+  files.push(text('MANIFEST.txt', buildManifestTxt(session, shipped, REPORT_OPTIONS)))
 
   stop()
   const result = await uploadWalkthrough(session, shipped, files, {

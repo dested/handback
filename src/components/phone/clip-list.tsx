@@ -8,8 +8,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Mic, Plus, X } from 'lucide-react'
 import { Button } from '~/components/ui/button'
-import { mmss } from '~/lib/capture/format'
-import type { ClipProbe } from '~/lib/capture/probe'
+import { mmss, type ClipProbe } from '@dested/video-to-prompt'
 
 /** One picked file, from the moment it is picked — `probing` until we know what it is. */
 export type Clip = {

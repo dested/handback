@@ -2,6 +2,17 @@
 
 > ADR-lite: what was decided, why, what was rejected. Append-only.
 
+## 2026-10-15 — Web capture runs on @dested/video-to-prompt; the copy is gone
+**Why:** /phone, /upload and /record each carried a port of the pipeline (frames, sheets, audio,
+report, format) that had to be mirrored by hand into the extension and the library, and had fallen
+behind both: format 1 reports, filename-captioned sheets, 1 s seek-stepping. distill.ts is now the
+library's `distill()` with Handback's cloud transcriber and polish plugged in; live-upload builds
+with the library's report, sheets and recording.json. Ten files deleted. The cloud transcribe
+endpoint now says which engine answered (`label`), so a report names Deepgram or Whisper, not both.
+**Rejected:** keeping thin re-export shims in capture/ (callers import the library directly);
+moving /record's frame rule to the library's Selector now (the extension shares that rule; they
+move together). Supersedes the mirror rule in 2026-08-06 for the web half.
+
 ## 2026-10-15 — Refine's synth pass sees the Start here frames
 **Why:** measured on the eval fixture (`scripts/brief-eval/`). Reading only text, Sonnet turned the
 spoken "it should still be twelve forty" into "$12.40" in 4 of 4 samples (the screen says $1,240.00),

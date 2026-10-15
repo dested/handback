@@ -17,7 +17,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Editor } from '~/components/edit/editor'
 import { Button } from '~/components/ui/button'
 import { SectionHead } from '~/components/viewer/section-head'
-import { mmss } from '~/lib/capture/format'
+import { mmss } from '@dested/video-to-prompt'
 import type { LiveTake } from '~/lib/capture/live-store'
 import type { TranscriptSegment } from '~/lib/capture/types'
 import {

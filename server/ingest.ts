@@ -749,8 +749,9 @@ ingestRouter.post(
       typeof langParam === 'string' && /^[a-z]{2}$/.test(langParam) ? langParam : undefined
 
     try {
-      const segments = await transcribeChunk(new Uint8Array(audio), language)
-      res.json({ segments })
+      // `label` names the engine that answered; clients that predate it ignore it.
+      const { segments, label } = await transcribeChunk(new Uint8Array(audio), language)
+      res.json({ segments, label })
     } catch (err) {
       if (err instanceof TranscribeUnavailable) {
         fail(res, 503, err.message)

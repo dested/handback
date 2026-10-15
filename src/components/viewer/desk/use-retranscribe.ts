@@ -12,7 +12,7 @@
 import { useCallback, useRef, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useCaptureToken } from '~/lib/capture-token'
-import { decodeMono } from '~/lib/capture/audio'
+import { decodeMono } from '@dested/video-to-prompt'
 import { polishTranscript } from '~/lib/capture/polish'
 import { transcribeInCloud } from '~/lib/capture/transcribe'
 import type { TranscriptSegment } from '~/lib/capture/types'
@@ -29,6 +29,9 @@ export type RetranscribeState =
 type ApplyTake = {
   takeId: string
   segments: Array<{ t: number; d?: number; text: string; speaker?: number }>
+  /** The engine that answered, in words; the server writes it as the take's transcriberLabel. */
+  label?: string
+  polished: boolean
 }
 
 /**
@@ -114,14 +117,23 @@ export function useRetranscribe({
 
             // Polish is best-effort: a failed cleanup keeps the raw words rather
             // than losing the take's transcript.
-            let segments = heard
+            let segments = heard.segments
+            let polished = false
             if (segments.length > 0) {
               setState({ stage: 'polish', takeIndex, takeCount })
               const cleaned = await polishTranscript(segments, { token, signal: controller.signal })
-              if (cleaned) segments = cleaned
+              if (cleaned) {
+                segments = cleaned
+                polished = true
+              }
             }
 
-            out.push({ takeId: take.id, segments: cleanSegments(segments) })
+            out.push({
+              takeId: take.id,
+              segments: cleanSegments(segments),
+              ...(heard.label ? { label: heard.label } : {}),
+              polished,
+            })
           }
           return out
         })
