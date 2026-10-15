@@ -32,12 +32,14 @@ import {
   presignGet,
   presignPut,
 } from './storage'
-import { FRAMES_PAGE_DEFAULT, FRAMES_PAGE_MAX, recStamp } from './mcp-format'
+import { FRAMES_PAGE_DEFAULT, FRAMES_PAGE_MAX } from './mcp-format'
 import {
   FULL_EDGE,
   INLINE_EDGE,
   briefFromRecordings,
+  evidenceImages,
   imageForAgent,
+  imageLabel,
   loadRecordings,
   type BriefCuration,
   type PointEvidence,
@@ -591,24 +593,12 @@ export async function getWalkthroughImages(
       )
 
   // Why each evidence frame is in the set, for its label.
-  const why = new Map<string, string[]>()
-  const note = (path: string, tag: string) => why.set(path, [...(why.get(path) ?? []), tag])
-  for (const p of points) {
-    const frame = rebuilt?.evidence[p.id]?.frame
-    if (frame) note(frame.path, p.id.toUpperCase())
-  }
-  for (const f of rebuilt?.startHere ?? []) note(f.path, 'start here')
-  const what = new Map<string, string>()
-  for (const p of points) {
-    const frame = rebuilt?.evidence[p.id]?.frame
-    if (frame) what.set(frame.path, frame.what)
-  }
-  for (const f of rebuilt?.startHere ?? []) what.set(f.path, f.what)
+  const evidence = new Map(evidenceImages(rebuilt, points).map((e) => [e.path, e]))
 
   const images = new Map(
     walkthrough.files.filter((f) => IMAGE_TYPES.has(f.contentType)).map((f) => [f.path, f])
   )
-  const wanted = paths && paths.length > 0 ? [...new Set(paths)] : [...why.keys()]
+  const wanted = paths && paths.length > 0 ? [...new Set(paths)] : [...evidence.keys()]
   const skipped = wanted.filter((p) => !images.has(p))
   const servable = wanted.filter((p) => images.has(p))
   const chosen = servable.slice(0, IMAGES_PER_CALL)
@@ -617,14 +607,7 @@ export async function getWalkthroughImages(
     chosen.map(async (path): Promise<WalkthroughImage> => {
       const bytes = await getObjectBytes(walkthroughKey(space, walkthrough.id, path))
       const { data, mimeType } = await imageForAgent(bytes, INLINE_EDGE)
-      const at = rebuilt?.frameAt[path]
-      const label = [
-        path,
-        ...(at === undefined ? [] : [recStamp(at)]),
-        ...(why.get(path) ?? []),
-        ...(what.has(path) ? [what.get(path) ?? ''] : []),
-      ].join(' · ')
-      return { path, label, mimeType, data }
+      return { path, label: imageLabel(path, rebuilt, evidence.get(path)), mimeType, data }
     })
   )
   return {

@@ -23,7 +23,14 @@ import Anthropic from '@anthropic-ai/sdk'
 import sharp from 'sharp'
 import { z } from 'zod'
 import { spaceId } from './access'
-import { briefFromRecordings, loadRecordings } from './brief'
+import {
+  INLINE_EDGE,
+  briefFromRecordings,
+  imageForAgent,
+  loadRecordings,
+  type RecordingBrief,
+  type StartHereFrame,
+} from './brief'
 import { env } from './env'
 import { log } from './logger'
 import { prisma } from './prisma'
@@ -32,10 +39,10 @@ import { getObjectBytes, getObjectText, walkthroughKey } from './storage'
 import { checkAndReservePolish } from './usage'
 
 const VISION_MODEL = 'claude-haiku-4-5'
-const SYNTH_MODEL = 'claude-sonnet-5'
+export const SYNTH_MODEL = 'claude-sonnet-5'
 const VISION_TIMEOUT_MS = 60_000
 const SYNTH_TIMEOUT_MS = 120_000
-const SYNTH_MAX_TOKENS = 16_000
+export const SYNTH_MAX_TOKENS = 16_000
 
 /** report.md for a long walkthrough is big but bounded; cap what we send. */
 const MAX_REPORT_CHARS = 80_000
@@ -380,8 +387,9 @@ async function curateFrames(
 }
 
 // --- synthesis ------------------------------------------------------------
+// Exported so scripts/brief-eval drives the production prompt.
 
-const SYNTH_SYSTEM = `You are Handback's refine pass. You read one narrated screen walkthrough — its report, transcript, keyframe captions and capture-health notes — and write the documents a coding agent and its human will actually read.
+export const SYNTH_SYSTEM = `You are Handback's refine pass. You read one narrated screen walkthrough — the frames its report says to start with (as images, each under its path and time), its report, transcript, keyframe captions and capture-health notes — and write the documents a coding agent and its human will actually read.
 Transcript lines may be prefixed S1:/S2: — those mark distinct people speaking; when the conversation reveals who a speaker is (an introduction, a name used in address), use the real name in the digest and key points, otherwise say Speaker 1 / Speaker 2.
 Rules:
 - digest is what the human sees first: 2–4 plain sentences — what this recording is, what the narrator wants, how urgent it reads. Written like a person, never a machine.
@@ -392,7 +400,55 @@ Rules:
 - title: a specific, ≤80-char name for the walkthrough in the narrator's own nouns.
 - health_extra: only genuine comprehension problems you noticed (audio that stops making sense, narration referring to something never visible), severity info or warn, at as m:ss or empty string.`
 
-const synthWireSchema = z.object({
+/**
+ * Start-here frames the synth pass sees as images. Without them it reads
+ * figures off the transcript: on the eval fixture, "it should still be twelve
+ * forty" became "$12.40" in 4 of 4 samples; with them, "$1,240.00 →
+ * $1,245.00" read off the screen in 4 of 4.
+ */
+export const SYNTH_FRAMES = 6
+
+export type SynthFrame = { label: string; data: string }
+
+/** The synth pass's user turn: the evidence frames, each under its label, then the text body. */
+export function synthContent(body: string, frames: SynthFrame[]): Anthropic.ContentBlockParam[] {
+  const content: Anthropic.ContentBlockParam[] = []
+  for (const f of frames) {
+    content.push({ type: 'text', text: f.label })
+    content.push({
+      type: 'image',
+      source: { type: 'base64', media_type: 'image/jpeg', data: f.data },
+    })
+  }
+  content.push({ type: 'text', text: body })
+  return content
+}
+
+/** What the synth pass reads above a frame: "rec-01/frames/04-0090.jpg · 0:09 · changed top-right (small)". */
+export const synthFrameLabel = (f: StartHereFrame) => `${f.path} · ${mmss(f.atMs)} · ${f.what}`
+
+/** The report's Start here frames, fetched and downscaled. A frame that won't load is left out. */
+async function loadSynthFrames(
+  space: string,
+  walkthroughId: string,
+  startHere: StartHereFrame[]
+): Promise<SynthFrame[]> {
+  const frames: SynthFrame[] = []
+  for (const f of startHere.slice(0, SYNTH_FRAMES)) {
+    try {
+      const bytes = await getObjectBytes(walkthroughKey(space, walkthroughId, f.path))
+      const { data } = await imageForAgent(bytes, INLINE_EDGE)
+      frames.push({ label: synthFrameLabel(f), data })
+    } catch (err) {
+      log.warn(
+        `[refine] start-here frame ${f.path} unreadable for ${walkthroughId}: ${String(err)}`
+      )
+    }
+  }
+  return frames
+}
+
+export const synthWireSchema = z.object({
   title: z.string().trim().min(1).max(200),
   digest: z.string().trim().min(1),
   key_points: z
@@ -416,7 +472,7 @@ const synthWireSchema = z.object({
   ),
 })
 
-const SYNTH_OUTPUT_SCHEMA = {
+export const SYNTH_OUTPUT_SCHEMA = {
   type: 'object',
   additionalProperties: false,
   required: ['title', 'digest', 'key_points', 'summary_md', 'brief_md', 'health_extra'],
@@ -533,20 +589,20 @@ export async function runRefine(
       videoPath: t.videoPath,
     }))
     const parsedTakes = await loadRecordings(space, walkthrough.id, briefTakes)
-    let rebuiltMd: string | null = null
+    let rebuilt: RecordingBrief | null = null
     if (parsedTakes) {
       try {
-        rebuiltMd = briefFromRecordings(
+        rebuilt = briefFromRecordings(
           { ...walkthrough, takes: briefTakes, curation: null, points: null },
           parsedTakes
-        ).recordingMd
+        )
       } catch (err) {
         log.warn(`[refine] report rebuild failed for ${walkthrough.id}: ${String(err)}`)
       }
     }
     const reportMd =
       (
-        rebuiltMd ??
+        rebuilt?.recordingMd ??
         (await getObjectText(walkthroughKey(space, walkthrough.id, 'report.md')).catch(() => null))
       )?.slice(0, MAX_REPORT_CHARS) ?? null
 
@@ -731,13 +787,16 @@ export async function runRefine(
       .join('\n\n')
 
     await setStage('writing')
+    const synthFrames = rebuilt
+      ? await loadSynthFrames(space, walkthrough.id, rebuilt.startHere)
+      : []
     const message = await client.messages.create(
       {
         model: SYNTH_MODEL,
         max_tokens: SYNTH_MAX_TOKENS,
         system: SYNTH_SYSTEM,
         output_config: { format: { type: 'json_schema', schema: SYNTH_OUTPUT_SCHEMA } },
-        messages: [{ role: 'user', content: body }],
+        messages: [{ role: 'user', content: synthContent(body, synthFrames) }],
       },
       { timeout: SYNTH_TIMEOUT_MS }
     )

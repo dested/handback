@@ -169,7 +169,9 @@ server/
                         curation (frames downscaled 800px JPEG, dHash near-dup dedup with
                         click/nav/start immune, narration prompt-cached; batches of 12, ≤84,
                         ≤20 keepers) →
-                        Sonnet 5 synthesis (Opus→Sonnet 2026-08-24, decisions.md): digestMd
+                        Sonnet 5 synthesis (Opus→Sonnet 2026-08-24, decisions.md), which also
+                        sees the rebuilt report's Start here frames as images (SYNTH_FRAMES ≤6,
+                        1600 px; 2026-10-15, decisions.md): digestMd
                         (2–4 human sentences) + pointsJson KeyPoint[]
                         (kpN ids, severity, atMs — THE structured spine) + summaryMd ledger +
                         refinedBriefMd (sections headed per KP). Titles: Session-class defaults
@@ -502,6 +504,10 @@ extension/              Handback Recorder — the Chrome MV3 extension (own npm 
                         mirrors the live readout and the transcription queue), Parts list (the review screen — one card per
                         recording, see the gotcha), Outbox.tsx (the strip), grids contact sheets
   scripts/              make-icons, copy-ort, prune-dist, preview.mjs + preview/ (layout harness)
+scripts/brief-eval/     run.ts: old vs new agent brief on a fixture walkthrough (Refine via Sonnet,
+                        then Opus 5.5 with each version's tools; costs money, ~$0.25/agent run).
+                        old-format.ts / old-refine.ts = snapshots as of 2333867. Own tsconfig:
+                        `bunx tsgo --noEmit -p scripts/brief-eval/tsconfig.json`
 ```
 
 ## Routes / URLs

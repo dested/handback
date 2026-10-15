@@ -23,6 +23,7 @@ import {
 import sharp from 'sharp'
 import { env } from './env'
 import { log } from './logger'
+import { recStamp } from './mcp-format'
 import { getObjectText, walkthroughKey } from './storage'
 
 /** What Handback's recorders write as `transcriber`, in words an agent can weigh. */
@@ -78,22 +79,29 @@ export async function loadRecordings(
         const text = await getObjectText(
           walkthroughKey(space, walkthroughId, `${take.dir}/recording.json`)
         )
-        const read = readRecordingJson(text)
-        if (!read) throw new Error(`${take.dir}/recording.json is not a recording`)
-        const meta = read.recording.meta
-        const label = meta.transcriber ? TRANSCRIBER_LABELS[meta.transcriber] : undefined
-        return {
-          ...read.recording,
-          // The row is the authority on which folder this take is.
-          index: take.index,
-          meta: label && !meta.transcriberLabel ? { ...meta, transcriberLabel: label } : meta,
-        }
+        const recording = recordingFromJson(text, take.index)
+        if (!recording) throw new Error(`${take.dir}/recording.json is not a recording`)
+        return recording
       })
     )
     return recordings
   } catch (err) {
     log.warn(`[brief] recordings unreadable for walkthrough ${walkthroughId}: ${String(err)}`)
     return null
+  }
+}
+
+/** One take's recording.json as Handback reads it: its transcriber named in words. Null when it isn't a recording. */
+export function recordingFromJson(text: string, index: number): Recording | null {
+  const read = readRecordingJson(text)
+  if (!read) return null
+  const meta = read.recording.meta
+  const label = meta.transcriber ? TRANSCRIBER_LABELS[meta.transcriber] : undefined
+  return {
+    ...read.recording,
+    // The row is the authority on which folder this take is.
+    index,
+    meta: label && !meta.transcriberLabel ? { ...meta, transcriberLabel: label } : meta,
   }
 }
 
@@ -188,6 +196,50 @@ export function briefFromRecordings(input: BriefInput, recordings: Recording[]):
   }
 
   return { recordingMd, startHere, evidence, frameAt }
+}
+
+/** One frame of `get_images`' default set: why it's in, and what changed in it. */
+export type EvidenceImage = { path: string; tags: string[]; what: string }
+
+/**
+ * The evidence set `get_images` serves when asked for no paths: each key
+ * point's frame in point order, then the report's Start here. One entry per
+ * path, carrying every reason it's in the set.
+ */
+export function evidenceImages(
+  brief: RecordingBrief | null,
+  points: Array<{ id: string }>
+): EvidenceImage[] {
+  const byPath = new Map<string, EvidenceImage>()
+  const add = (path: string, tag: string, what: string) => {
+    const entry = byPath.get(path)
+    if (entry) {
+      entry.tags.push(tag)
+      entry.what = what
+    } else {
+      byPath.set(path, { path, tags: [tag], what })
+    }
+  }
+  for (const p of points) {
+    const frame = brief?.evidence[p.id]?.frame
+    if (frame) add(frame.path, p.id.toUpperCase(), frame.what)
+  }
+  for (const f of brief?.startHere ?? []) add(f.path, 'start here', f.what)
+  return [...byPath.values()]
+}
+
+/** What an agent reads above an image: "rec-01/frames/04-0090.jpg · 0:09 · KP2 · changed top-right (small)". */
+export function imageLabel(
+  path: string,
+  brief: RecordingBrief | null,
+  entry: EvidenceImage | undefined
+): string {
+  const at = brief?.frameAt[path]
+  return [
+    path,
+    ...(at === undefined ? [] : [recStamp(at)]),
+    ...(entry ? [...entry.tags, entry.what] : []),
+  ].join(' · ')
 }
 
 // ── images for the agent ─────────────────────────────────────────────────────

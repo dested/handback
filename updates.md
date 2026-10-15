@@ -2,6 +2,13 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-10-15 — brief eval: old vs new, and what it fixed
+Asked: measure the new agent brief (small paid eval, Opus 5.5, fixture). New beat old on the toast (3/3 vs 0/3),
+validation timing and the payment sequence, $0.23 vs $0.28 a run, 4 vs 10 tool calls; $2.85 all in. Fixes it drove:
+library 1.1.2 (line → frame pointer, change notes explained), Refine sees Start here frames ($12.40 4/4 → 0/4).
+Per plans/2026-10-15-video-to-prompt-v2-and-brief.md. Touched: scripts/brief-eval/*, server/refine.ts,
+server/brief.ts, server/walkthroughs-api.ts, package.json, bun.lock
+
 ## 2026-10-15 — agent brief v2 on @dested/video-to-prompt
 Asked: make what Opus reads from Handback incredible. Brief rebuilt per pull from recording.json (library
 1.1.1 via git tag): evidence-first key points, thread/comments before Refine's working brief, verbatim

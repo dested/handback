@@ -2,6 +2,17 @@
 
 > ADR-lite: what was decided, why, what was rejected. Append-only.
 
+## 2026-10-15 — Refine's synth pass sees the Start here frames
+**Why:** measured on the eval fixture (`scripts/brief-eval/`). Reading only text, Sonnet turned the
+spoken "it should still be twelve forty" into "$12.40" in 4 of 4 samples (the screen says $1,240.00),
+invented a "confirm the dialog" step the narrator cancelled in 3 of 4, and placed the total by a
+frame's change note. With the rebuilt report's Start here frames as images (≤6, 1600 px): $12.40 in
+0 of 4, every sample quoting "$1,240.00 → $1,245.00" and the banner's exact text, the invented step
+1 of 4. About $0.02 more per refine.
+**Rejected:** prompt rules alone (spoken numbers, change notes, no invented steps): 3 of 4 and 2 of 4,
+indistinguishable from none, so they were dropped. Relying on Haiku curation captions: generic,
+and they don't carry figures.
+
 ## 2026-10-15 — The agent brief: evidence first, the recording rebuilt, images through a tool
 **Why:** after Refine the agent never saw the verbatim narration (`refinedBriefMd` replaced
 report.md), the digest, ledger, key points and brief all restated each other, and hundreds of

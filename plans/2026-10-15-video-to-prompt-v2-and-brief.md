@@ -73,10 +73,40 @@ fetches image bytes through the presigned URLs the wire body carries.
    set on the detail.
 3. `mcp-format.ts` reorder; `get_images` / `get_file` in `server/mcp.ts` and `cli/mcp.ts`; ingest
    endpoints for the CLI; admin debug keeps rendering the exact brief.
-4. Eval: Opus 5.5 on the fixture, old brief vs new, graded on the four planted complaints, frame
-   citations and nothing invented. Report the measured cost before scaling.
+4. ~~Eval: Opus 5.5 on the fixture, old brief vs new, graded on the four planted complaints, frame
+   citations and nothing invented.~~ Done; results below.
 5. Web capture (`src/lib/capture/`: /phone, /upload, /record) onto the library; keep the
    Handback-only pieces (api, context, pending, upload, transcribe, polish, live-*).
 6. Extension: report and grids from the library. A release needs Sal's OK.
 
 Pushing main deploys through Drydock: that needs Sal's explicit OK.
+
+## Eval results (2026-10-15)
+
+`scripts/brief-eval/run.ts` on the video-to-prompt fixture app (31 s, four planted complaints:
+toast gone in 0.6 s, total $1,240 → $1,245, "Email is required" before typing, a card-declined
+banner with no card), with the title and transcriber name neutralised (they gave the answers away).
+Old = v1 files, old Refine prompt, old formatter with presigned URLs and a fetch tool standing in
+for curl + Read. New = v2 files, rebuilt report, evidence key points, get_images/get_file. Refine
+ran once per condition (Sonnet 5, no Haiku curation in either); Opus 5.5, adaptive thinking, 3 runs
+each, graded by reading. Outputs: `W:\junk\handback\brief-eval\runs\` and `…\runs2\`.
+
+| | old | new | new + 1.1.2 + frames in Refine |
+| --- | --- | --- | --- |
+| toast seen (and its 0.5 s) | 0/3 (v1 kept no frame) | 3/3 | 3/3 |
+| total read as $1,240 → $1,245 | 3/3 | 3/3 | 3/3 |
+| validation timing right (appears while still focused) | 0/3 ("fires on focus") | 3/3 | 3/3 |
+| frames of what preceded the banner (dialog closed, scroll, PDF hover) | 0/3 (none kept) | 3/3 | 3/3 |
+| brief errors the agent had to correct | $12.40, "no frame of the total" | $12.40, total "top-right", confirm frame, "send caused the banner" | total "top-right" (1 line) |
+| cost per run / tool calls | $0.28 / 10 | $0.23 / 4 | $0.23 / 4 |
+
+All in: $2.85, 44 calls. Every run on both sides found all four complaints and kept the confirm
+dialog off the bug list; Opus 5.5 corrected Refine's $12.40 every time. What the new brief adds is
+evidence the old one never had (the transient toast and the frames between the events), at less
+cost. Fixes it drove: library 1.1.2 (a line's → frame weighs time on screen; the report says what
+"changed top-right" means) and Refine seeing the Start here frames (decisions.md).
+
+Open: a one-digit change doesn't register in the library's signature, so the total's frame is
+labelled by the email field's focus ring and Refine still sometimes places the total "top-right"
+(video-to-prompt plan, follow-up). Limits: one fixture, one Refine sample per condition, no Haiku
+curation, a fetch tool kinder than curl + Read.
