@@ -1,22 +1,27 @@
 // How a walkthrough reads to an agent. Pure string work, no imports — shared by the
 // hosted MCP endpoint (`server/mcp.ts`) and the stdio one (`cli/mcp.ts`) so a
 // walkthrough looks identical whichever way it was pulled.
+//
+// The brief is written for a model like Opus 5.5, which needs evidence and
+// orientation more than instruction. Order: what the recording is for, the key
+// points with the evidence for each (the words, the frame, the error), whatever
+// humans said since (review thread, comments, project instructions), Refine's
+// working brief labelled as model-written, then the recording itself (the v2
+// report, rebuilt server-side, verbatim narration on one timeline). Files are
+// listed as paths: images come through `get_images`, everything else through
+// `get_file`, so the brief carries no wall of presigned URLs.
 
-/** Structural, not nominal: the hosted server passes a Prisma-derived object
- *  and the stdio client passes a parsed wire body. Both have these fields
- *  (`notes` is absent on a wire body from a server that predates it). */
+/** Structural, not nominal: the hosted server passes its detail object and the
+ *  stdio client passes a parsed wire body, possibly from an older server, so
+ *  everything past the original fields is optional. */
 export type FormattableWalkthrough = {
   reportMd: string | null
   files: Array<{ path: string; url: string }>
-  // What the recording is FOR — drives the intent framing line. Optional so a
-  // wire body from an older server (no intent) still formats.
+  // What the recording is FOR — drives the intent framing line.
   intent?: string | null
-  // Refine's outputs, when it ran: the complete ledger and the reviewer-curated
-  // keyframe set / cut spans. All optional for the same back-compat reason.
+  // Refine's outputs, when it ran. The digest and the summary ledger are for
+  // humans; the brief carries the key points and the working brief instead.
   summaryMd?: string | null
-  // Refine's condensed brief and the numbered obligations an agent must address
-  // and report back on, one outcome per point. Optional: a wire body from an
-  // older server carries neither.
   digestMd?: string | null
   points?: Array<{
     id: string
@@ -24,12 +29,23 @@ export type FormattableWalkthrough = {
     detail: string
     severity: string
     atMs: number | null
+    evidence?: {
+      said?: { text: string; atMs: number; endMs: number }
+      frame?: { path: string; atMs: number; what: string }
+      error?: { message: string; atMs: number }
+    }
   }> | null
   projectInstructions?: string | null
   curation?: {
     frames: Array<{ path: string; caption: string; atMs: number | null }>
     excluded: Array<{ startMs: number; endMs: number; reason: string }>
   } | null
+  // From servers since 2026-10-15: the parts reportMd used to be one of.
+  briefMd?: string | null
+  refinedBriefMd?: string | null
+  recordingMd?: string | null
+  recordingRebuilt?: boolean
+  startHere?: Array<{ path: string; atMs: number; what: string }>
   notes?: Array<{
     role: string
     // 'result' | 'question' | 'answer'; absent on a pre-kind wire body, which
@@ -57,40 +73,33 @@ export type FormattableWalkthrough = {
   [key: string]: unknown
 }
 
-/** m:ss on the walkthrough-wide clock — how the transcript and frames talk. */
+/** m:ss on the walkthrough-wide clock, floored — how comments and key points are stamped. */
 const mmss = (ms: number) =>
   `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`
 
-// A walkthrough can carry thousands of keyframes; dumping every URL would bury the
-// report. The agent gets a workable sample and the endpoint to page the rest.
-// The sample scales with the walkthrough's length for the same reason the
-// recorder's own budget does (extension `frameBudget`): 30 lines describe a
-// 90-second walkthrough fully and starve a twenty-minute one.
-const BRIEF_FRAMES_PER_MIN = 8
-const MIN_BRIEF_FRAMES = 30
-const MAX_BRIEF_FRAMES = 120
+/** m:ss rounded to the nearest second — how the recording's own report stamps frames
+ *  and lines, so a time quoted from it matches the timeline character for character. */
+export const recStamp = (ms: number) => {
+  const total = Math.max(0, Math.round(ms / 1000))
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`
+}
 
-/** A single recording tops out at this many keyframes (the recorder's per-take
- *  MAX_FRAME_BUDGET). At or under it — the common one-recording walkthrough — the
- *  brief lists every frame so an agent can "look at every screenshot" straight
- *  from the pull. Past it (a multi-take walkthrough), the brief drops to an
- *  even-stride sample and get_frames pages the rest, rather than dumping hundreds
- *  of presigned URLs into the report. */
-const FULL_FRAME_THRESHOLD = 600
+// A walkthrough can carry thousands of keyframes. The brief names them by path;
+// get_frames pages their download URLs.
 
 /** get_frames paging window — the default and hard-max frames one call returns. */
 export const FRAMES_PAGE_DEFAULT = 120
 export const FRAMES_PAGE_MAX = 300
 
-/** `durationMs` arrives through an index signature, so it is `unknown` — a walkthrough
- *  declared without one still gets the floor rather than zero frames. */
-export function briefFrameLimit(durationMs: unknown): number {
-  const ms = typeof durationMs === 'number' && Number.isFinite(durationMs) ? durationMs : 0
-  const byLength = Math.round((ms / 60000) * BRIEF_FRAMES_PER_MIN)
-  return Math.min(MAX_BRIEF_FRAMES, Math.max(MIN_BRIEF_FRAMES, byLength))
-}
-
-const isFrame = (path: string) => path.includes('/frames/')
+/** Tool descriptions, shared so both servers say exactly the same thing. */
+export const TOOL_DESCRIPTIONS = {
+  get_walkthrough:
+    "Fetch one walkthrough's brief: a narrated screen recording a human made in the running app (a bug, review feedback, or a change request). It holds the key points to address with the evidence for each, the review thread and comments, and the recording itself: every keyframe and spoken line on one timeline, by file path. Call get_images next to see the evidence frames.",
+  get_images:
+    'See a walkthrough’s frames and contact sheets as images, at most 6 per call. With no paths: the evidence set, each key point’s frame and then the frames the report says to start with, labelled with time and why. With paths (from the brief): those images. Each image is downscaled to 1600 px; get_file serves one near full size.',
+  get_file:
+    'Read one file of a walkthrough by its path from the brief: text files (transcript.txt, recording.json, MANIFEST.txt, attached notes) come back as text, an image near full size, anything else (the video, a PDF) as a download URL.',
+} as const
 
 /** One review-thread entry as brief text. A reviewer entry's summary IS the
  *  send-back note (or, for kind 'answer', the reply to an agent's question) —
@@ -108,7 +117,6 @@ function formatNote(n: NonNullable<FormattableWalkthrough['notes']>[number]): st
   const lines = [head, n.summary]
   if (n.prUrl) lines.push(`PR: ${n.prUrl}`)
   if (n.filesTouched.length > 0) lines.push(`files: ${n.filesTouched.join(', ')}`)
-  // The urls for these paths are in the files section below.
   if (n.evidencePaths && n.evidencePaths.length > 0) {
     lines.push(`evidence: ${n.evidencePaths.join(', ')}`)
   }
@@ -130,154 +138,254 @@ function intentFraming(intent: string | null | undefined): string | null {
   }
 }
 
-/** The intent framing, metadata JSON, summary and project instructions, report.md,
- *  the reviewer's cut spans, the comments and review thread, then the files — the
- *  curated key frames up top when Refine picked a set, otherwise a length-scaled
- *  sample. */
-export function formatWalkthrough(walkthrough: FormattableWalkthrough): string {
-  const {
-    reportMd,
-    files,
-    notes,
-    comments,
-    intent,
-    summaryMd,
-    digestMd,
-    points,
-    projectInstructions,
-    curation,
-    missingFiles,
-    ...meta
-  } = walkthrough
-  const curatedFrames = curation?.frames ?? []
+const str = (v: unknown): string | null => (typeof v === 'string' && v ? v : null)
+const int = (v: unknown): number | null =>
+  typeof v === 'number' && Number.isFinite(v) ? Math.round(v) : null
 
-  // Reviewer-attached files are evidence the narration asked for — pulled out
-  // of the file listing into their own section right after the report, with a
-  // MISSING line for anything the recording mentioned that nobody attached.
-  const attachments = files.filter((f) => f.path.startsWith('attachments/'))
-  const listed = files.filter((f) => !f.path.startsWith('attachments/'))
+/** Title plus one line of the facts an agent acts on: the id its tools take,
+ *  whose space this is, where it stands, and what was captured. */
+function header(w: FormattableWalkthrough): string[] {
+  const title = str(w.title) ?? str(w.slug) ?? 'Walkthrough'
+  const facts: string[] = []
+  const id = str(w.id)
+  if (id) facts.push(`walkthroughId ${id}`)
+  const space = str(w.space)
+  if (space) facts.push(`space ${space}`)
+  const status = str(w.status)
+  if (status) facts.push(`status ${status}`)
+  const recordedAt = str(w.recordedAt)
+  if (recordedAt) facts.push(`recorded ${recordedAt}`)
+  const duration = int(w.durationMs)
+  if (duration) facts.push(recStamp(duration))
+  const takes = Array.isArray(w.takes) ? w.takes.length : 0
+  if (takes > 1) facts.push(`${takes} takes`)
+  const origin = str(w.origin)
+  if (origin) facts.push(`on ${origin}`)
+  const errors = int(w.errorCount) ?? 0
+  const dropped = int(w.droppedCount) ?? 0
+  if (errors > 0) facts.push(`${errors} error${errors === 1 ? '' : 's'} captured`)
+  if (dropped > 0) facts.push(`${dropped} from other tabs dropped`)
+  return [`# ${title}`, facts.join(' · ')]
+}
+
+/** Key points as obligations, each carrying what the recording holds where it was raised. */
+function keyPoints(points: NonNullable<FormattableWalkthrough['points']>): string {
+  const blocks = points.map((p) => {
+    const at = p.atMs === null ? '' : ` at ${mmss(p.atMs)}`
+    const lines = [`${p.id.toUpperCase()} (${p.severity})${at} — ${p.title}`]
+    if (p.detail) lines.push(`  ${p.detail}`)
+    const e = p.evidence
+    if (e?.said) {
+      lines.push(`  said ${recStamp(e.said.atMs)}–${recStamp(e.said.endMs)}: "${e.said.text}"`)
+    }
+    if (e?.frame) {
+      lines.push(`  frame ${e.frame.path} (${recStamp(e.frame.atMs)}, ${e.frame.what})`)
+    }
+    if (e?.error) lines.push(`  error at ${recStamp(e.error.atMs)}: ${e.error.message}`)
+    return lines.join('\n')
+  })
+  const evidenced = points.some((p) => p.evidence?.said || p.evidence?.frame)
+  return [
+    ...(evidenced
+      ? [
+          'A model distilled these from the recording. Under each: the words said where it was raised, the frame that shows it, and any error captured beside it. Check a point against its evidence before acting on it.',
+          '',
+        ]
+      : []),
+    blocks.join('\n\n'),
+    '',
+    "Address every key point. When you post_result, pass outcomes: one entry per key point — {point: 'kp1', status: 'fixed'|'partial'|'skipped'|'not_applicable', note: one line on what you did or why not}.",
+  ].join('\n')
+}
+
+const isFrame = (path: string) => path.includes('/frames/')
+const isSheet = (path: string) => path.includes('/grids/')
+const isVideo = (path: string) => /\.(webm|mp4|mov|m4a|mp3|wav)$/i.test(path)
+
+/** Paths, grouped: per take its video (with a URL, for anyone who wants to run
+ *  ffmpeg), its frames as a range, its sheets and text files; then the rest.
+ *  When the recording was rebuilt, the uploaded report.md is the older copy. */
+function fileListing(files: FormattableWalkthrough['files'], rebuilt: boolean): string[] {
+  const takes = new Map<string, Array<{ path: string; url: string }>>()
+  const loose: Array<{ path: string; url: string }> = []
+  for (const f of files) {
+    if (f.path.startsWith('attachments/')) continue
+    const dir = /^(rec-\d+)\//.exec(f.path)?.[1]
+    if (dir) takes.set(dir, [...(takes.get(dir) ?? []), f])
+    else loose.push(f)
+  }
+  const out: string[] = []
+  for (const [dir, list] of [...takes.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    const parts: string[] = []
+    for (const v of list.filter((f) => isVideo(f.path))) parts.push(`video ${v.path} — ${v.url}`)
+    const frames = list.filter((f) => isFrame(f.path)).map((f) => f.path)
+    const first = frames[0]
+    const last = frames[frames.length - 1]
+    if (first && last) {
+      parts.push(
+        frames.length === 1 ? `1 frame ${first}` : `${frames.length} frames ${first} … ${last}`
+      )
+    }
+    const sheets = list.filter((f) => isSheet(f.path)).map((f) => f.path)
+    if (sheets.length > 0) parts.push(`contact sheets ${sheets.join(', ')}`)
+    const other = list
+      .filter((f) => !isVideo(f.path) && !isFrame(f.path) && !isSheet(f.path))
+      .map((f) => f.path)
+    if (other.length > 0) parts.push(other.join(', '))
+    out.push(`${dir}: ${parts.join('; ')}`)
+  }
+  if (loose.length > 0) {
+    out.push(
+      loose
+        .map((f) =>
+          rebuilt && f.path === 'report.md'
+            ? 'report.md (as uploaded; the recording above is newer)'
+            : f.path
+        )
+        .join(', ')
+    )
+  }
+  return out
+}
+
+/** The whole brief. */
+export function formatWalkthrough(walkthrough: FormattableWalkthrough): string {
+  const w = walkthrough
+  const framing = intentFraming(w.intent)
+  // A server from before 2026-10-15 sends one document in reportMd.
+  const modern = w.recordingMd !== undefined
+  const recording = modern ? (w.recordingMd ?? null) : w.reportMd
+  const task = modern ? (w.briefMd ?? null) : null
+  const working = modern ? (w.refinedBriefMd ?? null) : null
+  const rebuilt = w.recordingRebuilt === true
+
   const attachmentLines = [
-    ...attachments.map((f) => `${f.path} — ${f.url}`),
-    ...(missingFiles ?? []).map(
+    ...w.files.filter((f) => f.path.startsWith('attachments/')).map((f) => f.path),
+    ...(w.missingFiles ?? []).map(
       (m) =>
         `MISSING: the recording mentions "${m.label}"${m.atMs === null ? '' : ` at ${mmss(m.atMs)}`} but no file was attached${m.quote ? ` — "${m.quote}"` : ''}`
     ),
   ]
 
-  // Files section. With a curated set, every frame is pulled from the flat list
-  // (the curated block above is the sample that matters) and the rest are a
-  // pointer; without one, we fall back to the length-scaled sample.
-  const fileBlocks: string[] = []
-  if (curatedFrames.length > 0) {
-    const urlByPath = new Map(files.map((f) => [f.path, f.url]))
-    const curatedLines = curatedFrames.flatMap((fr) => {
-      const url = urlByPath.get(fr.path)
-      if (url === undefined) return [] // curated frame whose file is gone — skip it
-      const stamp = fr.atMs === null ? '' : `[${mmss(fr.atMs)}] `
-      return [`${stamp}${fr.path} — ${fr.caption} — ${url}`]
-    })
-    fileBlocks.push('--- key frames (curated) ---', curatedLines.join('\n'))
-  }
-
-  const listLines: string[] = []
-  let framesOmitted = 0
-  if (curatedFrames.length > 0) {
-    for (const f of listed) {
-      if (isFrame(f.path)) {
-        framesOmitted++
-        continue
-      }
-      listLines.push(`${f.path} — ${f.url}`)
-    }
-    if (framesOmitted > 0) {
-      listLines.push(
-        `(+${framesOmitted} frames omitted — the curated set above is what matters; call get_frames to page the full set in order)`
-      )
-    }
-  } else {
-    // Adaptive: a walkthrough at or under one recording's worth of frames ships
-    // whole, so the agent sees every screenshot without paging. Past that, send an
-    // even-stride sample that spans the whole recording (not just its opening) and
-    // point at get_frames for the rest.
-    const total = listed.reduce((n, f) => (isFrame(f.path) ? n + 1 : n), 0)
-    const target = total <= FULL_FRAME_THRESHOLD ? total : briefFrameLimit(meta.durationMs)
-    let seen = 0
-    let shown = 0
-    for (const f of listed) {
-      if (isFrame(f.path)) {
-        // Even stride: keep this frame when it lands on the sample grid. When
-        // target === total every frame lands on it, so nothing is dropped.
-        const keep = shown < target && Math.floor((seen * target) / total) === shown
-        seen++
-        if (!keep) {
-          framesOmitted++
-          continue
-        }
-        shown++
-      }
-      listLines.push(`${f.path} — ${f.url}`)
-    }
-    if (framesOmitted > 0) {
-      listLines.push(
-        `(+${framesOmitted} more frames omitted from this sample — call get_frames to page the full set of ${total} in order)`
-      )
-    }
-  }
-  fileBlocks.push('--- files ---', listLines.join('\n'))
-
-  const framing = intentFraming(intent)
-
-  // The numbered obligations: every key point becomes a line an agent must close
-  // out, and the last line tells it to report one outcome per point in post_result.
-  const pointLines =
-    points && points.length > 0
-      ? [
-          ...points.map(
-            (p) =>
-              `${p.id.toUpperCase()} ${p.atMs === null ? '' : `[${mmss(p.atMs)}] `}(${p.severity}) ${p.title} — ${p.detail}`
-          ),
-          "Address every key point above. When you post_result, pass outcomes: one entry per key point — {point: 'kp1', status: 'fixed'|'partial'|'skipped'|'not_applicable', note: one line on what you did or why not}.",
-        ]
-      : []
+  const hasImages = w.files.some((f) => isFrame(f.path) || isSheet(f.path))
+  const listing = fileListing(w.files, rebuilt)
+  const filesBlock = [
+    hasImages
+      ? 'Paths only. Start with get_images(walkthroughId): the key-point frames and the report’s Start here, as images. Any frame or contact sheet below: get_images with its path. Anything else: get_file. Download URLs: get_frames.'
+      : 'Paths only: read any of them with get_file.',
+    ...listing,
+  ].join('\n')
 
   return [
     ...(framing ? [framing] : []),
-    ...(digestMd ? ['--- digest ---', digestMd] : []),
-    ...(pointLines.length > 0 ? ['--- key points ---', pointLines.join('\n')] : []),
-    JSON.stringify(meta, null, 2),
-    ...(summaryMd ? ['--- summary ---', summaryMd] : []),
-    ...(projectInstructions ? ['--- project instructions ---', projectInstructions] : []),
-    '--- report.md ---',
-    reportMd ?? '(no report.md was uploaded with this walkthrough)',
-    // Files the reviewer attached to support the narration — read these like
-    // the report, not like frames.
-    ...(attachmentLines.length > 0 ? ['--- attachments ---', attachmentLines.join('\n')] : []),
-    // The reviewer's cut spans: markers only (the video is never re-encoded), so
-    // the agent must be told not to trust anything shown inside them.
-    ...(curation && curation.excluded.length > 0
+    header(w).join('\n'),
+    ...(w.points && w.points.length > 0 ? ['--- key points ---', keyPoints(w.points)] : []),
+    // On a re-pull, a send-back or an answer is the newest instruction there is.
+    ...(w.notes && w.notes.length > 0
+      ? ['--- review thread ---', w.notes.map(formatNote).join('\n\n')]
+      : []),
+    ...(w.comments && w.comments.length > 0
+      ? [
+          '--- comments ---',
+          [
+            'Reviewers’ margin notes. Each is an instruction; a stamp is a time on the recording’s clock.',
+            ...w.comments.map(
+              (c) => `${c.atMs === null ? '' : `[${mmss(c.atMs)}] `}${c.authorName}: ${c.text}`
+            ),
+          ].join('\n'),
+        ]
+      : []),
+    ...(w.projectInstructions ? ['--- project instructions ---', w.projectInstructions] : []),
+    ...(task ? ['--- task ---', task] : []),
+    ...(working
+      ? [
+          '--- working brief ---',
+          `Written by a model from the recording below: repro steps and done-when checks per key point. Where it and the recording disagree, the recording wins.\n\n${working}`,
+        ]
+      : []),
+    '--- the recording ---',
+    recording ??
+      (task
+        ? '(This task was split out of a longer walkthrough; the recording lives on that one.)'
+        : '(no report came with this walkthrough)'),
+    // A rebuilt report already leaves the cut spans out and marks them.
+    ...(!rebuilt && w.curation && w.curation.excluded.length > 0
       ? [
           '--- removed from this walkthrough ---',
           [
-            ...curation.excluded.map((s) => `${mmss(s.startMs)}–${mmss(s.endMs)} — ${s.reason}`),
+            ...w.curation.excluded.map((s) => `${mmss(s.startMs)}–${mmss(s.endMs)} — ${s.reason}`),
             'These stretches were cut by the reviewer — ignore anything the video or keyframes show inside them.',
           ].join('\n'),
         ]
       : []),
-    // A comment is an instruction: "[2:31] Sal — this dropdown too". The
-    // timestamp keys into the transcript/frames, which share this clock.
-    ...(comments && comments.length > 0
+    ...(attachmentLines.length > 0
       ? [
-          '--- comments ---',
-          comments
-            .map((c) => `${c.atMs === null ? '' : `[${mmss(c.atMs)}] `}${c.authorName}: ${c.text}`)
-            .join('\n'),
+          '--- attachments ---',
+          [
+            'Files a human attached to back up the narration; read them like the recording (get_file).',
+            ...attachmentLines,
+          ].join('\n'),
         ]
       : []),
-    // Chronological, so "what happened since the recording" reads top to
-    // bottom: result, send-back, result again. Absent entirely when empty.
-    ...(notes && notes.length > 0
-      ? ['--- review thread ---', notes.map(formatNote).join('\n\n')]
-      : []),
-    ...fileBlocks,
+    ...(listing.length > 0 ? ['--- files ---', filesBlock] : []),
   ].join('\n\n')
+}
+
+// ── tool results that carry images ───────────────────────────────────────────
+
+export type ToolContent =
+  | { type: 'text'; text: string }
+  | { type: 'image'; data: string; mimeType: string }
+
+/** get_images as MCP content: each image under its label, then what was left out. */
+export function imagesContent(result: {
+  images: Array<{ label: string; data: string; mimeType: string }>
+  skipped: string[]
+  more: string[]
+}): ToolContent[] {
+  const out: ToolContent[] = []
+  for (const img of result.images) {
+    out.push({ type: 'text', text: img.label })
+    out.push({ type: 'image', data: img.data, mimeType: img.mimeType })
+  }
+  const tail: string[] = []
+  if (result.images.length === 0 && result.skipped.length === 0) {
+    tail.push(
+      'No evidence frames for this walkthrough (no key points pinned to a moment and no rebuilt report). Pass frame or contact-sheet paths from the brief.'
+    )
+  }
+  if (result.skipped.length > 0) {
+    tail.push(`Not images of this walkthrough: ${result.skipped.join(', ')}`)
+  }
+  if (result.more.length > 0) {
+    tail.push(`Also in the evidence set (ask by path): ${result.more.join(', ')}`)
+  }
+  if (result.images.length > 0) tail.push('Near full size: get_file with a path.')
+  if (tail.length > 0) out.push({ type: 'text', text: tail.join('\n') })
+  return out
+}
+
+/** get_file as MCP content. */
+export function fileContent(
+  file:
+    | { kind: 'text'; path: string; contentType: string; text: string }
+    | { kind: 'image'; path: string; mimeType: string; data: string }
+    | { kind: 'url'; path: string; contentType: string; size: number; url: string }
+): ToolContent[] {
+  switch (file.kind) {
+    case 'text':
+      return [{ type: 'text', text: file.text }]
+    case 'image':
+      return [
+        { type: 'text', text: file.path },
+        { type: 'image', data: file.data, mimeType: file.mimeType },
+      ]
+    case 'url':
+      return [
+        {
+          type: 'text',
+          text: `${file.path} (${file.contentType}, ${file.size} bytes) isn't text or an image; download it: ${file.url}`,
+        },
+      ]
+  }
 }

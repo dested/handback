@@ -44,7 +44,7 @@ import {
 } from './stripe'
 import { LOCKED_PRICING_MODEL, pricingModelSchema } from './pricing'
 import { log } from './logger'
-import { briefFrameLimit, formatWalkthrough } from './mcp-format'
+import { formatWalkthrough } from './mcp-format'
 import { unsubscribeUrl } from './notify'
 import { prisma } from './prisma'
 import { checkLimit } from './ratelimit'
@@ -3245,9 +3245,12 @@ const adminRouter = router({
           status: f.status,
           url: urls.get(f.path) ?? null,
         })),
-        reportMd: detail?.reportMd ?? null,
+        // The recorder's own report.md, beside the rebuilt one inside the brief.
+        uploadedReportMd: await getObjectText(walkthroughKey(sid, g.id, 'report.md')).catch(
+          () => null
+        ),
         brief,
-        briefFrameLimit: briefFrameLimit(g.durationMs),
+        recordingRebuilt: detail?.recordingRebuilt ?? false,
         frameFilesUploaded: frameFiles,
       }
     }),

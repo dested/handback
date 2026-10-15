@@ -33,7 +33,10 @@ import {
   askReviewerQuestion,
   authenticateToken,
   getWalkthroughDetail,
+  getWalkthroughFile,
   getWalkthroughFrames,
+  getWalkthroughImages,
+  IMAGES_PER_CALL,
   listWalkthroughs,
   postWalkthroughResult,
   requestEvidenceUploads,
@@ -187,6 +190,8 @@ const DECLARE = ['/walkthroughs', '/gripes']
 const FINALIZE = ['/walkthroughs/:id/finalize', '/gripes/:id/finalize']
 const DETAIL = ['/walkthroughs/:id', '/gripes/:id']
 const FRAMES = ['/walkthroughs/:id/frames', '/gripes/:id/frames']
+const IMAGES = '/walkthroughs/:id/images'
+const FILE = '/walkthroughs/:id/file'
 const STATUS = ['/walkthroughs/:id/status', '/gripes/:id/status']
 
 ingestRouter.use(json({ limit: '10mb' }))
@@ -634,6 +639,44 @@ ingestRouter.get(FRAMES, readLimit, async (req, res) => {
     return
   }
   res.json(page)
+})
+
+/** Every `?path=` value, as strings. Express hands back a string or an array. */
+function pathQuery(value: unknown): string[] {
+  const list = Array.isArray(value) ? value : value === undefined ? [] : [value]
+  return list.filter((v): v is string => typeof v === 'string' && v.length > 0)
+}
+
+// The stdio MCP's get_images and get_file: the same server functions the hosted
+// endpoint calls, so image selection, downscaling and labels stay server-side.
+ingestRouter.get(IMAGES, readLimit, async (req, res) => {
+  const auth = getAuth(req)
+  const paths = pathQuery(req.query.path)
+  if (paths.length > IMAGES_PER_CALL) {
+    fail(res, 400, `At most ${IMAGES_PER_CALL} paths per call`)
+    return
+  }
+  const result = await getWalkthroughImages(auth, pathId(req), paths)
+  if (!result) {
+    fail(res, 404, 'Unknown walkthrough')
+    return
+  }
+  res.json(result)
+})
+
+ingestRouter.get(FILE, readLimit, async (req, res) => {
+  const auth = getAuth(req)
+  const path = pathQuery(req.query.path)[0]
+  if (!path) {
+    fail(res, 400, 'path is required')
+    return
+  }
+  const file = await getWalkthroughFile(auth, pathId(req), path)
+  if (!file) {
+    fail(res, 404, 'Unknown walkthrough or file')
+    return
+  }
+  res.json(file)
 })
 
 ingestRouter.get(DETAIL, readLimit, async (req, res) => {

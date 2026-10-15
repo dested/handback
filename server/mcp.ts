@@ -28,7 +28,10 @@ import {
   askReviewerQuestion,
   authenticateToken,
   getWalkthroughDetail,
+  getWalkthroughFile,
   getWalkthroughFrames,
+  getWalkthroughImages,
+  IMAGES_PER_CALL,
   listWalkthroughs,
   postWalkthroughResult,
   requestEvidenceUploads,
@@ -36,15 +39,26 @@ import {
   type TokenAuth,
 } from './walkthroughs-api'
 import { log } from './logger'
-import { formatWalkthrough, FRAMES_PAGE_DEFAULT, FRAMES_PAGE_MAX } from './mcp-format'
+import {
+  fileContent,
+  formatWalkthrough,
+  FRAMES_PAGE_DEFAULT,
+  FRAMES_PAGE_MAX,
+  imagesContent,
+  TOOL_DESCRIPTIONS,
+  type ToolContent,
+} from './mcp-format'
 import { rateLimit } from './ratelimit'
 
 const statusSchema = z.enum(WALKTHROUGH_STATUSES)
 
 type ToolResult = {
-  content: Array<{ type: 'text'; text: string }>
+  content: ToolContent[]
   isError?: boolean
 }
+
+/** A long brief stays inline instead of being saved to a file by Claude Code (50k chars by default). */
+const BRIEF_MAX_CHARS = 200_000
 
 const text = (body: string): ToolResult => ({ content: [{ type: 'text', text: body }] })
 const toolError = (body: string): ToolResult => ({
@@ -63,7 +77,7 @@ const toolError = (body: string): ToolResult => ({
 function registerTool<S extends Record<string, z.ZodTypeAny>>(
   mcp: McpServer,
   name: string,
-  config: { title: string; description: string; inputSchema: S },
+  config: { title: string; description: string; inputSchema: S; _meta?: Record<string, unknown> },
   handler: (args: z.infer<z.ZodObject<S>>) => Promise<ToolResult>
 ): void {
   const register = mcp.registerTool.bind(mcp) as unknown as (
@@ -115,10 +129,9 @@ function buildServer(auth: TokenAuth): McpServer {
     'get_walkthrough',
     {
       title: 'Get walkthrough brief',
-      description:
-        "Fetch one walkthrough's full brief — a narrated screen recording made by a human in the running app, whether that's a bug, review feedback, or a change request: metadata, the report.md authored for agents, and presigned URLs for its files (video, transcript, and the keyframes — every frame for a normal-length walkthrough, a sample for a long one, with get_frames to page the full set)." +
-        scope,
+      description: TOOL_DESCRIPTIONS.get_walkthrough + scope,
       inputSchema: { walkthroughId: z.string().describe('Walkthrough id from list_walkthroughs') },
+      _meta: { 'anthropic/maxResultSizeChars': BRIEF_MAX_CHARS },
     },
     async ({ walkthroughId }) => {
       const walkthrough = await getWalkthroughDetail(auth, walkthroughId)
@@ -129,11 +142,56 @@ function buildServer(auth: TokenAuth): McpServer {
 
   registerTool(
     mcp,
+    'get_images',
+    {
+      title: 'See walkthrough frames',
+      description: TOOL_DESCRIPTIONS.get_images + scope,
+      inputSchema: {
+        walkthroughId: z.string().describe('Walkthrough id from list_walkthroughs'),
+        paths: z
+          .array(z.string().max(300))
+          .max(IMAGES_PER_CALL)
+          .optional()
+          .describe(
+            `Frame or contact-sheet paths from the brief, at most ${IMAGES_PER_CALL}. Omit for the evidence set.`
+          ),
+      },
+    },
+    async ({ walkthroughId, paths }) => {
+      const result = await getWalkthroughImages(auth, walkthroughId, paths)
+      if (!result) return toolError(notFound(walkthroughId))
+      return { content: imagesContent(result) }
+    }
+  )
+
+  registerTool(
+    mcp,
+    'get_file',
+    {
+      title: 'Read a walkthrough file',
+      description: TOOL_DESCRIPTIONS.get_file + scope,
+      inputSchema: {
+        walkthroughId: z.string().describe('Walkthrough id from list_walkthroughs'),
+        path: z.string().max(300).describe('A path from the brief, e.g. rec-01/transcript.txt'),
+      },
+    },
+    async ({ walkthroughId, path }) => {
+      const file = await getWalkthroughFile(auth, walkthroughId, path)
+      if (!file)
+        return toolError(
+          `No file ${path} on walkthrough ${walkthroughId} that this token can read.`
+        )
+      return { content: fileContent(file) }
+    }
+  )
+
+  registerTool(
+    mcp,
     'get_frames',
     {
       title: 'Get walkthrough frames',
       description:
-        `Page the full keyframe set for a walkthrough — presigned image URLs in the order they were recorded. get_walkthrough only carries a sample of frames once a walkthrough runs long; use this to fetch the rest, or all of them, without leaving MCP. Returns { total, offset, limit, returned, nextOffset, frames:[{path,url}] }; keep calling with offset = the previous nextOffset until nextOffset is null. Default ${FRAMES_PAGE_DEFAULT} frames per call, max ${FRAMES_PAGE_MAX}.` +
+        `Page download URLs for a walkthrough's keyframes, in the order they were recorded (get_images shows them as images). Returns { total, offset, limit, returned, nextOffset, frames:[{path,url}] }; keep calling with offset = the previous nextOffset until nextOffset is null. Default ${FRAMES_PAGE_DEFAULT} frames per call, max ${FRAMES_PAGE_MAX}.` +
         scope,
       inputSchema: {
         walkthroughId: z.string().describe('Walkthrough id from list_walkthroughs'),
@@ -149,7 +207,9 @@ function buildServer(auth: TokenAuth): McpServer {
           .min(1)
           .max(FRAMES_PAGE_MAX)
           .optional()
-          .describe(`How many frames to return (default ${FRAMES_PAGE_DEFAULT}, max ${FRAMES_PAGE_MAX})`),
+          .describe(
+            `How many frames to return (default ${FRAMES_PAGE_DEFAULT}, max ${FRAMES_PAGE_MAX})`
+          ),
       },
     },
     async ({ walkthroughId, offset, limit }) => {
@@ -241,7 +301,9 @@ function buildServer(auth: TokenAuth): McpServer {
           .string()
           .min(1)
           .max(2000)
-          .describe('The specific question — what you need decided or clarified before you can proceed'),
+          .describe(
+            'The specific question — what you need decided or clarified before you can proceed'
+          ),
       },
     },
     async ({ walkthroughId, question }) => {
@@ -334,7 +396,7 @@ mcpRouter.post('/', mcpLimit, async (req, res) => {
     // Stateless: no session id in responses, no session validation. See header.
     sessionIdGenerator: undefined,
     // Answer with a plain JSON body instead of holding an SSE stream open.
-    // Caddy and ECS both prefer short requests, and none of our three tools
+    // Caddy and ECS both prefer short requests, and none of our tools
     // stream or send server-initiated notifications.
     enableJsonResponse: true,
   })

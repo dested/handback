@@ -2,6 +2,13 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-10-15 — agent brief v2 on @dested/video-to-prompt
+Asked: make what Opus reads from Handback incredible. Brief rebuilt per pull from recording.json (library
+1.1.1 via git tag): evidence-first key points, thread/comments before Refine's working brief, verbatim
+timeline, paths not URLs; new MCP tools get_images (≤6 labelled frames) + get_file, both servers + ingest
+routes; Refine reads the rebuilt report; admin debug shows rebuilt vs uploaded. Per plans/2026-10-15-video-to-prompt-v2-and-brief.md.
+Touched: server/brief.ts, server/mcp-format.ts (+test), server/mcp.ts, server/walkthroughs-api.ts, server/ingest.ts, server/refine.ts, server/router.ts, cli/mcp.ts, src/app/admin/walkthrough-debug.tsx, package.json, bun.lock
+
 ## 2026-09-21 — get_frames MCP tool + adaptive brief frame cap
 Asked: an agent pulling a 600-frame walkthrough over MCP only got 120 frames and had no MCP way to
 the rest, so it fell back to re-cutting frames from the video with ffmpeg. Cause: `formatWalkthrough`

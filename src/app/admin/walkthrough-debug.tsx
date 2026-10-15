@@ -143,14 +143,17 @@ export function AdminWalkthroughDebugPage() {
         <SectionTitle
           right={
             <span className="text-muted-foreground font-mono text-xs">
-              {d.briefFrameLimit} of {d.frameFilesUploaded} frame links inlined
+              {d.recordingRebuilt
+                ? `report rebuilt from recording.json · ${d.frameFilesUploaded} frames`
+                : `uploaded report.md (recording.json unreadable) · ${d.frameFilesUploaded} frames`}
             </span>
           }>
           What the agent receives
         </SectionTitle>
         <p className="text-muted-foreground text-sm">
           The exact brief MCP returns for this walkthrough — same code path, nothing simulated.
-          Frame links beyond the cap are omitted with a pointer to the files list.
+          Files are listed by path; agents see images through get_images and read the rest with
+          get_file.
         </p>
         {d.brief ? (
           <pre className={PRE}>{d.brief}</pre>
@@ -259,9 +262,9 @@ export function AdminWalkthroughDebugPage() {
       </section>
 
       <section className="space-y-3">
-        <SectionTitle>report.md</SectionTitle>
-        {d.reportMd ? (
-          <pre className={PRE}>{d.reportMd}</pre>
+        <SectionTitle>report.md as uploaded</SectionTitle>
+        {d.uploadedReportMd ? (
+          <pre className={PRE}>{d.uploadedReportMd}</pre>
         ) : (
           <p className="text-muted-foreground text-sm">No report.md was uploaded.</p>
         )}

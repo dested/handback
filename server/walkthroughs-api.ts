@@ -24,8 +24,26 @@ import { log } from './logger'
 import { notifyQuestion, notifyResult } from './notify'
 import { prisma } from './prisma'
 import { expiryFor } from './retention'
-import { getObjectText, isSafePath, walkthroughKey, presignGet, presignPut } from './storage'
-import { FRAMES_PAGE_DEFAULT, FRAMES_PAGE_MAX } from './mcp-format'
+import {
+  getObjectBytes,
+  getObjectText,
+  isSafePath,
+  walkthroughKey,
+  presignGet,
+  presignPut,
+} from './storage'
+import { FRAMES_PAGE_DEFAULT, FRAMES_PAGE_MAX, recStamp } from './mcp-format'
+import {
+  FULL_EDGE,
+  INLINE_EDGE,
+  briefFromRecordings,
+  imageForAgent,
+  loadRecordings,
+  type BriefCuration,
+  type PointEvidence,
+  type RecordingBrief,
+  type StartHereFrame,
+} from './brief'
 
 export const WALKTHROUGH_STATUSES = ['open', 'in_review', 'needs_info', 'resolved'] as const
 export type WalkthroughStatus = (typeof WALKTHROUGH_STATUSES)[number]
@@ -223,6 +241,10 @@ export type KeyPoint = {
   detail: string
   severity: 'high' | 'medium' | 'low'
   atMs: number | null
+  // What the recording holds where the point is pinned: the line said there,
+  // the frame that shows it, an error beside it. Absent without a moment or a
+  // readable recording.
+  evidence?: PointEvidence
 }
 const POINT_OUTCOME_STATUSES = ['fixed', 'partial', 'skipped', 'not_applicable'] as const
 type PointOutcomeStatus = (typeof POINT_OUTCOME_STATUSES)[number]
@@ -286,11 +308,22 @@ export type WalkthroughDetail = {
   points: KeyPoint[] | null
   // Standing project context, prepended to every brief in this project.
   projectInstructions: string | null
-  curation: {
-    frames: Array<{ path: string; caption: string; atMs: number | null }>
-    excluded: Array<{ startMs: number; endMs: number; reason: string }>
-  } | null
+  curation: BriefCuration | null
+  // The single document an older brief formatter shows as "report.md":
+  // briefMd ?? refinedBriefMd ?? recordingMd. Kept for stdio installs that
+  // format with an older mcp-format.ts.
   reportMd: string | null
+  // A split-out task's whole content (structure.ts); the recording is the parent's.
+  briefMd: string | null
+  // Refine's model-written working brief: repro steps and done-when per key point.
+  refinedBriefMd: string | null
+  // The recording itself, read for agents: the v2 report rebuilt from each
+  // take's recording.json (`recordingRebuilt`), else the stored report.md.
+  recordingMd: string | null
+  recordingRebuilt: boolean
+  // The frames the report's Start here names, in time order. Empty when the
+  // report wasn't rebuilt.
+  startHere: StartHereFrame[]
   files: WalkthroughFileRef[]
   // The review thread, oldest first: agent results and reviewer send-backs.
   notes: WalkthroughNoteRef[]
@@ -370,28 +403,36 @@ export async function getWalkthroughDetail(
 
   const space = spaceId({ teamId: walkthrough.teamId, userId: walkthrough.userId })
 
-  // report.md is the whole point of the pull, but a walkthrough is still usable
-  // without it (bad upload, hand-declared walkthrough) — degrade to null. A
-  // split-out task carries no files at all: its brief IS the report, and it
-  // points the agent at the parent for the recording itself. Refine's rewrite
-  // (`refinedBriefMd`) is preferred over the raw report when it ran.
-  const reportMd =
-    walkthrough.briefMd ??
-    walkthrough.refinedBriefMd ??
-    (await getObjectText(walkthroughKey(space, walkthrough.id, 'report.md')).catch(
-      (err: unknown) => {
-        log.warn(
-          `[walkthroughs] report.md unreadable for walkthrough ${walkthrough.id}: ${String(err)}`
-        )
-        return null
-      }
-    ))
-
   const curationParsed = curationSchema.safeParse(walkthrough.curationJson)
   const curation = curationParsed.success ? curationParsed.data : null
 
   const pointsParsed = pointsSchema.safeParse(walkthrough.pointsJson)
-  const points = pointsParsed.success ? pointsParsed.data : null
+  const parsedPoints = pointsParsed.success ? pointsParsed.data : null
+
+  // The recording, rebuilt from the files (server/brief.ts). A split-out task
+  // carries no takes: its brief is the content and the parent holds the
+  // recording. When a take's recording.json can't be read, the stored
+  // report.md stands in; a walkthrough without either is still usable.
+  const rebuilt = walkthrough.parentId
+    ? null
+    : await recordingBriefFor(space, walkthrough, curation, parsedPoints)
+  const recordingMd =
+    rebuilt?.recordingMd ??
+    (walkthrough.parentId
+      ? null
+      : await getObjectText(walkthroughKey(space, walkthrough.id, 'report.md')).catch(
+          (err: unknown) => {
+            log.warn(
+              `[walkthroughs] report.md unreadable for walkthrough ${walkthrough.id}: ${String(err)}`
+            )
+            return null
+          }
+        ))
+  const points =
+    parsedPoints?.map((p) => {
+      const evidence = rebuilt?.evidence[p.id]
+      return evidence ? { ...p, evidence } : p
+    }) ?? null
 
   return {
     id: walkthrough.id,
@@ -419,7 +460,12 @@ export async function getWalkthroughDetail(
     points,
     projectInstructions: walkthrough.project?.instructions ?? null,
     curation,
-    reportMd,
+    reportMd: walkthrough.briefMd ?? walkthrough.refinedBriefMd ?? recordingMd,
+    briefMd: walkthrough.briefMd,
+    refinedBriefMd: walkthrough.refinedBriefMd,
+    recordingMd,
+    recordingRebuilt: rebuilt !== null,
+    startHere: rebuilt?.startHere ?? [],
     files: await Promise.all(
       walkthrough.files.map(async (f) => ({
         path: f.path,
@@ -454,6 +500,191 @@ export async function getWalkthroughDetail(
       quote: s.quote,
       atMs: s.atMs,
     })),
+  }
+}
+
+/** The rebuilt recording for a loaded walkthrough row, or null when its takes can't be read. */
+async function recordingBriefFor(
+  space: string,
+  walkthrough: {
+    id: string
+    title: string
+    slug: string
+    origin: string | null
+    recordedAt: Date
+    takes: Array<{ index: number; dir: string; videoPath: string | null }>
+  },
+  curation: BriefCuration | null,
+  points: Array<{ id: string; atMs: number | null }> | null
+): Promise<RecordingBrief | null> {
+  const takes = walkthrough.takes.map((t) => ({
+    index: t.index,
+    dir: t.dir,
+    videoPath: t.videoPath,
+  }))
+  const recordings = await loadRecordings(space, walkthrough.id, takes)
+  if (!recordings) return null
+  try {
+    return briefFromRecordings({ ...walkthrough, takes, curation, points }, recordings)
+  } catch (err) {
+    log.warn(
+      `[walkthroughs] report rebuild failed for walkthrough ${walkthrough.id}: ${String(err)}`
+    )
+    return null
+  }
+}
+
+/** Images per get_images call: six frames at INLINE_EDGE stay well inside Claude Code's 25k-token result cap. */
+export const IMAGES_PER_CALL = 6
+
+const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
+
+export type WalkthroughImage = {
+  path: string
+  /** "rec-01/frames/04-0090.jpg · 0:09 · KP2 · changed top-right (small)" — what the agent reads above the image. */
+  label: string
+  mimeType: 'image/jpeg'
+  /** base64 */
+  data: string
+}
+
+export type WalkthroughImages = {
+  walkthroughId: string
+  images: WalkthroughImage[]
+  /** Requested paths that aren't images of this walkthrough. */
+  skipped: string[]
+  /** Evidence paths left out by the per-call cap; ask for them by path. */
+  more: string[]
+}
+
+/**
+ * Frames and contact sheets as images an agent sees inline. With no paths, the
+ * evidence set: each key point's frame in point order, then the report's Start
+ * here, at most IMAGES_PER_CALL. Null on the same misses as getWalkthroughDetail.
+ */
+export async function getWalkthroughImages(
+  auth: TokenAuth,
+  walkthroughId: string,
+  paths?: string[]
+): Promise<WalkthroughImages | null> {
+  const walkthrough = await prisma.walkthrough.findUnique({
+    where: { id: walkthroughId },
+    include: {
+      takes: { orderBy: { index: 'asc' } },
+      files: { where: { status: 'uploaded' }, orderBy: { path: 'asc' } },
+    },
+  })
+  if (!walkthrough || !(await inScope(auth, walkthrough)) || !walkthrough.finalizedAt) return null
+  traceAccess(auth, walkthrough.id, 'pulled')
+  const space = spaceId({ teamId: walkthrough.teamId, userId: walkthrough.userId })
+
+  const curationParsed = curationSchema.safeParse(walkthrough.curationJson)
+  const pointsParsed = pointsSchema.safeParse(walkthrough.pointsJson)
+  const points = pointsParsed.success ? pointsParsed.data : []
+  const rebuilt = walkthrough.parentId
+    ? null
+    : await recordingBriefFor(
+        space,
+        walkthrough,
+        curationParsed.success ? curationParsed.data : null,
+        points
+      )
+
+  // Why each evidence frame is in the set, for its label.
+  const why = new Map<string, string[]>()
+  const note = (path: string, tag: string) => why.set(path, [...(why.get(path) ?? []), tag])
+  for (const p of points) {
+    const frame = rebuilt?.evidence[p.id]?.frame
+    if (frame) note(frame.path, p.id.toUpperCase())
+  }
+  for (const f of rebuilt?.startHere ?? []) note(f.path, 'start here')
+  const what = new Map<string, string>()
+  for (const p of points) {
+    const frame = rebuilt?.evidence[p.id]?.frame
+    if (frame) what.set(frame.path, frame.what)
+  }
+  for (const f of rebuilt?.startHere ?? []) what.set(f.path, f.what)
+
+  const images = new Map(
+    walkthrough.files.filter((f) => IMAGE_TYPES.has(f.contentType)).map((f) => [f.path, f])
+  )
+  const wanted = paths && paths.length > 0 ? [...new Set(paths)] : [...why.keys()]
+  const skipped = wanted.filter((p) => !images.has(p))
+  const servable = wanted.filter((p) => images.has(p))
+  const chosen = servable.slice(0, IMAGES_PER_CALL)
+
+  const out = await Promise.all(
+    chosen.map(async (path): Promise<WalkthroughImage> => {
+      const bytes = await getObjectBytes(walkthroughKey(space, walkthrough.id, path))
+      const { data, mimeType } = await imageForAgent(bytes, INLINE_EDGE)
+      const at = rebuilt?.frameAt[path]
+      const label = [
+        path,
+        ...(at === undefined ? [] : [recStamp(at)]),
+        ...(why.get(path) ?? []),
+        ...(what.has(path) ? [what.get(path) ?? ''] : []),
+      ].join(' · ')
+      return { path, label, mimeType, data }
+    })
+  )
+  return {
+    walkthroughId: walkthrough.id,
+    images: out,
+    skipped,
+    more: servable.slice(IMAGES_PER_CALL),
+  }
+}
+
+/** Text files up to this many characters come back inline; past it, a URL. */
+const TEXT_INLINE_MAX = 400_000
+
+export type WalkthroughFileContent =
+  | { kind: 'text'; path: string; contentType: string; text: string }
+  | { kind: 'image'; path: string; mimeType: 'image/jpeg'; data: string }
+  | { kind: 'url'; path: string; contentType: string; size: number; url: string }
+
+const isText = (contentType: string) =>
+  contentType.startsWith('text/') || contentType === 'application/json'
+
+/**
+ * One file of a walkthrough, in the form an agent can use directly: text as
+ * text, an image near full size, anything else (video, a PDF) as a presigned
+ * URL. Null when the walkthrough is out of reach or has no such file.
+ */
+export async function getWalkthroughFile(
+  auth: TokenAuth,
+  walkthroughId: string,
+  path: string
+): Promise<WalkthroughFileContent | null> {
+  const walkthrough = await prisma.walkthrough.findUnique({
+    where: { id: walkthroughId },
+    include: { files: { where: { status: 'uploaded', path } } },
+  })
+  if (!walkthrough || !(await inScope(auth, walkthrough)) || !walkthrough.finalizedAt) return null
+  const file = walkthrough.files[0]
+  if (!file) return null
+  traceAccess(auth, walkthrough.id, 'pulled')
+  const space = spaceId({ teamId: walkthrough.teamId, userId: walkthrough.userId })
+  const key = walkthroughKey(space, walkthrough.id, file.path)
+
+  if (IMAGE_TYPES.has(file.contentType)) {
+    const { data, mimeType } = await imageForAgent(await getObjectBytes(key), FULL_EDGE)
+    return { kind: 'image', path: file.path, mimeType, data }
+  }
+  if (isText(file.contentType) && file.size <= TEXT_INLINE_MAX) {
+    return {
+      kind: 'text',
+      path: file.path,
+      contentType: file.contentType,
+      text: await getObjectText(key),
+    }
+  }
+  return {
+    kind: 'url',
+    path: file.path,
+    contentType: file.contentType,
+    size: file.size,
+    url: await presignGet(key),
   }
 }
 
@@ -495,7 +726,10 @@ export async function getWalkthroughFrames(
   const total = frameFiles.length
 
   const offset = Math.min(Math.max(0, Math.floor(opts.offset ?? 0)), total)
-  const limit = Math.min(FRAMES_PAGE_MAX, Math.max(1, Math.floor(opts.limit ?? FRAMES_PAGE_DEFAULT)))
+  const limit = Math.min(
+    FRAMES_PAGE_MAX,
+    Math.max(1, Math.floor(opts.limit ?? FRAMES_PAGE_DEFAULT))
+  )
   const frames = await Promise.all(
     frameFiles.slice(offset, offset + limit).map(async (f) => ({
       path: f.path,

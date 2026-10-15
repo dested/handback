@@ -10,9 +10,9 @@
 //
 // The tools over the token-authed API in server/ingest.ts: list every
 // walkthrough the token reaches (its owner's personal space plus every team
-// they're in), pull one walkthrough's full brief (report.md + presigned URLs for
-// video/keyframes/transcript), page the full keyframe set, move a walkthrough
-// through review, and post the result a human signs off on.
+// they're in), pull one walkthrough's brief, see its frames as images, read any
+// file, page download URLs for the keyframes, move a walkthrough through review,
+// and post the result a human signs off on.
 //
 // stdout is the JSON-RPC channel — nothing but the protocol may be written to
 // it. Diagnostics go to stderr.
@@ -21,10 +21,14 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
 import {
+  fileContent,
   formatWalkthrough,
   FRAMES_PAGE_DEFAULT,
   FRAMES_PAGE_MAX,
+  imagesContent,
+  TOOL_DESCRIPTIONS,
   type FormattableWalkthrough,
+  type ToolContent,
 } from '../server/mcp-format'
 
 const DEFAULT_SERVER = 'https://handback.dev'
@@ -39,9 +43,36 @@ if (!token) {
 const statusSchema = z.enum(['open', 'in_review', 'resolved'])
 
 type ToolResult = {
-  content: { type: 'text'; text: string }[]
+  content: ToolContent[]
   isError?: boolean
 }
+
+/** Mirrors IMAGES_PER_CALL in server/walkthroughs-api.ts; the server enforces it. */
+const IMAGES_PER_CALL = 6
+
+// The image and file bodies are new, so they are checked rather than trusted:
+// an older server answers these routes with a 404, a malformed body is an error.
+const imagesBody = z.object({
+  images: z.array(z.object({ label: z.string(), data: z.string(), mimeType: z.string() })),
+  skipped: z.array(z.string()),
+  more: z.array(z.string()),
+})
+const fileBody = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('text'),
+    path: z.string(),
+    contentType: z.string(),
+    text: z.string(),
+  }),
+  z.object({ kind: z.literal('image'), path: z.string(), mimeType: z.string(), data: z.string() }),
+  z.object({
+    kind: z.literal('url'),
+    path: z.string(),
+    contentType: z.string(),
+    size: z.number(),
+    url: z.string(),
+  }),
+])
 
 const mcp = new McpServer({ name: 'handback', version: '0.1.0' })
 
@@ -54,7 +85,7 @@ const mcp = new McpServer({ name: 'handback', version: '0.1.0' })
  */
 function registerTool<S extends Record<string, z.ZodTypeAny>>(
   name: string,
-  config: { title: string; description: string; inputSchema: S },
+  config: { title: string; description: string; inputSchema: S; _meta?: Record<string, unknown> },
   handler: (args: z.infer<z.ZodObject<S>>) => Promise<ToolResult>
 ): void {
   const register = mcp.registerTool.bind(mcp) as unknown as (
@@ -124,9 +155,10 @@ registerTool(
   'get_walkthrough',
   {
     title: 'Get walkthrough brief',
-    description:
-      "Fetch one walkthrough's full brief — a narrated screen recording made by a human in the running app, whether that's a bug, review feedback, or a change request: metadata, the report.md authored for agents, and presigned URLs for its files (video, transcript, and the keyframes — every frame for a normal-length walkthrough, a sample for a long one, with get_frames to page the full set).",
+    description: TOOL_DESCRIPTIONS.get_walkthrough,
     inputSchema: { walkthroughId: z.string().describe('Walkthrough id from list_walkthroughs') },
+    // A long brief stays inline instead of being saved to a file by Claude Code.
+    _meta: { 'anthropic/maxResultSizeChars': 200_000 },
   },
   async ({ walkthroughId }) => {
     const result = await api<FormattableWalkthrough>(
@@ -138,11 +170,61 @@ registerTool(
 )
 
 registerTool(
+  'get_images',
+  {
+    title: 'See walkthrough frames',
+    description: TOOL_DESCRIPTIONS.get_images,
+    inputSchema: {
+      walkthroughId: z.string().describe('Walkthrough id from list_walkthroughs'),
+      paths: z
+        .array(z.string().max(300))
+        .max(IMAGES_PER_CALL)
+        .optional()
+        .describe(
+          `Frame or contact-sheet paths from the brief, at most ${IMAGES_PER_CALL}. Omit for the evidence set.`
+        ),
+    },
+  },
+  async ({ walkthroughId, paths }) => {
+    const query = new URLSearchParams()
+    for (const p of paths ?? []) query.append('path', p)
+    const qs = query.toString()
+    const result = await api<unknown>(
+      `/walkthroughs/${encodeURIComponent(walkthroughId)}/images${qs ? `?${qs}` : ''}`
+    )
+    if ('error' in result) return result.error
+    const parsed = imagesBody.safeParse(result.data)
+    if (!parsed.success) return toolError(`Unexpected images response: ${parsed.error.message}`)
+    return { content: imagesContent(parsed.data) }
+  }
+)
+
+registerTool(
+  'get_file',
+  {
+    title: 'Read a walkthrough file',
+    description: TOOL_DESCRIPTIONS.get_file,
+    inputSchema: {
+      walkthroughId: z.string().describe('Walkthrough id from list_walkthroughs'),
+      path: z.string().max(300).describe('A path from the brief, e.g. rec-01/transcript.txt'),
+    },
+  },
+  async ({ walkthroughId, path }) => {
+    const result = await api<unknown>(
+      `/walkthroughs/${encodeURIComponent(walkthroughId)}/file?path=${encodeURIComponent(path)}`
+    )
+    if ('error' in result) return result.error
+    const parsed = fileBody.safeParse(result.data)
+    if (!parsed.success) return toolError(`Unexpected file response: ${parsed.error.message}`)
+    return { content: fileContent(parsed.data) }
+  }
+)
+
+registerTool(
   'get_frames',
   {
     title: 'Get walkthrough frames',
-    description:
-      `Page the full keyframe set for a walkthrough — presigned image URLs in the order they were recorded. get_walkthrough only carries a sample of frames once a walkthrough runs long; use this to fetch the rest, or all of them. Returns { total, offset, limit, returned, nextOffset, frames:[{path,url}] }; keep calling with offset = the previous nextOffset until nextOffset is null. Default ${FRAMES_PAGE_DEFAULT} frames per call, max ${FRAMES_PAGE_MAX}.`,
+    description: `Page download URLs for a walkthrough's keyframes, in the order they were recorded (get_images shows them as images). Returns { total, offset, limit, returned, nextOffset, frames:[{path,url}] }; keep calling with offset = the previous nextOffset until nextOffset is null. Default ${FRAMES_PAGE_DEFAULT} frames per call, max ${FRAMES_PAGE_MAX}.`,
     inputSchema: {
       walkthroughId: z.string().describe('Walkthrough id from list_walkthroughs'),
       offset: z
@@ -157,7 +239,9 @@ registerTool(
         .min(1)
         .max(FRAMES_PAGE_MAX)
         .optional()
-        .describe(`How many frames to return (default ${FRAMES_PAGE_DEFAULT}, max ${FRAMES_PAGE_MAX})`),
+        .describe(
+          `How many frames to return (default ${FRAMES_PAGE_DEFAULT}, max ${FRAMES_PAGE_MAX})`
+        ),
     },
   },
   async ({ walkthroughId, offset, limit }) => {
@@ -248,7 +332,9 @@ registerTool(
         .string()
         .min(1)
         .max(2000)
-        .describe('The specific question — what you need decided or clarified before you can proceed'),
+        .describe(
+          'The specific question — what you need decided or clarified before you can proceed'
+        ),
     },
   },
   async ({ walkthroughId, question }) => {

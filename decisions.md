@@ -2,6 +2,28 @@
 
 > ADR-lite: what was decided, why, what was rejected. Append-only.
 
+## 2026-10-15 — The agent brief: evidence first, the recording rebuilt, images through a tool
+**Why:** after Refine the agent never saw the verbatim narration (`refinedBriefMd` replaced
+report.md), the digest, ledger, key points and brief all restated each other, and hundreds of
+presigned URLs pushed long briefs past Claude Code's 50k-char inline limit. Seeing a frame meant
+curl + Read, so agents mostly didn't. Now: key points carry their quote, frame and nearby error
+(library `evidenceAt`); the review thread and comments come before the model-written working
+brief; the recording is the v2 report rebuilt from recording.json on every pull (old uploads too,
+and re-transcribes, cuts and captions included); files are paths; `get_images` returns ≤6 labelled
+frames (evidence set by default) and `get_file` returns text, an image or a URL.
+**Rejected:** inlining images in get_walkthrough (Claude Code caps image results at 25k tokens; a
+long brief plus frames breaks it), regenerating report.md at upload only (old walkthroughs stay
+v1, edits go stale), keeping the digest/ledger in the brief (they're the human's read), a local
+fork of the report writer (the library owns the format; Handback passes cuts/captions as options).
+
+## 2026-10-15 — @dested/video-to-prompt from its git tag until npm publish
+**Why:** the library is public on GitHub but not yet on npm (needs Sal's `npm login`). Bun won't
+run `prepare` for git deps and devDeps aren't installed, so each tag is a release commit with
+`dist/` force-added; `github:` specs install as a tarball, so the Alpine Docker build needs no git.
+mediabunny moves to ^1.61.0 so there's one copy.
+**Rejected:** `trustedDependencies` + build on install (tsc isn't there), vendoring dist (a fourth
+copy of the pipeline), a git submodule.
+
 ## 2026-09-12 — The recorder panel is a window; the offscreen document is the engine
 **Why:** closing the side panel (X, toolbar icon, focus change) silently killed the recording
 because the panel owned `getDisplayMedia` + `MediaRecorder` (owner: "first, I need to be able

@@ -1,7 +1,7 @@
 # Handback — CliffNotes
 
 > Living map of the project. Read this before any coding session.
-> Last updated: 2026-09-13 (Asana-shaped redesign — plans/2026-09-12-asana-redesign.md). Visual language → `ui.md` · why → `decisions.md` ·
+> Last updated: 2026-10-15 (agent brief v2 on @dested/video-to-prompt — plans/2026-10-15-video-to-prompt-v2-and-brief.md). Visual language → `ui.md` · why → `decisions.md` ·
 > log → `updates.md`.
 >
 > **2026-08-23 mega-wave** (plans/2026-08-23-fable5-mega-wave.md): sidebar app
@@ -190,8 +190,8 @@ server/
   ingest.ts             Token-authed REST (Bearer hb_…): two-phase upload, size caps + per-org
                         quota, /transcribe and /polish; read side delegates to walkthroughs-api.
                         Every route registered under /walkthroughs* AND legacy /gripes* aliases
-  walkthroughs-api.ts   THE agent-facing surface: token auth + list/get/setStatus/postResult
-                        (the review thread) + the WalkthroughAccess trace. Shared by ingest.ts
+  walkthroughs-api.ts   THE agent-facing surface: token auth + list/get/images/file/setStatus/
+                        postResult (the review thread) + the WalkthroughAccess trace. Shared by ingest.ts
                         AND both MCP servers so they can't drift. A token reaches its
                         owner's personal space + every team they're in; a platform admin's token
                         reaches everything. Items carry `space` (team name or "Personal")
@@ -203,7 +203,13 @@ server/
   digest.ts             the Monday digest: hourly sweep, fires in ONE UTC window (Mon 15:00),
                         digestSentAt stamped BEFORE send (idempotency)
   mcp.ts                Hosted MCP at /mcp — StreamableHTTP, stateless, hb_ bearer auth
-  mcp-format.ts         Pure formatter for a walkthrough brief; shared with cli/mcp.ts
+  mcp-format.ts         Pure formatter for a walkthrough brief + get_images/get_file content +
+                        the shared tool descriptions; shared with cli/mcp.ts (golden-ish tests in
+                        mcp-format.test.ts, `bun run test:unit`)
+  brief.ts              The recording half of the brief, rebuilt on every pull: each take's
+                        recording.json → @dested/video-to-prompt `readRecordingJson` → `buildReport`
+                        (reviewer cuts ✂, Refine captions `shows:`), key-point evidence
+                        (`evidenceAt`), Start here; sharp downscale for images handed to agents
   storage.ts            S3: presignPut/Get, getObjectText, deletePrefix, deleteKeys, key layout,
                         isSafePath. Honors optional S3_ENDPOINT (R2/S3-compatible, forcePathStyle)
   retention.ts          THE deletion clocks: RETENTION_DAYS=30 (resolved auto-expire via
@@ -539,8 +545,10 @@ extension/              Handback Recorder — the Chrome MV3 extension (own npm 
 | `POST /walkthroughs` | Declare: metadata + file list → rows + presigned PUT per file. Optional `teamId` targets a team (member-validated; absent = personal), optional `projectId` pins a project in that space (else originHints route it). Re-declaring an existing (space, slug) deletes the old walkthrough + S3 prefix first |
 | `POST /walkthroughs/:id/finalize` | Marks files uploaded + sets `finalizedAt` (list only shows finalized) |
 | `GET /walkthroughs` | List for agents (MCP `list_walkthroughs`): everything the token reaches, `?team=personal\|<id>` filters. Platform-wide when the owner is a platform admin |
-| `GET /walkthroughs/:id` | Detail + `reportMd` text + presigned GET for every file (MCP `get_walkthrough`). Note: the *brief* only inlines a frame sample (see §frame cap); the raw JSON here still carries every file |
-| `GET /walkthroughs/:id/frames` | Paged presigned keyframe URLs, chronological, `?offset=&limit=` (default 120, max 300) → `{total,offset,limit,returned,nextOffset,frames[]}` (MCP `get_frames`). The escape hatch when the brief sampled frames |
+| `GET /walkthroughs/:id` | Detail (MCP `get_walkthrough`): `recordingMd` (rebuilt report, else the stored one) + `recordingRebuilt`, `briefMd`, `refinedBriefMd`, points with `evidence`, `startHere`, legacy `reportMd`, presigned GET for every file. The *brief* names files by path only (video URL aside) |
+| `GET /walkthroughs/:id/images` | `?path=` ×≤6, or none for the evidence set (KP frames, then Start here) → base64 JPEGs ≤1600 px with labels (MCP `get_images`) |
+| `GET /walkthroughs/:id/file` | `?path=` → text / image ≤2576 px / presigned URL (MCP `get_file`) |
+| `GET /walkthroughs/:id/frames` | Paged presigned keyframe URLs, chronological, `?offset=&limit=` (default 120, max 300) → `{total,offset,limit,returned,nextOffset,frames[]}` (MCP `get_frames`). Download URLs only |
 | `POST /walkthroughs/:id/status` | open / in_review / resolved (MCP `set_walkthrough_status`) |
 | `POST /walkthroughs/:id/result` | The agent's answer (MCP `post_result`): summary + optional prUrl/filesTouched/body **+ evidence[] (paths from /evidence — flips those rows uploaded, lands on the note)** → review-thread note; auto-flips open → in_review. No `/gripes` alias (nothing old posts it) |
 | `POST /walkthroughs/:id/question` | MCP `ask_reviewer`: agent asks instead of guessing → WalkthroughNote kind 'question', status → needs_info, uploader emailed. No `/gripes` alias |
@@ -583,8 +591,8 @@ FTS corpus, filled at finalize) · **Walkthrough.parentId / briefMd** (a split-o
 metadata-only child row — no files, takes, or bytes; `briefMd` IS its report; self-relation
 "split" with `onDelete: SetNull` so children outlive a deleted parent as standalone tasks) ·
 **Walkthrough.intent** ('bug'|'feature'|'idea'|null — null presumes nothing; drives the brief's
-framing) · **the Refine columns** (`summaryMd` ledger, `refinedBriefMd` — the brief serves
-`briefMd ?? refinedBriefMd ?? S3 report.md` — `healthJson` [{severity,text,atMs}],
+framing) · **the Refine columns** (`summaryMd` ledger, `refinedBriefMd` — the brief serves it as
+a labelled "working brief" ABOVE the rebuilt recording, never instead of it — `healthJson` [{severity,text,atMs}],
 `curationJson` {frames:[{path,caption,atMs}], excluded:[{startMs,endMs,reason}]},
 `refineStatus` running|done|failed, `refinedAt`) · **WalkthroughNote.kind**
 ('result'|'question'|'answer'; default 'result' — a reviewer 'result' is a send-back) +
@@ -834,23 +842,27 @@ reaches the container on a plain push.
   (`extension/src/offscreen/recorder.ts`) is 40 frames/min clamped to **[150, 600]** per *take* —
   applied once in `finish()`, after dedup, as a **uniform** thin with nothing carved out of it
   (the `reason === 'mark'` exemption went with the mark feature, 2026-08-01); survivors are
-  renumbered ascending (`t` survives, so transcript citations stay valid). It was a flat 150 until 2026-07-31. Server-side, `formatWalkthrough()`
-  (`server/mcp-format.ts`) decides how many frame URLs the agent's brief *inlines*, adaptively
-  (2026-09-21): a walkthrough at or under **600** frames — one full recording, `FULL_FRAME_THRESHOLD`,
-  = the recorder's per-take ceiling — ships **every** frame so "look at every screenshot" works
-  straight from the pull; past that it drops to an **even-stride** sample of `briefFrameLimit()`
-  frames (8/min clamped to [30, 120]) spanning the whole recording, and prints a pointer to
-  **`get_frames`** for the rest. Display cap only: the detail JSON still presigns every frame, and
-  `get_frames` (`GET /walkthroughs/:id/frames`, paged) hands back all of them in order — an agent
-  should page frames, never re-cut them from the video. Raising the sample has real cost: a frame is
-  ~150–300 KB (JPEG quality 0.8 since 2026-08-25 — was 0.9; mirrored in capture/frames.ts and
-  video-to-prompt), against 2 GB/gripe and 20 GB/org.
+  renumbered ascending (`t` survives, so transcript citations stay valid). It was a flat 150 until 2026-07-31.
+  The brief (2026-10-15) carries **no frame URLs**: frames are named by path in the rebuilt report's
+  timeline, `get_images` shows ≤6 per call (evidence set by default), `get_frames` pages download
+  URLs. A frame is ~150–300 KB (JPEG quality 0.8 since 2026-08-25), against 2 GB/gripe and 20 GB/org.
+- **Image-bearing MCP results are capped at 25k tokens by Claude Code** (`MAX_MCP_OUTPUT_TOKENS`);
+  text-only results over 50k chars get saved to a file unless the tool declares
+  `_meta["anthropic/maxResultSizeChars"]` (get_walkthrough: 200k). So images never ride in the brief:
+  `get_images` caps at `IMAGES_PER_CALL` = 6 and downsizes to `INLINE_EDGE` 1600 px (server/brief.ts).
+- **The brief's recording is rebuilt, the upload is not.** `server/brief.ts` reruns the library's
+  `buildReport` over each take's recording.json on every pull (and Refine reads the same rebuilt
+  text). A format-1 take never claims change boxes. If ANY take's recording.json is unreadable the
+  whole walkthrough falls back to S3 report.md. The library comes from the git tag
+  (`github:dested/video-to-prompt#vX.Y.Z`, a release commit with `dist/` built in; bun fetches the
+  tarball, so the Alpine build needs no git). Bump the tag, `bun install`, and check the lockfile
+  still passes a bun 1.3 `--frozen-lockfile` install (the Dockerfile's bun).
 - **Renaming a column is a SQL job, not a `db push` job.** Predeploy runs `bunx prisma db push`
   **without** `--accept-data-loss` on purpose, so any drop stalls the deploy. Rename in place first
   (`ALTER TABLE "gripe" RENAME COLUMN "old" TO "new"`), then push — it sees no drift. Remember
   `handback_test` needs the same statement or the e2e suite 500s.
 - **Two MCP servers, one implementation.** `server/mcp.ts` (hosted, `/mcp`) and `cli/mcp.ts`
-  (stdio) both go through `server/gripes-api.ts` + `server/mcp-format.ts`. Change what an agent
+  (stdio) both go through `server/walkthroughs-api.ts` + `server/mcp-format.ts`. Change what an agent
   sees in those two files, never in one server. `/api/ingest`'s read routes are thin wrappers over
   the same functions.
 - **`/mcp` is stateless and POST-only.** Fresh `McpServer` + transport per request
@@ -1198,8 +1210,10 @@ reaches the container on a plain push.
 - **Refine and the assistant never mutate the ground truth.** report.md in S3 is immutable;
   refine writes columns, the assistant edits recording.json transcript TEXT only (timings
   frozen — the polish contract), and `remove_span` deletes keyframes + records a marker but
-  NEVER re-encodes video (owner: "fuck ffmpeg"). The brief's removed-spans section tells
-  agents to ignore video inside those windows — that's the whole mechanism.
+  NEVER re-encodes video (owner: "fuck ffmpeg"). The rebuilt report leaves those windows out
+  and marks them ✂ (library `cuts`); the old removed-spans section only prints when the report
+  couldn't be rebuilt. Because the report is rebuilt per pull, an assistant edit to
+  recording.json shows up in the next brief.
 - **runRefine's payer is the uploader on auto-run, the caller on manual.** `{byUserId}` exists
   so a pro teammate can refine a non-pro teammate's upload; both paths meter one polish call
   and bail silently when not pro / not configured / already running. It never throws — a

@@ -23,6 +23,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import sharp from 'sharp'
 import { z } from 'zod'
 import { spaceId } from './access'
+import { briefFromRecordings, loadRecordings } from './brief'
 import { env } from './env'
 import { log } from './logger'
 import { prisma } from './prisma'
@@ -127,7 +128,7 @@ const mmss = (ms: number) =>
 // --- vision curation ------------------------------------------------------
 
 const VISION_SYSTEM =
-  'You pick the keyframes that carry a screen recording\'s story for a coding agent, and caption them. Keep a frame only if it shows something the narration references, a bug visibly occurring, an error state, or a distinct step in the flow. Captions are one factual sentence tied to what is visible — never speculation.'
+  "You pick the keyframes that carry a screen recording's story for a coding agent, and caption them. Keep a frame only if it shows something the narration references, a bug visibly occurring, an error state, or a distinct step in the flow. Captions are one factual sentence tied to what is visible — never speculation."
 
 const visionWireSchema = z.object({
   frames: z.array(
@@ -154,7 +155,10 @@ const VISION_OUTPUT_SCHEMA = {
         properties: {
           k: { type: 'number', description: 'The frame number shown to you' },
           keep: { type: 'boolean', description: 'Whether this frame carries the story' },
-          weight: { type: 'number', description: 'How much it matters, 1 (minor) to 5 (essential)' },
+          weight: {
+            type: 'number',
+            description: 'How much it matters, 1 (minor) to 5 (essential)',
+          },
           caption: { type: 'string', description: 'One factual sentence about what is visible' },
         },
       },
@@ -311,7 +315,11 @@ async function curateFrames(
       shown.set(k, frame)
       content.push({
         type: 'image',
-        source: { type: 'base64', media_type: frame.mediaType, data: frame.jpeg.toString('base64') },
+        source: {
+          type: 'base64',
+          media_type: frame.mediaType,
+          data: frame.jpeg.toString('base64'),
+        },
       })
       content.push({
         type: 'text',
@@ -413,23 +421,28 @@ const SYNTH_OUTPUT_SCHEMA = {
   additionalProperties: false,
   required: ['title', 'digest', 'key_points', 'summary_md', 'brief_md', 'health_extra'],
   properties: {
-    title: { type: 'string', description: 'Specific ≤80-char name in the narrator\'s nouns' },
+    title: { type: 'string', description: "Specific ≤80-char name in the narrator's nouns" },
     digest: {
       type: 'string',
-      description: '2–4 plain sentences a person reads first: what this recording is and what the narrator wants',
+      description:
+        '2–4 plain sentences a person reads first: what this recording is and what the narrator wants',
     },
     key_points: {
       type: 'array',
-      description: 'every distinct thing the narrator raised, in order; typically 2–8; never invented',
+      description:
+        'every distinct thing the narrator raised, in order; typically 2–8; never invented',
       items: {
         type: 'object',
         additionalProperties: false,
         required: ['title', 'detail', 'severity', 'at'],
         properties: {
-          title: { type: 'string', description: 'The point in the narrator\'s own nouns' },
+          title: { type: 'string', description: "The point in the narrator's own nouns" },
           detail: { type: 'string', description: 'One sentence on what was raised' },
           severity: { type: 'string', enum: ['high', 'medium', 'low'] },
-          at: { type: 'string', description: 'm:ss where it is raised, or empty string when there is no moment' },
+          at: {
+            type: 'string',
+            description: 'm:ss where it is raised, or empty string when there is no moment',
+          },
         },
       },
     },
@@ -511,10 +524,31 @@ export async function runRefine(
     const space = spaceId({ teamId: walkthrough.teamId, userId: walkthrough.userId })
     const durationMs = walkthrough.durationMs
 
-    // report.md — the recorder's own writeup, when it uploaded one.
-    const reportMd = await getObjectText(walkthroughKey(space, walkthrough.id, 'report.md'))
-      .then((t) => t.slice(0, MAX_REPORT_CHARS))
-      .catch(() => null)
+    // The report, rebuilt from each take's recording.json (server/brief.ts) so
+    // Sonnet reads the current format whatever recorder wrote the upload; the
+    // recorder's own report.md when a take can't be read.
+    const briefTakes = walkthrough.takes.map((t) => ({
+      index: t.index,
+      dir: t.dir,
+      videoPath: t.videoPath,
+    }))
+    const parsedTakes = await loadRecordings(space, walkthrough.id, briefTakes)
+    let rebuiltMd: string | null = null
+    if (parsedTakes) {
+      try {
+        rebuiltMd = briefFromRecordings(
+          { ...walkthrough, takes: briefTakes, curation: null, points: null },
+          parsedTakes
+        ).recordingMd
+      } catch (err) {
+        log.warn(`[refine] report rebuild failed for ${walkthrough.id}: ${String(err)}`)
+      }
+    }
+    const reportMd =
+      (
+        rebuiltMd ??
+        (await getObjectText(walkthroughKey(space, walkthrough.id, 'report.md')).catch(() => null))
+      )?.slice(0, MAX_REPORT_CHARS) ?? null
 
     // Each take's global offset is the sum of every earlier take's duration —
     // the walkthrough-wide output clock every stamp below rides on.
@@ -543,7 +577,9 @@ export async function runRefine(
     })
     const comments = commentRows
       .map((c) =>
-        c.atMs !== null ? `[${mmss(c.atMs)}] ${c.authorName}: ${c.text}` : `${c.authorName}: ${c.text}`
+        c.atMs !== null
+          ? `[${mmss(c.atMs)}] ${c.authorName}: ${c.text}`
+          : `${c.authorName}: ${c.text}`
       )
       .join('\n')
       .slice(0, MAX_COMMENT_CHARS)
@@ -553,7 +589,11 @@ export async function runRefine(
     // --- deterministic health checks -----------------------------------
     const health: HealthNote[] = []
     if (reportMd === null) {
-      health.push({ severity: 'warn', text: 'no report.md was uploaded with this walkthrough', atMs: null })
+      health.push({
+        severity: 'warn',
+        text: 'no report.md was uploaded with this walkthrough',
+        atMs: null,
+      })
     }
     let spokenMs = 0
     const gapNotes: HealthNote[] = []
@@ -591,9 +631,7 @@ export async function runRefine(
           const a = rec.frames[f]!
           const b = rec.frames[f + 1]!
           if (b.tMs - a.tMs <= 120_000) continue
-          const overlaps = rec.transcript.some(
-            (line) => line.endMs > a.tMs && line.tMs < b.tMs
-          )
+          const overlaps = rec.transcript.some((line) => line.endMs > a.tMs && line.tMs < b.tMs)
           if (!overlaps) continue
           gapNotes.push({
             severity: 'info',
@@ -786,7 +824,10 @@ export async function runRefine(
     }
   } catch (err) {
     await prisma.walkthrough
-      .update({ where: { id: walkthrough.id }, data: { refineStatus: 'failed', refineStage: null } })
+      .update({
+        where: { id: walkthrough.id },
+        data: { refineStatus: 'failed', refineStage: null },
+      })
       .catch(() => {})
     log.warn(`[refine] pass failed for ${walkthrough.id}: ${String(err)}`)
   }
