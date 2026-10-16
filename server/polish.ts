@@ -23,8 +23,10 @@ import { log } from './logger'
 
 // Haiku, not Opus, and deliberately: this is spelling and punctuation against a
 // glossary the prompt already contains. It runs on every take, so latency and
-// cost per minute of narration matter more here than reasoning depth.
-const MODEL = 'claude-haiku-4-5'
+// cost per minute of narration matter more here than reasoning depth — hence
+// effort 'low' (Haiku 5.5 thinks by default; low lets it skip thinking on an
+// easy chunk).
+const MODEL = 'claude-haiku-5-5'
 
 /** Lines per request. Keeps one bad chunk from spoiling a long walkthrough. */
 const CHUNK_LINES = 250
@@ -51,7 +53,32 @@ const editSchema = z.object({
   text: z.string(),
 })
 
-const editsSchema = z.array(editSchema)
+const editsSchema = z.object({ edits: z.array(editSchema) })
+
+/**
+ * The JSON Schema handed to structured outputs — same shape as `editsSchema`.
+ * Haiku 5.5 rejects an assistant prefill (400), and structured outputs is the
+ * stronger guarantee anyway: the reply always parses.
+ */
+const OUTPUT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['edits'],
+  properties: {
+    edits: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['i', 'text'],
+        properties: {
+          i: { type: 'integer', description: 'The line number as given' },
+          text: { type: 'string', description: 'The corrected line' },
+        },
+      },
+    },
+  },
+} as const
 
 export function polishConfigured(): boolean {
   return Boolean(env.ANTHROPIC_API_KEY)
@@ -74,7 +101,7 @@ Never:
 - translate; keep the speaker's language
 - rewrite phrasing that is merely informal — this is a transcript of a person talking, not prose. Leave "so yeah, that's broken" alone apart from punctuation.
 
-Return a JSON array of {"i": <line number>, "text": "<corrected line>"} containing ONLY the lines you changed. A line you would return unchanged must be omitted. Return [] when nothing needs correcting. Output the JSON array and nothing else.`
+Return {"edits": [{"i": <line number>, "text": "<corrected line>"}]} containing ONLY the lines you changed. A line you would return unchanged must be omitted. Return {"edits": []} when nothing needs correcting.`
 
 function contextBlock(context: PolishContext): string {
   const parts: string[] = []
@@ -114,24 +141,22 @@ async function polishChunk(
       model: MODEL,
       max_tokens: 8000,
       system: SYSTEM,
-      messages: [
-        { role: 'user', content: `${contextBlock(context)}Transcript lines:\n${numbered}` },
-        // Prefilled so the reply is a JSON array from its first token — no
-        // preamble to strip, no "Here are the corrections:" to parse around.
-        { role: 'assistant', content: '[' },
-      ],
+      output_config: { effort: 'low', format: { type: 'json_schema', schema: OUTPUT_SCHEMA } },
+      messages: [{ role: 'user', content: `${contextBlock(context)}Transcript lines:\n${numbered}` }],
     },
     { timeout: REQUEST_TIMEOUT_MS }
   )
+  // Haiku 5.5's classifiers can decline; the content is then not an answer.
+  if (message.stop_reason === 'refusal') throw new Error('model declined the chunk')
 
   const body = message.content
     .flatMap((block) => (block.type === 'text' ? [block.text] : []))
     .join('')
-  const parsed = editsSchema.safeParse(JSON.parse(`[${body.replace(/]\s*$/, '')}]`))
+  const parsed = editsSchema.safeParse(JSON.parse(body))
   if (!parsed.success) throw new Error('model returned unparseable edits')
 
   const edits = new Map<number, string>()
-  for (const edit of parsed.data) {
+  for (const edit of parsed.data.edits) {
     const index = edit.i - 1
     const original = lines[index - offset]
     if (!original) continue

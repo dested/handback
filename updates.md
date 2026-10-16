@@ -2,6 +2,12 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-10-15 — Claude models to the 5.5 family
+Asked: every model on 5.5. polish/references/refine-vision → claude-haiku-5-5, refine-synth/structure/agent →
+claude-sonnet-5-5. Haiku 5.5 400s on prefill: polish + references now use structured outputs, effort low, refusal check.
+Live smoke: polish fixed 3/4 mangled lines, structure proposed 2 tasks. (The compare page was deleted on request.)
+Touched: server/{polish,references,refine,structure,agent}.ts, src/app/privacy.tsx, cliffnotes.md
+
 ## 2026-10-15 — old vs new capture on three real uploads
 Asked: compare an old walkthrough's result to the new pipeline's. Re-ran Gym, Hometeam, Oct 3 (Personal, iPhone HEVC)
 through 6148dbb in headless Windows Chrome: no regressions; old Hometeam stopped at 1:15 of 4:51, new covers it.

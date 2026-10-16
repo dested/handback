@@ -22,7 +22,8 @@ import { log } from './logger'
 import { prisma } from './prisma'
 import { getObjectText, walkthroughKey } from './storage'
 
-const MODEL = 'claude-haiku-4-5'
+// Effort 'low': a short extraction, and Haiku 5.5 thinks by default.
+const MODEL = 'claude-haiku-5-5'
 const REQUEST_TIMEOUT_MS = 60_000
 // A nudge list longer than this is nagging, not helping.
 const MAX_SUGGESTIONS = 6
@@ -40,7 +41,42 @@ const suggestionSchema = z.object({
     .optional(),
 })
 
-const suggestionsSchema = z.array(suggestionSchema)
+// Structured outputs wants every field present, so "no quote"/"no timestamp"
+// arrive as "" and become absent here.
+const blankToUndefined = (v: unknown) => (v === '' ? undefined : v)
+const suggestionsSchema = z.object({
+  files: z.array(
+    suggestionSchema.extend({
+      quote: z.preprocess(blankToUndefined, suggestionSchema.shape.quote),
+      at: z.preprocess(blankToUndefined, suggestionSchema.shape.at),
+    })
+  ),
+})
+
+/** The JSON Schema handed to structured outputs (Haiku 5.5 rejects a prefill). */
+const OUTPUT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['files'],
+  properties: {
+    files: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['label', 'quote', 'at'],
+        properties: {
+          label: { type: 'string', description: 'What the speaker called it, short' },
+          quote: { type: 'string', description: 'The sentence that mentioned it, verbatim or lightly trimmed' },
+          at: {
+            type: 'string',
+            description: 'm:ss timestamp printed beside that line, or "" when none is printed',
+          },
+        },
+      },
+    },
+  },
+} as const
 
 const SYSTEM = `You read the report of a narrated screen recording ("walkthrough") that a person recorded for a coding agent. Your one job: find moments where the speaker refers to a concrete digital artifact that exists OUTSIDE the recording and that the agent would want as a file.
 
@@ -48,10 +84,10 @@ Count as an artifact: a document, spreadsheet, PDF, CSV, log file, config file, 
 
 Do NOT count: the app being recorded, code "in the repo", pages/screens/buttons on screen, the recording or its own frames/transcript, vague plurals ("the docs", "our files") with no specific artifact, or anything the agent can already see in this report.
 
-Return a JSON array (max ${MAX_SUGGESTIONS} items, deduplicated) of:
-{"label": "<what the speaker called it, short>", "quote": "<the sentence that mentioned it, verbatim or lightly trimmed>", "at": "<m:ss timestamp of that line, only if one is printed beside it>"}
+Return {"files": [...]} with at most ${MAX_SUGGESTIONS} items, deduplicated, each:
+{"label": "<what the speaker called it, short>", "quote": "<the sentence that mentioned it, verbatim or lightly trimmed>", "at": "<m:ss timestamp of that line if one is printed beside it, else \"\">"}
 
-Return [] when nothing qualifies — most walkthroughs mention no outside files, and an empty array is the expected answer. Output the JSON array and nothing else.`
+Return {"files": []} when nothing qualifies — most walkthroughs mention no outside files, and an empty list is the expected answer.`
 
 const parseAt = (at: string | undefined): number | null => {
   if (!at) return null
@@ -87,23 +123,27 @@ export async function detectReferencedFiles(walkthroughId: string): Promise<void
     const message = await client.messages.create(
       {
         model: MODEL,
-        max_tokens: 2000,
+        // Room for thinking on top of a short list.
+        max_tokens: 4000,
         system: SYSTEM,
+        output_config: { effort: 'low', format: { type: 'json_schema', schema: OUTPUT_SCHEMA } },
         messages: [
           {
             role: 'user',
             content: `Walkthrough title: ${walkthrough.title}\n\n${reportMd.slice(0, MAX_REPORT_CHARS)}`,
           },
-          // Prefilled so the reply is a JSON array from its first token.
-          { role: 'assistant', content: '[' },
         ],
       },
       { timeout: REQUEST_TIMEOUT_MS }
     )
+    if (message.stop_reason === 'refusal') {
+      log.warn(`[references] model declined ${walkthroughId}`)
+      return
+    }
     const body = message.content
       .flatMap((block) => (block.type === 'text' ? [block.text] : []))
       .join('')
-    const parsed = suggestionsSchema.safeParse(JSON.parse(`[${body.replace(/]\s*$/, '')}]`))
+    const parsed = suggestionsSchema.safeParse(JSON.parse(body))
     if (!parsed.success) {
       log.warn(`[references] unparseable suggestions for ${walkthroughId}`)
       return
@@ -112,7 +152,7 @@ export async function detectReferencedFiles(walkthroughId: string): Promise<void
     // Dedupe by label, case-blind — the model occasionally names one artifact
     // twice across two mentions.
     const seen = new Set<string>()
-    const rows = parsed.data
+    const rows = parsed.data.files
       .filter((s) => {
         const key = s.label.toLowerCase()
         if (seen.has(key)) return false

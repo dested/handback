@@ -12,12 +12,12 @@
 // refusal, a timeout — returns null and the caller reports "couldn't structure
 // this one" without having spent anything but the metered call. Unlike polish
 // this is a reasoning pass over a whole walkthrough, run on demand from the
-// viewer, so it gets Opus rather than Haiku — depth matters here, per-minute
+// viewer, so it gets Sonnet rather than Haiku — depth matters here, per-minute
 // cost does not.
 //
-// Opus 5 notes (they differ from the Haiku call in polish.ts): assistant
-// prefill is not accepted (400), so the JSON shape is enforced with structured
-// outputs (`output_config.format`) instead; thinking is on by default and the
+// Sonnet 5.5 notes: assistant prefill is not accepted (400), so the JSON shape
+// is enforced with structured outputs (`output_config.format`) instead; thinking
+// is on by default and the
 // classifiers can decline a request outright — `stop_reason: 'refusal'` is
 // checked before the content is read, and degrades to null like everything else.
 
@@ -26,7 +26,7 @@ import { z } from 'zod'
 import { env } from './env'
 import { log } from './logger'
 
-const MODEL = 'claude-sonnet-5'
+const MODEL = 'claude-sonnet-5-5'
 const REQUEST_TIMEOUT_MS = 120_000
 const MAX_TASKS = 10
 /** report.md for a long walkthrough is big but bounded; cap what we send anyway. */
@@ -156,7 +156,7 @@ export async function proposeStructure(input: StructureInput): Promise<ProposedT
       },
       { timeout: REQUEST_TIMEOUT_MS }
     )
-    // Opus 5's classifiers can decline before or mid-answer; content is then
+    // The classifiers can decline before or mid-answer; content is then
     // empty or partial and must not be parsed as an answer.
     if (message.stop_reason === 'refusal') {
       log.warn('[structure] model declined the request')

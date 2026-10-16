@@ -1,4 +1,4 @@
-// The walkthrough agent: an Opus 5 tool loop the reviewer talks to on the viewer.
+// The walkthrough agent: a Sonnet 5.5 tool loop the reviewer talks to on the viewer.
 //
 // A walkthrough is a narrated screen recording someone made for a coding agent.
 // This module lets the human who owns it edit its DERIVED content by talking —
@@ -7,7 +7,7 @@
 // touches the video (excluded spans are markers only — nothing is re-encoded),
 // the transcript timings, or the original uploaded report.md.
 //
-// Same provider posture as refine.ts/structure.ts (Opus 5, structured refusal
+// Same provider posture as refine.ts/structure.ts (Sonnet 5.5, structured refusal
 // handling), but a conversation rather than a single synthesis: real tools whose
 // handlers mutate the row and S3, run in a bounded loop. The caller (router) has
 // already authenticated, pro-gated and metered the reviewer — this module trusts
@@ -25,7 +25,7 @@ import { indexWalkthrough } from './search'
 import { deleteKeys, getObjectText, putObjectText, walkthroughKey } from './storage'
 import type { Curation } from './refine'
 
-const MODEL = 'claude-sonnet-5'
+const MODEL = 'claude-sonnet-5-5'
 const MAX_TOKENS = 8_000
 const REQUEST_TIMEOUT_MS = 120_000
 const MAX_ITERATIONS = 12

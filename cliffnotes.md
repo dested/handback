@@ -220,12 +220,13 @@ server/
   transcribe.ts         speech-to-text: Deepgram nova-3 (diarize → segments carry `speaker`,
                         provider-local per chunk) when DEEPGRAM_API_KEY set, else Groq
                         whisper-large-v3-turbo; segments in ms
-  polish.ts             transcript cleanup via claude-haiku-4-5 — text only, timings untouched
+  polish.ts             transcript cleanup via claude-haiku-5-5 (structured outputs, effort low)
+                        — text only, timings untouched
   references.ts         "you mentioned a file": Haiku reads report.md at finalize (agent kind,
                         null→set transition only) → WalkthroughFileSuggestion nudge rows;
                         degrade-to-nothing like polish, unmetered
   structure.ts          the split pass: report.md + comments → 1–10 proposed tasks via
-                        claude-sonnet-5 structured outputs (no prefill); every
+                        claude-sonnet-5-5 structured outputs (no prefill); every
                         failure degrades to null like polish. childBriefMd() writes a child's
                         brief_md (steps, done-when, "Source: get_walkthrough(parent)")
   email.ts              Resend sender + reset/verify/invite templates; never throws

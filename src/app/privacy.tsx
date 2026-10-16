@@ -151,7 +151,7 @@ export function PrivacyPage() {
             {
               term: 'Anthropic',
               detail:
-                'Transcript cleanup with the claude-haiku-4-5 model. Receives the transcript text, the recorded page address, and its console errors. Never receives audio, video, or images.',
+                'Transcript cleanup with the claude-haiku-5-5 model. Receives the transcript text, the recorded page address, and its console errors. Never receives audio, video, or images.',
             },
             {
               term: 'Resend',

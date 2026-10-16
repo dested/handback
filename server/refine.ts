@@ -10,10 +10,10 @@
 // otherwise untouched. The original report.md in S3 is never rewritten; the
 // refined text lives on the walkthrough row and the brief prefers it.
 //
-// Same model posture as structure.ts: Sonnet 5 for the synthesis (no assistant
+// Same model posture as structure.ts: Sonnet 5.5 for the synthesis (no assistant
 // prefill; JSON shape via structured outputs; `stop_reason: 'refusal'` degrades
 // like any other failure — Sonnet-not-Opus is the 2026-08-24 pricing decision,
-// decisions.md) and Haiku for the per-batch vision curation, which is cheap
+// decisions.md) and Haiku 5.5 for the per-batch vision curation, which is cheap
 // classification against images the prompt already carries. Vision frames are
 // downscaled to 800px JPEGs before sending, near-duplicate frames are skipped by
 // a dHash pass (click/nav/start frames immune), and the narration prefix is
@@ -38,8 +38,8 @@ import { indexWalkthrough } from './search'
 import { getObjectBytes, getObjectText, walkthroughKey } from './storage'
 import { checkAndReservePolish } from './usage'
 
-const VISION_MODEL = 'claude-haiku-4-5'
-export const SYNTH_MODEL = 'claude-sonnet-5'
+const VISION_MODEL = 'claude-haiku-5-5'
+export const SYNTH_MODEL = 'claude-sonnet-5-5'
 const VISION_TIMEOUT_MS = 60_000
 const SYNTH_TIMEOUT_MS = 120_000
 export const SYNTH_MAX_TOKENS = 16_000
@@ -341,7 +341,8 @@ async function curateFrames(
       const message = await client.messages.create(
         {
           model: VISION_MODEL,
-          max_tokens: 4_000,
+          // Haiku 5.5 thinks by default, and thinking counts toward the cap.
+          max_tokens: 8_000,
           system: VISION_SYSTEM,
           output_config: { format: { type: 'json_schema', schema: VISION_OUTPUT_SCHEMA } },
           messages: [{ role: 'user', content }],
@@ -800,7 +801,7 @@ export async function runRefine(
       },
       { timeout: SYNTH_TIMEOUT_MS }
     )
-    // Opus 5 can decline before or mid-answer; a refusal is a failure like any
+    // Sonnet 5.5 can decline before or mid-answer; a refusal is a failure like any
     // other, handled by the outer catch.
     if (message.stop_reason === 'refusal') throw new Error('synthesis declined')
     const text = message.content
