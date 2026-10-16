@@ -219,7 +219,9 @@ server/
                         reap; hourly S3-first sweep (startRetentionSweep in server.ts)
   transcribe.ts         speech-to-text: Deepgram nova-3 (diarize → segments carry `speaker`,
                         provider-local per chunk) when DEEPGRAM_API_KEY set, else Groq
-                        whisper-large-v3-turbo; segments in ms
+                        whisper-large-v3-turbo; segments in ms; every chunk's lines go through
+                        the library's dropUnheard on its own WAV (pcmFromWav) — no "Thank you."
+                        over silence, for every client incl. the extension
   polish.ts             transcript cleanup via claude-haiku-5-5 (structured outputs, effort low)
                         — text only, timings untouched
   references.ts         "you mentioned a file": Haiku reads report.md at finalize (agent kind,

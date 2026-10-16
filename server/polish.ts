@@ -142,7 +142,9 @@ async function polishChunk(
       max_tokens: 8000,
       system: SYSTEM,
       output_config: { effort: 'low', format: { type: 'json_schema', schema: OUTPUT_SCHEMA } },
-      messages: [{ role: 'user', content: `${contextBlock(context)}Transcript lines:\n${numbered}` }],
+      messages: [
+        { role: 'user', content: `${contextBlock(context)}Transcript lines:\n${numbered}` },
+      ],
     },
     { timeout: REQUEST_TIMEOUT_MS }
   )

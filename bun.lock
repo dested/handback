@@ -8,7 +8,7 @@
         "@anthropic-ai/sdk": "^0.115.0",
         "@aws-sdk/client-s3": "^3.1095.0",
         "@aws-sdk/s3-request-presigner": "^3.1095.0",
-        "@dested/video-to-prompt": "github:dested/video-to-prompt#v1.1.4",
+        "@dested/video-to-prompt": "github:dested/video-to-prompt#v1.1.5",
         "@modelcontextprotocol/sdk": "^1.29.0",
         "@prisma/adapter-pg": "^7.8.0",
         "@prisma/client": "^7.8.0",
@@ -159,7 +159,7 @@
 
     "@better-fetch/fetch": ["@better-fetch/fetch@1.1.21", "", {}, "sha512-/ImESw0sskqlVR94jB+5+Pxjf+xBwDZF/N5+y2/q4EqD7IARUTSpPfIo8uf39SYpCxyOCtbyYpUrZ3F/k0zT4A=="],
 
-    "@dested/video-to-prompt": ["@dested/video-to-prompt@github:dested/video-to-prompt#094cbc3", { "dependencies": { "mediabunny": "^1.61.0" } }, "dested-video-to-prompt-094cbc3", "sha512-GWLEuuV0FaVOuUpjXjukJyYkBrpfg8f4F19KPk6DxGbv+yAejH45T5aER4KRtJdT+ma5QNh2UtaudkEVqJFR/A=="],
+    "@dested/video-to-prompt": ["@dested/video-to-prompt@github:dested/video-to-prompt#3f3b67f", { "dependencies": { "mediabunny": "^1.61.0" } }, "dested-video-to-prompt-3f3b67f", "sha512-Cvl2xqbHSxesQVQNd4pryLmlFxHLH8qBP9LKpVi3Vu2U3zIiH30Kl5g2cOK9wfCYPvIz04vEMeElpZaXfdtEnw=="],
 
     "@electric-sql/pglite": ["@electric-sql/pglite@0.4.1", "", {}, "sha512-mZ9NzzUSYPOCnxHH1oAHPRzoMFJHY472raDKwXl/+6oPbpdJ7g8LsCN4FSaIIfkiCKHhb3iF/Zqo3NYxaIhU7Q=="],
 

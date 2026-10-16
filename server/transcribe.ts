@@ -9,6 +9,7 @@
 // emits — `{t, d?, text}` in milliseconds — so the extension can swap engines
 // without the timeline, the report builder, or the viewer noticing.
 
+import { dropUnheard } from '@dested/video-to-prompt'
 import { z } from 'zod'
 import { env } from './env'
 
@@ -92,6 +93,56 @@ export function dropEchoes(segments: Segment[]): Segment[] {
   return out
 }
 
+/**
+ * A 16-bit PCM WAV (what every client sends: the library's encodeWav, the
+ * extension's own copy of it) as mono Float32 and its rate. Walks the RIFF
+ * chunks rather than trusting a 44-byte header. Null for anything else.
+ */
+export function pcmFromWav(wav: Uint8Array): { samples: Float32Array; sampleRate: number } | null {
+  const view = new DataView(wav.buffer, wav.byteOffset, wav.byteLength)
+  const tag = (at: number) => String.fromCharCode(...wav.subarray(at, at + 4))
+  if (wav.byteLength < 12 || tag(0) !== 'RIFF' || tag(8) !== 'WAVE') return null
+  let channels = 0
+  let sampleRate = 0
+  let at = 12
+  while (at + 8 <= wav.byteLength) {
+    const id = tag(at)
+    const size = view.getUint32(at + 4, true)
+    const body = at + 8
+    if (id === 'fmt ' && size >= 16) {
+      const format = view.getUint16(body, true)
+      const bits = view.getUint16(body + 14, true)
+      if (format !== 1 || bits !== 16) return null
+      channels = view.getUint16(body + 2, true)
+      sampleRate = view.getUint32(body + 4, true)
+    } else if (id === 'data') {
+      if (!channels || !sampleRate) return null
+      // A streamed WAV can promise more data than it carries; read what's there.
+      const bytes = Math.min(size, wav.byteLength - body)
+      const samples = new Float32Array(Math.floor(bytes / 2 / channels))
+      for (let i = 0; i < samples.length; i++) {
+        let sum = 0
+        for (let c = 0; c < channels; c++) sum += view.getInt16(body + (i * channels + c) * 2, true)
+        samples[i] = sum / channels / 32768
+      }
+      return { samples, sampleRate }
+    }
+    at = body + size + (size % 2)
+  }
+  return null
+}
+
+/**
+ * Lines nobody said, gone: Whisper answers silence with "Thank you." (nine of
+ * them over a near-silent phone take). The library's check of each line
+ * against the audio it claims, run on this chunk's own WAV, so every client —
+ * phone, upload, re-transcribe, the extension — gets it.
+ */
+function dropSilentLines(segments: Segment[], wav: Uint8Array): Segment[] {
+  const pcm = pcmFromWav(wav)
+  return pcm ? dropUnheard(segments, pcm.samples, pcm.sampleRate) : segments
+}
+
 export class TranscribeUnavailable extends Error {}
 export class TranscribeFailed extends Error {}
 
@@ -112,9 +163,11 @@ export async function transcribeChunk(
 ): Promise<Transcribed> {
   // Deepgram wins when configured — it diarizes; Groq is the fallback.
   if (env.DEEPGRAM_API_KEY) {
-    return { segments: await transcribeDeepgram(wav, language), label: DEEPGRAM_LABEL }
+    const segments = await transcribeDeepgram(wav, language)
+    return { segments: dropSilentLines(segments, wav), label: DEEPGRAM_LABEL }
   }
-  return { segments: dropEchoes(await transcribeGroq(wav, language)), label: GROQ_LABEL }
+  const segments = dropEchoes(await transcribeGroq(wav, language))
+  return { segments: dropSilentLines(segments, wav), label: GROQ_LABEL }
 }
 
 async function transcribeGroq(

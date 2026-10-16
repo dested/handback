@@ -67,7 +67,10 @@ const OUTPUT_SCHEMA = {
         required: ['label', 'quote', 'at'],
         properties: {
           label: { type: 'string', description: 'What the speaker called it, short' },
-          quote: { type: 'string', description: 'The sentence that mentioned it, verbatim or lightly trimmed' },
+          quote: {
+            type: 'string',
+            description: 'The sentence that mentioned it, verbatim or lightly trimmed',
+          },
           at: {
             type: 'string',
             description: 'm:ss timestamp printed beside that line, or "" when none is printed',

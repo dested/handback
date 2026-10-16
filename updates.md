@@ -2,6 +2,12 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-10-15 — no more "Thank you." over silence (library 1.1.5)
+Asked: fix Whisper's silence hallucinations. Library 1.1.5's dropUnheard runs in distill (phone/upload) and on every
+/api/ingest/transcribe chunk server-side (pcmFromWav), so the extension and re-transcribe get it too. Real-take check:
+drops 13 of 1,116 lines (Hometeam's 9 "Thank you.", Gym 2:46, Oct 3 tail, two near-silent takes), nothing else.
+Touched: server/transcribe.ts, server/transcribe.test.ts, package.json, bun.lock, cliffnotes.md
+
 ## 2026-10-15 — Claude models to the 5.5 family
 Asked: every model on 5.5. polish/references/refine-vision → claude-haiku-5-5, refine-synth/structure/agent →
 claude-sonnet-5-5. Haiku 5.5 400s on prefill: polish + references now use structured outputs, effort low, refusal check.
