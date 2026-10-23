@@ -44,6 +44,7 @@ import {
 } from './stripe'
 import { LOCKED_PRICING_MODEL, pricingModelSchema } from './pricing'
 import { log } from './logger'
+import { closeUpsOn } from './frame-labels'
 import { formatWalkthrough } from './mcp-format'
 import { unsubscribeUrl } from './notify'
 import { prisma } from './prisma'
@@ -1801,7 +1802,8 @@ const walkthroughsRouter = router({
    * under a take's frames/ dir are deletable this way; the video, transcript and
    * report are not frames and stay out of reach. Rows go first, S3 second: a
    * crash in between leaves orphaned objects (wiped with the walkthrough's
-   * prefix eventually), never rows presigning dead keys.
+   * prefix eventually), never rows presigning dead keys. A deleted frame's
+   * close-ups go with it.
    */
   deleteFrames: protectedProcedure
     .input(
@@ -1817,10 +1819,25 @@ const walkthroughsRouter = router({
       if (input.paths.some((p) => !isSafePath(p) || !p.includes('/frames/'))) {
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'Only keyframes can be deleted' })
       }
+      // Each take's recording.json says which frames are close-ups of which.
+      // One that can't be read has none to find; the asked-for frames still go.
+      const paths = new Set(input.paths)
+      for (const dir of new Set(input.paths.map((p) => p.split('/')[0] ?? ''))) {
+        let doc: unknown
+        try {
+          doc = JSON.parse(
+            await getObjectText(walkthroughKey(spaceId(g), input.walkthroughId, `${dir}/recording.json`))
+          )
+        } catch {
+          continue
+        }
+        const frames = isJsonRecord(doc) && isJsonRecord(doc.recording) ? doc.recording.frames : null
+        for (const p of closeUpsOn(dir, frames, paths)) paths.add(p)
+      }
       const files = await prisma.walkthroughFile.findMany({
         where: {
           walkthroughId: input.walkthroughId,
-          path: { in: input.paths },
+          path: { in: [...paths] },
           status: 'uploaded',
         },
       })

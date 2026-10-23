@@ -2,6 +2,16 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-10-22 — deleting a frame takes its close-ups along
+Asked (1.2.0 follow-up): a close-up whose base is deleted is a crop of nothing. deleteFrames reads each
+touched take's recording.json and adds the close-ups resting on a deleted base; the agent's remove_span
+does the same from the take it rewrites (a close-up goes with a base in the span wherever its own time
+falls). The viewer hides a close-up while its base is staged; undo brings both. closeUpsOn() is pure, 4
+tests. ui.md's Frames view gains the close-up treatment. brief-eval sends the production synth picks
+(bases first). Deployed 7c3a213 (library 1.2.0) to handback.dev: run 39875826919 green.
+Touched: server/{frame-labels,frame-labels.test,router,agent}.ts, use-walkthrough-media.ts,
+scripts/brief-eval/run.ts, ui.md
+
 ## 2026-10-22 — library 1.2.0: no frame cap, close-ups and seen spans everywhere frames are read
 Asked: make capture top tier and ship it. Pin to video-to-prompt v1.2.0 (no cap, page model, per-block video,
 close-ups). Viewer: FrameImage draws a close-up into its base (cobalt outline, rest dimmed; "actual size"

@@ -130,10 +130,12 @@ export function useWalkthroughMedia(walkthrough: Walkthrough, urlByPath: Map<str
         const atMs = offset + frame.tMs
         const path = `${take.dir}/${frame.file}`
         const url = urlByPath.get(path)
-        // A frame that never uploaded has nothing to show; a staged one is gone.
+        // A frame that never uploaded has nothing to show; a staged one is gone,
+        // and so is a close-up of one (deleteFrames takes it along).
         if (url === undefined || stagedSet.has(path)) continue
         const base = frame.detail ? byIndex.get(frame.detail.of) : undefined
         const basePath = base ? `${take.dir}/${base.file}` : null
+        if (basePath !== null && stagedSet.has(basePath)) continue
         frames.push({
           atMs,
           url,
@@ -144,10 +146,7 @@ export function useWalkthroughMedia(walkthrough: Walkthrough, urlByPath: Map<str
                 closeUp: {
                   box: frame.detail.box,
                   basePath,
-                  baseUrl:
-                    basePath === null || stagedSet.has(basePath)
-                      ? null
-                      : (urlByPath.get(basePath) ?? null),
+                  baseUrl: basePath === null ? null : (urlByPath.get(basePath) ?? null),
                 },
               }
             : {}),

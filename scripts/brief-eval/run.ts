@@ -42,13 +42,12 @@ import {
   type ToolContent,
 } from '../../server/mcp-format'
 import {
-  SYNTH_FRAMES,
   SYNTH_MAX_TOKENS,
   SYNTH_MODEL,
   SYNTH_OUTPUT_SCHEMA,
   SYNTH_SYSTEM,
   synthContent,
-  synthFrameLabel,
+  synthFramePicks,
   synthWireSchema,
 } from '../../server/refine'
 import { formatWalkthrough as formatOld } from './old-format'
@@ -228,9 +227,9 @@ async function refineRequest(
   }
   const rebuilt = briefFromRecordings(briefInput(fx, RECORDER_TITLE, []), fx.recordings)
   const frames = await Promise.all(
-    rebuilt.startHere.slice(0, SYNTH_FRAMES).map(async (f) => {
+    synthFramePicks(rebuilt.startHere, rebuilt.closeUps, rebuilt.frameAt).map(async (f) => {
       const { data } = await imageForAgent(await readFile(join(fx.root, f.path)), INLINE_EDGE)
-      return { label: synthFrameLabel(f), data }
+      return { label: f.label, data }
     })
   )
   return {

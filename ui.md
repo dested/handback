@@ -243,6 +243,16 @@ The bullets below describe components the pane and page reuse unchanged:
   current shot re-indexes to keep the big view on the same image. Same position
   shows the next shot after a delete, so pruning near-duplicates is
   delete-delete-delete.
+  **Close-ups** (library 1.2+: a frame that is only the region of an earlier
+  frame, its base, that changed) are never shown as a bare crop while the base
+  exists: `FrameImage` draws the base, dims everything outside the region 30%
+  black, lays the close-up's own pixels into the region and outlines it 2px
+  cobalt. Same treatment on the stage, filmstrip thumbs, the timeline's tick
+  thumbnails and the player's corner thumbnail. The readout adds a muted
+  `· close-up of frame N` (N jumps to the base); an `actual size` / `show in
+  place` mono link swaps the stage to the crop alone at its own pixels. A
+  close-up whose base is gone renders as the crop. Deleting a base deletes its
+  close-ups: they leave the strip with it when staged and come back on undo.
 - **Transcript** (`transcript-panel.tsx`) is a borderless list: cobalt mono
   times, the playing line cobalt-washed, click seeks. **Console**
   (`events-panel.tsx`): mono lines with a 2px left tick — red error, violet

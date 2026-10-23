@@ -9,6 +9,7 @@
 // brings the base frame in first.
 
 import { recDirName, type Recording } from '@dested/video-to-prompt'
+import { z } from 'zod'
 import type { RecordingBrief } from './brief'
 import { recStamp } from './mcp-format'
 
@@ -28,6 +29,34 @@ export function closeUpsOf(recordings: Recording[]): Record<string, CloseUpOf> {
     }
   }
   return out
+}
+
+const detailFrameSchema = z.object({
+  index: z.number().optional(),
+  file: z.string(),
+  detail: z.object({ of: z.number() }).optional().catch(undefined),
+})
+
+/**
+ * The close-ups resting on any of `bases` in one take, as walkthrough-relative
+ * paths. A close-up is only the region of its base that changed, so deleting
+ * the base takes it along. `frames` is the take's recording.json `frames`,
+ * unparsed: a frame that doesn't read is no close-up.
+ */
+export function closeUpsOn(dir: string, frames: unknown, bases: ReadonlySet<string>): string[] {
+  if (!Array.isArray(frames)) return []
+  // The recorder sometimes writes the take dir into `file` already.
+  const pathOf = (file: string) => (file.startsWith(`${dir}/`) ? file : `${dir}/${file}`)
+  const parsed = frames.flatMap((raw) => {
+    const f = detailFrameSchema.safeParse(raw)
+    return f.success ? [f.data] : []
+  })
+  const goneIndexes = new Set(
+    parsed.flatMap((f) => (f.index !== undefined && bases.has(pathOf(f.file)) ? [f.index] : []))
+  )
+  return parsed.flatMap((f) =>
+    f.detail && goneIndexes.has(f.detail.of) && !bases.has(pathOf(f.file)) ? [pathOf(f.file)] : []
+  )
 }
 
 /** What a close-up is, for anything that shows one to a model: "close-up of frame 12 (rec-01/frames/12-0017.jpg): the screen then was that frame except this region". */

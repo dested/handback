@@ -19,6 +19,7 @@ import type { Prisma } from '@prisma/client'
 import { z } from 'zod'
 import { spaceId } from './access'
 import { env } from './env'
+import { closeUpsOn } from './frame-labels'
 import { log } from './logger'
 import { prisma } from './prisma'
 import { indexWalkthrough } from './search'
@@ -608,11 +609,15 @@ async function removeSpanTool(ctx: Ctx, rawInput: unknown): Promise<ToolOutcome>
       if (inSpan) linesRemoved++
       return !inSpan
     })
-    const keptFrames = rec.frames.filter((frame) => {
-      const inSpan = frame.tMs >= localStart && frame.tMs <= localEnd
-      if (inSpan) removedPaths.push(framePath(take.dir, frame.file))
-      return !inSpan
-    })
+    const gone = new Set(
+      rec.frames
+        .filter((frame) => frame.tMs >= localStart && frame.tMs <= localEnd)
+        .map((frame) => framePath(take.dir, frame.file))
+    )
+    // A close-up of a frame in the span goes with it, wherever its own time falls.
+    for (const path of closeUpsOn(take.dir, rec.frames, gone)) gone.add(path)
+    removedPaths.push(...gone)
+    const keptFrames = rec.frames.filter((frame) => !gone.has(framePath(take.dir, frame.file)))
 
     if (keptLines.length !== rec.transcript.length || keptFrames.length !== rec.frames.length) {
       rec.transcript = keptLines

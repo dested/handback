@@ -4,6 +4,7 @@ import type { RecordingBrief } from './brief'
 import {
   closeUpNote,
   closeUpsOf,
+  closeUpsOn,
   evidenceImages,
   imageLabel,
   visionBatches,
@@ -51,6 +52,40 @@ describe('closeUpsOf', () => {
 
   test('the reader keeps seen spans', () => {
     expect(take?.recording.meta.frames[3]?.seen).toEqual([[20000, 25000]])
+  })
+})
+
+describe('closeUpsOn', () => {
+  const frames = [
+    { index: 1, tMs: 0, file: 'frames/01-0000.jpg' },
+    { index: 2, tMs: 9000, file: 'frames/02-0009.jpg' },
+    { index: 3, tMs: 12000, file: 'frames/03-0012.jpg', detail: { of: 2, box: {} } },
+    { index: 4, tMs: 14000, file: 'rec-01/frames/04-0014.jpg', detail: { of: 2, box: {} } },
+    { index: 5, tMs: 15000, file: 'frames/05-0015.jpg', detail: { of: 1, box: {} } },
+  ]
+
+  test("deleting a base takes its close-ups, whichever way the take writes `file`", () => {
+    expect(closeUpsOn('rec-01', frames, new Set(['rec-01/frames/02-0009.jpg']))).toEqual([
+      'rec-01/frames/03-0012.jpg',
+      'rec-01/frames/04-0014.jpg',
+    ])
+  })
+
+  test('deleting a close-up alone takes nothing else', () => {
+    expect(closeUpsOn('rec-01', frames, new Set(['rec-01/frames/03-0012.jpg']))).toEqual([])
+  })
+
+  test("a close-up already being deleted isn't listed twice", () => {
+    const bases = new Set(['rec-01/frames/01-0000.jpg', 'rec-01/frames/05-0015.jpg'])
+    expect(closeUpsOn('rec-01', frames, bases)).toEqual([])
+  })
+
+  test("another take's paths and an unreadable recording take nothing", () => {
+    expect(closeUpsOn('rec-02', frames, new Set(['rec-01/frames/02-0009.jpg']))).toEqual([])
+    expect(closeUpsOn('rec-01', { frames }, new Set(['rec-01/frames/02-0009.jpg']))).toEqual([])
+    expect(
+      closeUpsOn('rec-01', [{ file: 'frames/02-0009.jpg' }, ...frames.slice(2)], new Set(['rec-01/frames/02-0009.jpg']))
+    ).toEqual([])
   })
 })
 
