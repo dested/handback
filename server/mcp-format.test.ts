@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'bun:test'
-import { formatWalkthrough, imagesContent, type FormattableWalkthrough } from './mcp-format'
+import {
+  byFrameOrder,
+  formatWalkthrough,
+  imagesContent,
+  type FormattableWalkthrough,
+} from './mcp-format'
 
 const url = (path: string) => `https://r2.example/${path}?X-Amz-Signature=abc`
 const file = (path: string) => ({ path, url: url(path) })
@@ -140,5 +145,36 @@ describe('imagesContent', () => {
     expect(content.map((c) => c.type)).toEqual(['text', 'image', 'text'])
     const tail = content[2]
     expect(tail?.type === 'text' ? tail.text : '').toContain('nope.jpg')
+  })
+})
+
+describe('frame order', () => {
+  test('past frame 99 the number decides, not the path', () => {
+    const paths = [
+      'rec-02/frames/01-0000.jpg',
+      'rec-01/frames/100-0412.jpg',
+      'rec-01/frames/11-0016.jpg',
+      'rec-01/frames/99-0410.jpg',
+      'rec-01/frames/02-0005.jpg',
+    ]
+    expect([...paths].sort(byFrameOrder)).toEqual([
+      'rec-01/frames/02-0005.jpg',
+      'rec-01/frames/11-0016.jpg',
+      'rec-01/frames/99-0410.jpg',
+      'rec-01/frames/100-0412.jpg',
+      'rec-02/frames/01-0000.jpg',
+    ])
+  })
+
+  test("the brief names a take's frames first … last in recording order", () => {
+    const brief = formatWalkthrough({
+      ...modern,
+      files: [
+        'rec-01/frames/01-0000.jpg',
+        'rec-01/frames/100-0412.jpg',
+        'rec-01/frames/99-0410.jpg',
+      ].map(file),
+    })
+    expect(brief).toContain('3 frames rec-01/frames/01-0000.jpg … rec-01/frames/100-0412.jpg')
   })
 })

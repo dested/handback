@@ -32,6 +32,7 @@ import {
   type StartHereFrame,
 } from './brief'
 import { env } from './env'
+import { closeUpNote, closeUpsOf, visionBatches, withBases, type CloseUpOf } from './frame-labels'
 import { log } from './logger'
 import { prisma } from './prisma'
 import { indexWalkthrough } from './search'
@@ -135,7 +136,7 @@ const mmss = (ms: number) =>
 // --- vision curation ------------------------------------------------------
 
 const VISION_SYSTEM =
-  "You pick the keyframes that carry a screen recording's story for a coding agent, and caption them. Keep a frame only if it shows something the narration references, a bug visibly occurring, an error state, or a distinct step in the flow. Captions are one factual sentence tied to what is visible — never speculation."
+  "You pick the keyframes that carry a screen recording's story for a coding agent, and caption them. Keep a frame only if it shows something the narration references, a bug visibly occurring, an error state, or a distinct step in the flow. Captions are one factual sentence tied to what is visible — never speculation. Some images are close-ups: one region of the screen at full resolution, labelled with the frame it sits on; read a close-up as that frame with this region changed."
 
 const visionWireSchema = z.object({
   frames: z.array(
@@ -193,7 +194,14 @@ function pickEvenly<T>(items: T[], count: number): T[] {
   return out
 }
 
-type Candidate = { path: string; key: string; atMs: number | null; reason: string | null }
+type Candidate = {
+  path: string
+  key: string
+  atMs: number | null
+  reason: string | null
+  /** A close-up's base frame (library 1.2+); null for a whole-screen frame. */
+  base: Candidate | null
+}
 type Keeper = { path: string; caption: string; atMs: number | null; weight: number }
 
 /** A frame ready to send: downscaled JPEG bytes (or original bytes when sharp
@@ -203,6 +211,8 @@ type PreparedFrame = {
   atMs: number | null
   jpeg: Buffer
   mediaType: 'image/jpeg' | 'image/png' | 'image/webp'
+  /** A close-up's base, prepared too, so the model sees the screen it sits on; null for a whole-screen frame or a base that won't load. */
+  base: PreparedFrame | null
 }
 
 /** 64-bit dHash of a 9×8 grayscale raw buffer (72 bytes): bit(y*8+x) set when the
@@ -228,6 +238,38 @@ function hamming(a: bigint, b: bigint): number {
   return count
 }
 
+/** One frame fetched and downscaled, with its dHash. A sharp failure degrades it
+ *  to its raw bytes and a null hash; null only when it can't be read or sent at all. */
+async function prepareOne(
+  c: Candidate
+): Promise<{ jpeg: Buffer; mediaType: PreparedFrame['mediaType']; hash: bigint | null } | null> {
+  let bytes: Buffer
+  try {
+    bytes = Buffer.from(await getObjectBytes(c.key))
+  } catch (err) {
+    log.warn(`[refine] frame ${c.path} unreadable: ${String(err)}`)
+    return null
+  }
+  try {
+    const jpeg = await sharp(bytes)
+      .resize(VISION_MAX_EDGE, VISION_MAX_EDGE, { fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: VISION_JPEG_QUALITY })
+      .toBuffer()
+    const gray = await sharp(bytes).grayscale().resize(9, 8, { fit: 'fill' }).raw().toBuffer()
+    return { jpeg, mediaType: 'image/jpeg', hash: dHash(gray) }
+  } catch (err) {
+    // A corrupt image can't be downscaled or hashed: send it raw, and let a null
+    // hash keep it out of the dedup comparison entirely.
+    log.warn(`[refine] frame ${c.path} not processable, sending raw: ${String(err)}`)
+    const raw = mediaTypeFor(c.path)
+    return raw ? { jpeg: bytes, mediaType: raw, hash: null } : null
+  }
+}
+
+/** Images the vision pass sends for these frames: a close-up's base rides along when its request lacks it. */
+const imagesSent = (frames: PreparedFrame[]) =>
+  visionBatches(frames, VISION_BATCH).reduce((n, batch) => n + batch.length, 0)
+
 /** Fetch, downscale, and perceptually dedup the candidate frames the vision pass
  *  will see. Owns all frame I/O (curateFrames does no fetching). A sharp failure
  *  degrades one frame to its raw bytes — it never throws, refine's contract holds. */
@@ -236,62 +278,74 @@ async function prepareFrames(candidates: Candidate[]): Promise<PreparedFrame[]> 
   const prepared: Prepared[] = []
   // The dHash of the most recent frame we kept (that had a hash); a near-duplicate
   // of it is dropped. Corrupt frames carry a null hash and never set this.
+  // Close-ups keep their own: a crop against a whole screen means nothing, and
+  // one in between must not let two near-identical screens both through.
   let lastKeptHash: bigint | null = null
-
-  for (const c of pickEvenly(candidates, MAX_DEDUP_CANDIDATES)) {
-    let bytes: Buffer
-    try {
-      bytes = Buffer.from(await getObjectBytes(c.key))
-    } catch (err) {
-      log.warn(`[refine] frame ${c.path} unreadable: ${String(err)}`)
-      continue
-    }
-
-    let jpeg: Buffer
-    let mediaType: PreparedFrame['mediaType']
-    let hash: bigint | null
-    try {
-      jpeg = await sharp(bytes)
-        .resize(VISION_MAX_EDGE, VISION_MAX_EDGE, { fit: 'inside', withoutEnlargement: true })
-        .jpeg({ quality: VISION_JPEG_QUALITY })
-        .toBuffer()
-      mediaType = 'image/jpeg'
-      const gray = await sharp(bytes).grayscale().resize(9, 8, { fit: 'fill' }).raw().toBuffer()
-      hash = dHash(gray)
-    } catch (err) {
-      // A corrupt image can't be downscaled or hashed: send it raw, and let a null
-      // hash keep it out of the dedup comparison entirely.
-      log.warn(`[refine] frame ${c.path} not processable, sending raw: ${String(err)}`)
-      const raw = mediaTypeFor(c.path)
-      if (!raw) continue
-      jpeg = bytes
-      mediaType = raw
-      hash = null
-    }
-
-    const isDuplicate =
-      !PROTECTED_REASONS.has(c.reason ?? '') &&
-      lastKeptHash !== null &&
-      hash !== null &&
-      hamming(hash, lastKeptHash) <= DEDUP_HAMMING_MAX
-    if (isDuplicate) continue
-    if (hash !== null) lastKeptHash = hash
-    prepared.push({ path: c.path, atMs: c.atMs, jpeg, mediaType, reason: c.reason })
+  let lastCloseUpHash: bigint | null = null
+  // Bases close-ups will need, prepared once whether or not they were sampled.
+  const needed = new Set(candidates.flatMap((c) => (c.base ? [c.base.path] : [])))
+  const bases = new Map<string, PreparedFrame | null>()
+  const baseFor = async (c: Candidate): Promise<PreparedFrame | null> => {
+    const cached = bases.get(c.path)
+    if (cached !== undefined) return cached
+    const p = await prepareOne(c)
+    const frame = p
+      ? { path: c.path, atMs: c.atMs, jpeg: p.jpeg, mediaType: p.mediaType, base: null }
+      : null
+    bases.set(c.path, frame)
+    return frame
   }
 
-  if (prepared.length <= MAX_VISION_FRAMES) return prepared
+  for (const c of pickEvenly(candidates, MAX_DEDUP_CANDIDATES)) {
+    const p = await prepareOne(c)
+    if (!p) continue
+    if (c.base === null && needed.has(c.path)) {
+      bases.set(c.path, {
+        path: c.path,
+        atMs: c.atMs,
+        jpeg: p.jpeg,
+        mediaType: p.mediaType,
+        base: null,
+      })
+    }
+    const last = c.base ? lastCloseUpHash : lastKeptHash
+    const isDuplicate =
+      !PROTECTED_REASONS.has(c.reason ?? '') &&
+      last !== null &&
+      p.hash !== null &&
+      hamming(p.hash, last) <= DEDUP_HAMMING_MAX
+    if (isDuplicate) continue
+    if (p.hash !== null) {
+      if (c.base) lastCloseUpHash = p.hash
+      else lastKeptHash = p.hash
+    }
+    prepared.push({
+      path: c.path,
+      atMs: c.atMs,
+      jpeg: p.jpeg,
+      mediaType: p.mediaType,
+      reason: c.reason,
+      base: c.base ? await baseFor(c.base) : null,
+    })
+  }
+
+  // The cap counts images sent, a close-up's base included.
+  if (imagesSent(prepared) <= MAX_VISION_FRAMES) return prepared
 
   // Over the cap: interaction frames survive whole, the rest fill what's left —
   // blind sampling could drop a click frame, so protect them explicitly.
   const isProtected = (f: Prepared) => PROTECTED_REASONS.has(f.reason ?? '')
   const protectedFrames = prepared.filter(isProtected)
   const unprotected = prepared.filter((f) => !isProtected(f))
-  const kept =
-    protectedFrames.length >= MAX_VISION_FRAMES
-      ? pickEvenly(protectedFrames, MAX_VISION_FRAMES)
-      : [...protectedFrames, ...pickEvenly(unprotected, MAX_VISION_FRAMES - protectedFrames.length)]
-  kept.sort((a, b) => (a.atMs ?? Infinity) - (b.atMs ?? Infinity))
-  return kept
+  for (let cap = MAX_VISION_FRAMES; cap > 0; cap--) {
+    const kept =
+      protectedFrames.length >= cap
+        ? pickEvenly(protectedFrames, cap)
+        : [...protectedFrames, ...pickEvenly(unprotected, cap - protectedFrames.length)]
+    kept.sort((a, b) => (a.atMs ?? Infinity) - (b.atMs ?? Infinity))
+    if (imagesSent(kept) <= MAX_VISION_FRAMES) return kept
+  }
+  return []
 }
 
 async function curateFrames(
@@ -304,10 +358,11 @@ async function curateFrames(
   // echoes `k`, so it must be unique across every batch.
   let nextK = 0
 
-  for (let start = 0; start < frames.length; start += VISION_BATCH) {
-    const batch = frames.slice(start, start + VISION_BATCH)
+  for (const batch of visionBatches(frames, VISION_BATCH)) {
     const content: Anthropic.ContentBlockParam[] = []
     const shown = new Map<number, PreparedFrame>()
+    // Where each frame of this request was numbered, for a close-up's label.
+    const kOf = new Map<string, number>()
 
     // The narration is byte-identical across batches and leads the message so it
     // caches: batch 1 writes the prefix, batches 2+ read it at a tenth of the price.
@@ -320,6 +375,7 @@ async function curateFrames(
     for (const frame of batch) {
       const k = nextK++
       shown.set(k, frame)
+      kOf.set(frame.path, k)
       content.push({
         type: 'image',
         source: {
@@ -328,9 +384,10 @@ async function curateFrames(
           data: frame.jpeg.toString('base64'),
         },
       })
+      const baseK = frame.base ? kOf.get(frame.base.path) : undefined
       content.push({
         type: 'text',
-        text: `frame ${k} — ${frame.atMs === null ? '??:??' : mmss(frame.atMs)}`,
+        text: `frame ${k} — ${frame.atMs === null ? '??:??' : mmss(frame.atMs)}${baseK === undefined ? '' : ` — a close-up: the screen then was frame ${baseK} except this region`}`,
       })
     }
     if (shown.size === 0) continue
@@ -363,7 +420,8 @@ async function curateFrames(
       }
       for (const verdict of parsed.data.frames) {
         const cand = shown.get(verdict.k)
-        if (!cand || !verdict.keep) continue
+        // A base sent again for a later close-up can be kept twice; once is enough.
+        if (!cand || !verdict.keep || keepers.some((k) => k.path === cand.path)) continue
         keepers.push({
           path: cand.path,
           caption: verdict.caption.trim(),
@@ -373,7 +431,7 @@ async function curateFrames(
       }
     } catch (err) {
       // A bad batch loses its own frames; the rest of the curation still runs.
-      log.warn(`[refine] vision batch at ${start} failed: ${String(err)}`)
+      log.warn(`[refine] vision batch at frame ${nextK - batch.length} failed: ${String(err)}`)
     }
   }
 
@@ -428,18 +486,48 @@ export function synthContent(body: string, frames: SynthFrame[]): Anthropic.Cont
 /** What the synth pass reads above a frame: "rec-01/frames/04-0090.jpg · 0:09 · changed top-right (small)". */
 export const synthFrameLabel = (f: StartHereFrame) => `${f.path} · ${mmss(f.atMs)} · ${f.what}`
 
-/** The report's Start here frames, fetched and downscaled. A frame that won't load is left out. */
+/**
+ * The synth pass's frames: the report's Start here, each close-up preceded by
+ * its base when the base isn't already in, SYNTH_FRAMES images in all. Labels
+ * say what a close-up is and which frame a base is there for.
+ */
+export function synthFramePicks(
+  startHere: StartHereFrame[],
+  closeUps: Record<string, CloseUpOf>,
+  frameAt: Record<string, number>
+): Array<{ path: string; label: string }> {
+  const byPath = new Map(startHere.map((f) => [f.path, f]))
+  return withBases(
+    startHere.map((f) => f.path),
+    closeUps,
+    SYNTH_FRAMES
+  ).flatMap(({ path, baseOf }) => {
+    if (baseOf !== undefined) {
+      const at = frameAt[path]
+      const stamp = at === undefined ? '' : ` · ${mmss(at)}`
+      return [{ path, label: `${path}${stamp} · the screen behind the close-up ${baseOf}` }]
+    }
+    const f = byPath.get(path)
+    if (!f) return []
+    const base = closeUps[path]
+    return [
+      { path, label: base ? `${synthFrameLabel(f)} · ${closeUpNote(base)}` : synthFrameLabel(f) },
+    ]
+  })
+}
+
+/** The synth pass's frames (synthFramePicks), fetched and downscaled. A frame that won't load is left out. */
 async function loadSynthFrames(
   space: string,
   walkthroughId: string,
-  startHere: StartHereFrame[]
+  brief: RecordingBrief
 ): Promise<SynthFrame[]> {
   const frames: SynthFrame[] = []
-  for (const f of startHere.slice(0, SYNTH_FRAMES)) {
+  for (const f of synthFramePicks(brief.startHere, brief.closeUps, brief.frameAt)) {
     try {
       const bytes = await getObjectBytes(walkthroughKey(space, walkthroughId, f.path))
       const { data } = await imageForAgent(bytes, INLINE_EDGE)
-      frames.push({ label: synthFrameLabel(f), data })
+      frames.push({ label: f.label, data })
     } catch (err) {
       log.warn(
         `[refine] start-here frame ${f.path} unreadable for ${walkthroughId}: ${String(err)}`
@@ -742,9 +830,17 @@ export async function runRefine(
         key: walkthroughKey(space, walkthrough.id, file.path),
         atMs,
         reason,
+        base: null,
       })
     }
     candidates.sort((a, b) => (a.atMs ?? Infinity) - (b.atMs ?? Infinity))
+    // A close-up (library 1.2+) carries its base, so the model sees the screen it sits on.
+    const closeUps = parsedTakes ? closeUpsOf(parsedTakes) : {}
+    const candidateAt = new Map(candidates.map((c) => [c.path, c]))
+    for (const c of candidates) {
+      const base = closeUps[c.path]
+      c.base = base ? (candidateAt.get(base.path) ?? null) : null
+    }
     const sampled = await prepareFrames(candidates)
 
     const narration = takes
@@ -788,9 +884,7 @@ export async function runRefine(
       .join('\n\n')
 
     await setStage('writing')
-    const synthFrames = rebuilt
-      ? await loadSynthFrames(space, walkthrough.id, rebuilt.startHere)
-      : []
+    const synthFrames = rebuilt ? await loadSynthFrames(space, walkthrough.id, rebuilt) : []
     const message = await client.messages.create(
       {
         model: SYNTH_MODEL,

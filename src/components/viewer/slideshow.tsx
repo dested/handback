@@ -8,22 +8,21 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, ArrowRight, X } from 'lucide-react'
 import { cn } from '~/lib/utils'
 import { mmss } from './format'
+import { frameAt, type FrameTiming } from './frame-at'
+import { FrameImage, type FrameCloseUp } from './frame-image'
 
-export interface ViewerFrame {
+export interface ViewerFrame extends FrameTiming {
   atMs: number // walkthrough-wide clock
   url: string // presigned GET — non-null by construction (agent-view filters)
   label: string // mmss(atMs)
   path: string // walkthrough-relative, e.g. "rec-01/frames/03-0125.jpg"
+  /** Library 1.2+: this image is the changed region of its base frame. */
+  closeUp?: FrameCloseUp
 }
 
-/** The last frame the playhead has reached — distinct from the shot being viewed. */
+/** The frame on screen when the playhead is at `ms` — distinct from the shot being viewed. */
 function activeIndex(frames: ViewerFrame[], ms: number): number {
-  let index = 0
-  for (let i = 0; i < frames.length; i++) {
-    const f = frames[i]
-    if (f && f.atMs <= ms) index = i
-  }
-  return index
+  return Math.max(0, frameAt(frames, ms))
 }
 
 export function Slideshow({
@@ -51,6 +50,8 @@ export function Slideshow({
 }): React.ReactElement {
   const [index, setIndex] = useState(0)
   const [editing, setEditing] = useState(false)
+  // The close-up being shown as itself, at its own size, instead of in place.
+  const [nativePath, setNativePath] = useState<string | null>(null)
   const stripRef = useRef<HTMLDivElement>(null)
   const scriptRef = useRef<HTMLUListElement>(null)
 
@@ -61,6 +62,11 @@ export function Slideshow({
 
   // Where the player's playhead sits — "where the video is", not "where I'm looking".
   const playheadIndex = activeIndex(frames, activeMs)
+
+  // A close-up names its base by path; this is where that base sits in the strip.
+  const positionOf = useMemo(() => new Map(frames.map((f, n) => [f.path, n])), [frames])
+  const baseOf = (f: ViewerFrame) =>
+    f.closeUp?.basePath ? (positionOf.get(f.closeUp.basePath) ?? -1) : -1
 
   // The narration line being spoken at this shot.
   const activeLine = useMemo(() => {
@@ -141,8 +147,32 @@ export function Slideshow({
           <span className="text-foreground">frame {i + 1}</span>
           <span className="text-muted-foreground px-1.5">/ {frames.length}</span>
           <span className="text-cobalt">{frame.label}</span>
+          {frame.closeUp && (
+            <span className="text-muted-foreground">
+              {' · close-up'}
+              {baseOf(frame) >= 0 && (
+                <>
+                  {' of '}
+                  <button
+                    type="button"
+                    onClick={() => setIndex(baseOf(frame))}
+                    className="hover:text-foreground underline underline-offset-4">
+                    frame {baseOf(frame) + 1}
+                  </button>
+                </>
+              )}
+            </span>
+          )}
         </p>
         <div className="flex items-center gap-4">
+          {frame.closeUp?.baseUrl && (
+            <button
+              type="button"
+              onClick={() => setNativePath(nativePath === frame.path ? null : frame.path)}
+              className="text-muted-foreground hover:text-foreground font-mono text-xs underline underline-offset-4">
+              {nativePath === frame.path ? 'show in place' : 'actual size'}
+            </button>
+          )}
           <button
             type="button"
             onClick={() => onSeek(frame.atMs)}
@@ -200,12 +230,24 @@ export function Slideshow({
             tabIndex={0}
             onKeyDown={onKeyDown}>
             <div className="flex aspect-video w-full items-center justify-center overflow-hidden rounded-sm border bg-black/95">
-              <img
-                src={frame.url}
-                alt=""
-                draggable={false}
-                className="max-h-full max-w-full object-contain"
-              />
+              {frame.closeUp?.baseUrl && nativePath !== frame.path ? (
+                // A close-up in place: its base frame, the changed region drawn in.
+                <FrameImage
+                  key={frame.path}
+                  url={frame.url}
+                  closeUp={frame.closeUp}
+                  fit="contain"
+                  className="h-full w-full"
+                  imgClassName="h-full w-full object-contain"
+                />
+              ) : (
+                <img
+                  src={frame.url}
+                  alt=""
+                  draggable={false}
+                  className="max-h-full max-w-full object-contain"
+                />
+              )}
             </div>
 
             {i > 0 && (
@@ -252,18 +294,21 @@ export function Slideshow({
                 <button
                   type="button"
                   onClick={() => setIndex(n)}
-                  aria-label={`Frame ${n + 1} at ${f.label}`}
+                  aria-label={`Frame ${n + 1} at ${f.label}${f.closeUp ? ', a close-up' : ''}`}
                   className="block h-full w-full">
-                  <img
-                    src={f.url}
-                    alt=""
-                    loading="lazy"
-                    draggable={false}
-                    className="h-full w-full object-cover"
+                  <FrameImage
+                    url={f.url}
+                    closeUp={f.closeUp}
+                    fit="cover"
+                    lazy
+                    className="h-full w-full"
+                    imgClassName="h-full w-full object-cover"
                   />
                 </button>
                 <span className="pointer-events-none absolute bottom-0.5 left-0.5 rounded-sm bg-black/50 px-1 font-mono text-[10px] text-white">
                   {n + 1}
+                  {f.closeUp &&
+                    (baseOf(f) >= 0 ? ` · close-up of ${baseOf(f) + 1}` : ' · close-up')}
                 </span>
                 {n === playheadIndex && (
                   <span className="bg-cobalt pointer-events-none absolute inset-x-0 bottom-0 h-0.5" />

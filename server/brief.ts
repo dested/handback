@@ -22,8 +22,8 @@ import {
 } from '@dested/video-to-prompt'
 import sharp from 'sharp'
 import { env } from './env'
+import { closeUpsOf, type CloseUpOf } from './frame-labels'
 import { log } from './logger'
-import { recStamp } from './mcp-format'
 import { getObjectText, walkthroughKey } from './storage'
 
 /** What Handback's recorders write as `transcriber`, in words an agent can weigh. */
@@ -61,8 +61,9 @@ export type RecordingBrief = {
   evidence: Record<string, PointEvidence>
   /** Every keyframe's position on the walkthrough clock, by path. */
   frameAt: Record<string, number>
+  /** Library 1.2+ close-ups, by path: the frame each one sits on. */
+  closeUps: Record<string, CloseUpOf>
 }
-
 /**
  * Every take's recording.json, parsed. Null when any one is missing or
  * unreadable: a report silently missing a take is worse than the stored one.
@@ -195,52 +196,11 @@ export function briefFromRecordings(input: BriefInput, recordings: Recording[]):
     }
   }
 
-  return { recordingMd, startHere, evidence, frameAt }
+  return { recordingMd, startHere, evidence, frameAt, closeUps: closeUpsOf(recordings) }
 }
 
-/** One frame of `get_images`' default set: why it's in, and what changed in it. */
-export type EvidenceImage = { path: string; tags: string[]; what: string }
-
-/**
- * The evidence set `get_images` serves when asked for no paths: each key
- * point's frame in point order, then the report's Start here. One entry per
- * path, carrying every reason it's in the set.
- */
-export function evidenceImages(
-  brief: RecordingBrief | null,
-  points: Array<{ id: string }>
-): EvidenceImage[] {
-  const byPath = new Map<string, EvidenceImage>()
-  const add = (path: string, tag: string, what: string) => {
-    const entry = byPath.get(path)
-    if (entry) {
-      entry.tags.push(tag)
-      entry.what = what
-    } else {
-      byPath.set(path, { path, tags: [tag], what })
-    }
-  }
-  for (const p of points) {
-    const frame = brief?.evidence[p.id]?.frame
-    if (frame) add(frame.path, p.id.toUpperCase(), frame.what)
-  }
-  for (const f of brief?.startHere ?? []) add(f.path, 'start here', f.what)
-  return [...byPath.values()]
-}
-
-/** What an agent reads above an image: "rec-01/frames/04-0090.jpg · 0:09 · KP2 · changed top-right (small)". */
-export function imageLabel(
-  path: string,
-  brief: RecordingBrief | null,
-  entry: EvidenceImage | undefined
-): string {
-  const at = brief?.frameAt[path]
-  return [
-    path,
-    ...(at === undefined ? [] : [recStamp(at)]),
-    ...(entry ? [...entry.tags, entry.what] : []),
-  ].join(' · ')
-}
+// The evidence set and image labels live in frame-labels.ts (no env, so tests import them).
+export { evidenceImages, imageLabel, type EvidenceImage } from './frame-labels'
 
 // ── images for the agent ─────────────────────────────────────────────────────
 

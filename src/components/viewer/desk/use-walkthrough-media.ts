@@ -124,13 +124,44 @@ export function useWalkthroughMedia(walkthrough: Walkthrough, urlByPath: Map<str
       const detail = recordings[i]?.data?.recording
       if (!detail) return
       const offset = offsets.byTakeId.get(take.id) ?? 0
+      // A close-up names its base by the take's frame index.
+      const byIndex = new Map(detail.frames.map((frame) => [frame.index, frame]))
       for (const frame of detail.frames) {
         const atMs = offset + frame.tMs
         const path = `${take.dir}/${frame.file}`
         const url = urlByPath.get(path)
         // A frame that never uploaded has nothing to show; a staged one is gone.
         if (url === undefined || stagedSet.has(path)) continue
-        frames.push({ atMs, url, label: mmss(atMs), path })
+        const base = frame.detail ? byIndex.get(frame.detail.of) : undefined
+        const basePath = base ? `${take.dir}/${base.file}` : null
+        frames.push({
+          atMs,
+          url,
+          label: mmss(atMs),
+          path,
+          ...(frame.detail
+            ? {
+                closeUp: {
+                  box: frame.detail.box,
+                  basePath,
+                  baseUrl:
+                    basePath === null || stagedSet.has(basePath)
+                      ? null
+                      : (urlByPath.get(basePath) ?? null),
+                },
+              }
+            : {}),
+          ...(frame.seenMs?.length
+            ? {
+                seen: frame.seenMs.map(([from, to]): [number, number] => [
+                  offset + from,
+                  offset + to,
+                ]),
+              }
+            : {}),
+          ...(frame.held === undefined ? {} : { held: frame.held }),
+          ...(frame.transient ? { transient: true } : {}),
+        })
       }
       for (const line of detail.transcript) {
         lines.push({

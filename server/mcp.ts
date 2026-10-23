@@ -190,9 +190,7 @@ function buildServer(auth: TokenAuth): McpServer {
     'get_frames',
     {
       title: 'Get walkthrough frames',
-      description:
-        `Page download URLs for a walkthrough's keyframes, in the order they were recorded (get_images shows them as images). Returns { total, offset, limit, returned, nextOffset, frames:[{path,url}] }; keep calling with offset = the previous nextOffset until nextOffset is null. Default ${FRAMES_PAGE_DEFAULT} frames per call, max ${FRAMES_PAGE_MAX}.` +
-        scope,
+      description: TOOL_DESCRIPTIONS.get_frames + scope,
       inputSchema: {
         walkthroughId: z.string().describe('Walkthrough id from list_walkthroughs'),
         offset: z

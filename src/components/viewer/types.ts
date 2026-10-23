@@ -3,6 +3,7 @@
 // own `rec-NN/recording.json`, fetched straight from S3 — that file is written
 // by the recorder extension, so its shape is declared by hand here.
 
+import type { FrameBox } from '@dested/video-to-prompt'
 import type { inferRouterOutputs } from '@trpc/server'
 import type { AppRouter } from '../../../server/router'
 
@@ -21,6 +22,18 @@ export type Frame = {
   file: string
   reason: string
   pointer?: { x: number; y: number } | null
+  /** How long this state stayed on screen, ms. */
+  held?: number
+  /** The screen went back to how it was before after `held` (a toast, a hover). */
+  transient?: boolean
+  /** Other take-local spans [from, to) when this frame is what was on screen (library 1.2+). */
+  seenMs?: Array<[number, number]>
+  /**
+   * A close-up, not the whole screen (library 1.2+): the screen then was frame
+   * `of` (its `index`, same take) except inside `box`, and this image shows
+   * `box` at its own resolution.
+   */
+  detail?: { of: number; box: FrameBox }
 }
 
 /** One spoken window. `tMs`/`endMs` are take-local milliseconds. */

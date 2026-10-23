@@ -14,6 +14,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Scissors, X } from 'lucide-react'
 import { cn } from '~/lib/utils'
 import { mmss } from './format'
+import { FrameImage, type FrameCloseUp } from './frame-image'
 
 export interface TimelineTake {
   id: string
@@ -26,6 +27,8 @@ export interface TimelineTake {
 export interface TimelineFrame {
   atMs: number
   url: string | null
+  /** A close-up (library 1.2+) renders drawn into its base frame. */
+  closeUp?: FrameCloseUp
 }
 
 export interface TimelineVoiceBar {
@@ -315,6 +318,20 @@ export function Timeline({
                   'border-border bg-muted absolute top-1 h-12 w-16 rounded-sm border',
                   cut && 'opacity-40'
                 )}
+              />
+            ) : frame.closeUp?.baseUrl ? (
+              <FrameImage
+                key={`${index}:${frame.atMs}`}
+                url={frame.url}
+                closeUp={frame.closeUp}
+                fit="contain"
+                lazy
+                style={style}
+                className={cn(
+                  'border-border absolute top-1 h-12 overflow-hidden rounded-sm border',
+                  cut && 'opacity-40'
+                )}
+                imgClassName="h-full w-auto"
               />
             ) : (
               <img

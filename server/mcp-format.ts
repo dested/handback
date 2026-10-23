@@ -91,12 +91,28 @@ export const recStamp = (ms: number) => {
 export const FRAMES_PAGE_DEFAULT = 120
 export const FRAMES_PAGE_MAX = 300
 
+/**
+ * Recording order for frame paths: take folder, then the frame number that
+ * leads the file name. Names are `NN-mmss.jpg` with NN only padded to two, so
+ * past frame 99 a plain path sort puts `100-…` before `11-…`.
+ */
+export function byFrameOrder(a: string, b: string): number {
+  const parse = (p: string) => {
+    const m = /^(.*)\/frames\/(\d+)-/.exec(p)
+    return m ? { dir: m[1] ?? '', n: Number(m[2]) } : { dir: p, n: -1 }
+  }
+  const x = parse(a)
+  const y = parse(b)
+  return x.dir.localeCompare(y.dir) || x.n - y.n || a.localeCompare(b)
+}
+
 /** Tool descriptions, shared so both servers say exactly the same thing. */
 export const TOOL_DESCRIPTIONS = {
   get_walkthrough:
     "Fetch one walkthrough's brief: a narrated screen recording a human made in the running app (a bug, review feedback, or a change request). It holds the key points to address with the evidence for each, the review thread and comments, and the recording itself: every keyframe and spoken line on one timeline, by file path. Call get_images next to see the evidence frames.",
   get_images:
-    'See a walkthrough’s frames and contact sheets as images, at most 6 per call. With no paths: the evidence set, each key point’s frame and then the frames the report says to start with, labelled with time and why. With paths (from the brief): those images. Each image is downscaled to 1600 px; get_file serves one near full size.',
+    'See a walkthrough’s frames and contact sheets as images, at most 6 per call. With no paths: the evidence set, each key point’s frame and then the frames the report says to start with, labelled with time and why. With paths (from the brief): those images. A close-up (one region of the screen at full resolution) is labelled with the frame it sits on, and the evidence set shows that frame first. Each image is downscaled to 1600 px; get_file serves one near full size.',
+  get_frames: `Page download URLs for a walkthrough's keyframes, in the order they were recorded (get_images shows them as images). Returns { total, offset, limit, returned, nextOffset, frames:[{path,url,closeUpOf?}] }; closeUpOf marks a close-up, one region of the screen at full resolution, and names the frame whose screen it sits on (the rest of the screen was that frame). Keep calling with offset = the previous nextOffset until nextOffset is null. Default ${FRAMES_PAGE_DEFAULT} frames per call, max ${FRAMES_PAGE_MAX}.`,
   get_file:
     'Read one file of a walkthrough by its path from the brief: text files (transcript.txt, recording.json, MANIFEST.txt, attached notes) come back as text, an image near full size, anything else (the video, a PDF) as a download URL.',
 } as const
@@ -218,7 +234,10 @@ function fileListing(files: FormattableWalkthrough['files'], rebuilt: boolean): 
   for (const [dir, list] of [...takes.entries()].sort(([a], [b]) => a.localeCompare(b))) {
     const parts: string[] = []
     for (const v of list.filter((f) => isVideo(f.path))) parts.push(`video ${v.path} — ${v.url}`)
-    const frames = list.filter((f) => isFrame(f.path)).map((f) => f.path)
+    const frames = list
+      .filter((f) => isFrame(f.path))
+      .map((f) => f.path)
+      .sort(byFrameOrder)
     const first = frames[0]
     const last = frames[frames.length - 1]
     if (first && last) {

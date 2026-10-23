@@ -32,7 +32,8 @@ import {
   presignGet,
   presignPut,
 } from './storage'
-import { FRAMES_PAGE_DEFAULT, FRAMES_PAGE_MAX } from './mcp-format'
+import { FRAMES_PAGE_DEFAULT, FRAMES_PAGE_MAX, byFrameOrder } from './mcp-format'
+import { closeUpsOf } from './frame-labels'
 import {
   FULL_EDGE,
   INLINE_EDGE,
@@ -679,17 +680,19 @@ export type WalkthroughFramesPage = {
   returned: number
   /** Pass as the next call's `offset`; null once this page reached the end. */
   nextOffset: number | null
-  frames: Array<{ path: string; url: string }>
+  /** `closeUpOf`: this frame is a close-up (library 1.2+) and the screen around it was that frame. */
+  frames: Array<{ path: string; url: string; closeUpOf?: string }>
 }
 
 /**
  * One page of a walkthrough's keyframes, presigned. get_walkthrough only ever
  * carries a sample of frames (see mcp-format's cap); this is how an agent pages
  * the full set — every frame, in the order they were recorded — without leaving
- * MCP. Frame files sort chronologically by path (`NN-mmss.jpg`, zero-padded), so
- * list order is timeline order. Only the requested window is presigned, so
- * paging a long walkthrough doesn't sign frames it will never open. Null on the
- * same three misses as getWalkthroughDetail (unknown / out of scope / never
+ * MCP. Frames are in recording order: take, then the frame number leading the
+ * file name (byFrameOrder — a plain path sort breaks past frame 99). A close-up
+ * names the frame it sits on. Only the requested window is presigned, so paging
+ * a long walkthrough doesn't sign frames it will never open. Null on the same
+ * three misses as getWalkthroughDetail (unknown / out of scope / never
  * finalized).
  */
 export async function getWalkthroughFrames(
@@ -699,13 +702,18 @@ export async function getWalkthroughFrames(
 ): Promise<WalkthroughFramesPage | null> {
   const walkthrough = await prisma.walkthrough.findUnique({
     where: { id: walkthroughId },
-    include: { files: { where: { status: 'uploaded' }, orderBy: { path: 'asc' } } },
+    include: {
+      takes: { orderBy: { index: 'asc' } },
+      files: { where: { status: 'uploaded' }, orderBy: { path: 'asc' } },
+    },
   })
   if (!walkthrough || !(await inScope(auth, walkthrough)) || !walkthrough.finalizedAt) return null
   traceAccess(auth, walkthrough.id, 'pulled')
 
   const space = spaceId({ teamId: walkthrough.teamId, userId: walkthrough.userId })
-  const frameFiles = walkthrough.files.filter((f) => f.path.includes('/frames/'))
+  const frameFiles = walkthrough.files
+    .filter((f) => f.path.includes('/frames/'))
+    .sort((a, b) => byFrameOrder(a.path, b.path))
   const total = frameFiles.length
 
   const offset = Math.min(Math.max(0, Math.floor(opts.offset ?? 0)), total)
@@ -713,11 +721,23 @@ export async function getWalkthroughFrames(
     FRAMES_PAGE_MAX,
     Math.max(1, Math.floor(opts.limit ?? FRAMES_PAGE_DEFAULT))
   )
+  // Which frames are close-ups comes from the takes' recording.json; when one
+  // can't be read the page still serves, just unmarked.
+  const recordings = await loadRecordings(
+    space,
+    walkthrough.id,
+    walkthrough.takes.map((t) => ({ index: t.index, dir: t.dir, videoPath: t.videoPath }))
+  )
+  const closeUps = recordings ? closeUpsOf(recordings) : {}
   const frames = await Promise.all(
-    frameFiles.slice(offset, offset + limit).map(async (f) => ({
-      path: f.path,
-      url: await presignGet(walkthroughKey(space, walkthrough.id, f.path)),
-    }))
+    frameFiles.slice(offset, offset + limit).map(async (f) => {
+      const base = closeUps[f.path]
+      return {
+        path: f.path,
+        url: await presignGet(walkthroughKey(space, walkthrough.id, f.path)),
+        ...(base ? { closeUpOf: base.path } : {}),
+      }
+    })
   )
   const end = offset + frames.length
   return {

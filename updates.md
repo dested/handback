@@ -2,6 +2,17 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-10-22 — library 1.2.0: no frame cap, close-ups and seen spans everywhere frames are read
+Asked: make capture top tier and ship it. Pin to video-to-prompt v1.2.0 (no cap, page model, per-block video,
+close-ups). Viewer: FrameImage draws a close-up into its base (cobalt outline, rest dimmed; "actual size"
+toggle), frameAt() honours seenMs and transients (slideshow, transcript jumps, player still). MCP:
+get_images labels close-ups and brings the base first, get_frames marks closeUpOf; Refine sends a
+close-up's base with it, cap counts images sent. Frame paths sort by index (byFrameOrder: a path sort
+broke past frame 99). Corpus: W:\junk\video-to-prompt\compare\index.html. 30 unit tests.
+Touched: package.json, bun.lock, server/{brief,mcp,mcp-format,refine,walkthroughs-api,frame-labels}.ts,
+cli/mcp.ts, src/components/viewer/{types,slideshow,timeline,video-stage,frame-at,frame-image}*,
+use-walkthrough-media.ts, cliffnotes.md, plans/2026-10-22-live-capture.md
+
 ## 2026-10-15 — no more "Thank you." over silence (library 1.1.5)
 Asked: fix Whisper's silence hallucinations. Library 1.1.5's dropUnheard runs in distill (phone/upload) and on every
 /api/ingest/transcribe chunk server-side (pcmFromWav), so the extension and re-transcribe get it too. Real-take check:

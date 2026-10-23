@@ -20,6 +20,8 @@ import {
 } from 'lucide-react'
 import { cn } from '~/lib/utils'
 import { mmss } from './format'
+import { frameAt } from './frame-at'
+import { FrameImage } from './frame-image'
 import type { ViewerFrame } from './slideshow'
 import { usePopover } from './overflow-menu'
 import type { SegmentPlayer } from './use-segment-player'
@@ -58,15 +60,10 @@ export function VideoStage({
   const [showCaptures, setShowCaptures] = useState(true)
   const [flash, setFlash] = useState(false)
 
-  // The keyframe the playhead is currently sitting on — the last capture at or
-  // before now. A shutter flash fires the instant playback crosses into a new one.
-  let frameIndex = -1
-  if (frames) {
-    for (let i = 0; i < frames.length; i++) {
-      if (frames[i].atMs <= outputMs) frameIndex = i
-      else break
-    }
-  }
+  // The keyframe on screen now — the last capture at or before now, or an older
+  // one its `seen` spans bring back. A shutter flash fires the instant playback
+  // crosses into a new capture.
+  const frameIndex = frames ? frameAt(frames, outputMs) : -1
   const currentFrame = frameIndex >= 0 ? frames?.[frameIndex] : undefined
 
   const prevFrameIndex = useRef(frameIndex)
@@ -297,7 +294,13 @@ export function VideoStage({
               playing || flash ? 'opacity-100' : 'opacity-0'
             )}>
             {currentFrame.url && (
-              <img src={currentFrame.url} alt="" className="aspect-video w-full object-cover" />
+              <FrameImage
+                url={currentFrame.url}
+                closeUp={currentFrame.closeUp}
+                fit="cover"
+                className="aspect-video w-full"
+                imgClassName="h-full w-full object-cover"
+              />
             )}
             <p className="flex items-center gap-1.5 px-1.5 py-1 font-mono text-[10px] text-white/90">
               <Camera className="size-3 text-white/80" />

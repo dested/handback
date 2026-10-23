@@ -167,11 +167,13 @@ server/
   refine.ts             THE Refine pass (budget-gated, free tier included; manual re-run
                         walkthroughs.refine stays Pro): capture-health checks → Haiku vision
                         curation (frames downscaled 800px JPEG, dHash near-dup dedup with
-                        click/nav/start immune, narration prompt-cached; batches of 12, ≤84,
-                        ≤20 keepers) →
+                        click/nav/start immune — close-ups dedup only against close-ups,
+                        narration prompt-cached; batches of 12, ≤84 IMAGES, ≤20 keepers; a
+                        close-up's base rides in the same request, labelled, and counts) →
                         Sonnet 5 synthesis (Opus→Sonnet 2026-08-24, decisions.md), which also
                         sees the rebuilt report's Start here frames as images (SYNTH_FRAMES ≤6,
-                        1600 px; 2026-10-15, decisions.md): digestMd
+                        1600 px; 2026-10-15, decisions.md; synthFramePicks puts a close-up's
+                        base before it, inside the 6): digestMd
                         (2–4 human sentences) + pointsJson KeyPoint[]
                         (kpN ids, severity, atMs — THE structured spine) + summaryMd ledger +
                         refinedBriefMd (sections headed per KP). Titles: Session-class defaults
@@ -211,7 +213,13 @@ server/
   brief.ts              The recording half of the brief, rebuilt on every pull: each take's
                         recording.json → @dested/video-to-prompt `readRecordingJson` → `buildReport`
                         (reviewer cuts ✂, Refine captions `shows:`), key-point evidence
-                        (`evidenceAt`), Start here; sharp downscale for images handed to agents
+                        (`evidenceAt`), Start here, `closeUps` (path → base); sharp downscale
+                        for images handed to agents
+  frame-labels.ts       Pure (no env): what a model reads about a frame. closeUpsOf/closeUpNote
+                        ("close-up of frame 12 (rec-01/frames/12-0017.jpg): the screen then was
+                        that frame except this region"), get_images' evidence set (a close-up
+                        brings its base in just before it) + imageLabel, withBases, Refine's
+                        visionBatches. Tests: frame-labels.test.ts
   storage.ts            S3: presignPut/Get, getObjectText, deletePrefix, deleteKeys, key layout,
                         isSafePath. Honors optional S3_ENDPOINT (R2/S3-compatible, forcePathStyle)
   retention.ts          THE deletion clocks: RETENTION_DAYS=30 (resolved auto-expire via
@@ -400,7 +408,13 @@ src/
                         (multi-take playback, rAF playhead) · slideshow (shot-by-shot
                         frames: big still + filmstrip + synced dialog strip, edit-mode frame
                         deletion via walkthroughs.deleteFrames; replaced frames-grid
-                        2026-08-14) · transcript-panel (borderless, live active line) · events-panel
+                        2026-08-14) · frame-image (FrameImage: a library 1.2 close-up drawn
+                        into its base frame — SVG overlay sized to the base's natural pixels,
+                        cobalt outline, rest dimmed 30%; a close-up whose base is gone shows
+                        as the bare crop, labelled) · frame-at (frameAt: the frame on screen at
+                        t — latest capture, or an older frame whose `seen` span began later;
+                        gone transients skipped; slideshow tick, transcript jumps and the
+                        player's corner still all use it; frame-at.test.ts) · transcript-panel (borderless, live active line) · events-panel
                         (mono, red/violet ticks) · section-head · report-panel ·
                         share-control (url·copy·revoke pill) · final-cut · skeleton · types ·
                         format · use-copy · split-panel (SplitPanel — the propose/apply split
@@ -553,9 +567,9 @@ scripts/brief-eval/     run.ts: old vs new agent brief on a fixture walkthrough 
 | `POST /walkthroughs/:id/finalize` | Marks files uploaded + sets `finalizedAt` (list only shows finalized) |
 | `GET /walkthroughs` | List for agents (MCP `list_walkthroughs`): everything the token reaches, `?team=personal\|<id>` filters. Platform-wide when the owner is a platform admin |
 | `GET /walkthroughs/:id` | Detail (MCP `get_walkthrough`): `recordingMd` (rebuilt report, else the stored one) + `recordingRebuilt`, `briefMd`, `refinedBriefMd`, points with `evidence`, `startHere`, legacy `reportMd`, presigned GET for every file. The *brief* names files by path only (video URL aside) |
-| `GET /walkthroughs/:id/images` | `?path=` ×≤6, or none for the evidence set (KP frames, then Start here) → base64 JPEGs ≤1600 px with labels (MCP `get_images`) |
+| `GET /walkthroughs/:id/images` | `?path=` ×≤6, or none for the evidence set (KP frames, then Start here; a close-up's base goes in just before it) → base64 JPEGs ≤1600 px with labels; a close-up's label says "close-up of frame N (path): …" (MCP `get_images`) |
 | `GET /walkthroughs/:id/file` | `?path=` → text / image ≤2576 px / presigned URL (MCP `get_file`) |
-| `GET /walkthroughs/:id/frames` | Paged presigned keyframe URLs, chronological, `?offset=&limit=` (default 120, max 300) → `{total,offset,limit,returned,nextOffset,frames[]}` (MCP `get_frames`). Download URLs only |
+| `GET /walkthroughs/:id/frames` | Paged presigned keyframe URLs, chronological (`byFrameOrder`: take, then the numeric frame prefix — `100-…` sorts after `99-…`), `?offset=&limit=` (default 120, max 300) → `{total,offset,limit,returned,nextOffset,frames[{path,url,closeUpOf?}]}` (MCP `get_frames`; `closeUpOf` = the base a close-up sits on, from recording.json). Download URLs only |
 | `POST /walkthroughs/:id/status` | open / in_review / resolved (MCP `set_walkthrough_status`) |
 | `POST /walkthroughs/:id/result` | The agent's answer (MCP `post_result`): summary + optional prUrl/filesTouched/body **+ evidence[] (paths from /evidence — flips those rows uploaded, lands on the note)** → review-thread note; auto-flips open → in_review. No `/gripes` alias (nothing old posts it) |
 | `POST /walkthroughs/:id/question` | MCP `ask_reviewer`: agent asks instead of guessing → WalkthroughNote kind 'question', status → needs_info, uploader emailed. No `/gripes` alias |
@@ -850,6 +864,15 @@ reaches the container on a plain push.
   The brief (2026-10-15) carries **no frame URLs**: frames are named by path in the rebuilt report's
   timeline, `get_images` shows ≤6 per call (evidence set by default), `get_frames` pages download
   URLs. A frame is ~150–300 KB (JPEG quality 0.8 since 2026-08-25), against 2 GB/gripe and 20 GB/org.
+- **Library 1.2 frames: no cap, close-ups, `seen` spans (2026-10-22).** The library's extractor
+  (web/phone/upload capture via distill) picks frames with no cap (~20/min on a real 28-min take)
+  and a third to a half are **close-ups**: on disk `detail: {of, box}` — the image is only `box`
+  (0..1 of the frame) at native size, the rest of the screen was frame `of` (its `index`, same
+  take). Also on disk `seenMs: [[from, to)]` (the reader calls it `seen`): other take-local spans
+  when that frame is what's on screen. Never show or hand over a close-up bare: the viewer
+  composites it (frame-image.tsx), agents/models get it labelled with its base (frame-labels.ts).
+  File names are `NN-mmss.jpg` padded to two, so past frame 99 a path sort is NOT recording
+  order — sort with `byFrameOrder` (mcp-format.ts).
 - **Image-bearing MCP results are capped at 25k tokens by Claude Code** (`MAX_MCP_OUTPUT_TOKENS`);
   text-only results over 50k chars get saved to a file unless the tool declares
   `_meta["anthropic/maxResultSizeChars"]` (get_walkthrough: 200k). So images never ride in the brief:
