@@ -49,10 +49,10 @@ export async function polishTranscript(
   if (!base || !token) return null;
   if (segments.length === 0 || segments.length > MAX_LINES) return null;
 
-  // Network noise is repetitive and rarely names anything; console errors carry
-  // the identifiers worth spelling right.
+  // Network noise is repetitive and rarely names anything, and click/nav notes
+  // aren't errors; console errors carry the identifiers worth spelling right.
   const errors = (opts.events ?? [])
-    .filter((e) => e.level !== 'network')
+    .filter((e) => e.level === 'error' || e.level === 'warn')
     .slice(-MAX_ERRORS)
     .map((e) => (e.detail ? `${e.message} — ${e.detail}` : e.message));
 

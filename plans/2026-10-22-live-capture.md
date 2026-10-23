@@ -1,6 +1,12 @@
 # Live capture on the library's rule (extension + /record)
 
-Status: active
+Status: active — built 2026-10-22; /record deployed with Handback, extension 1.12.0 zipped for Sal to
+publish. Items 1–8 done (library pinned to #v1.3.1 in both package.json files); /record and the extension's offscreen
+`Recorder` driven in headless Chromium with fake capture (frames with change boxes and close-ups,
+`sampling.engine 'live'`, JPEGs under their pick keys, a narration frame stored out of index order).
+Item 4 needed library 1.3.1 (`info` joins `PageEvent.level`, kept by `readRecordingJson`, left out
+of every error count); nav notes carry origin + path only (a query or hash can hold a token). Item 8 measured headless (software canvas): `push` median 17 ms at 1080p, 57 ms at 5K
+(p95 ~200 ms); cadence unchanged. Next: Sal records a real take on the unpacked build.
 
 ## Why
 

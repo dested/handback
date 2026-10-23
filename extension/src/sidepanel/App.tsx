@@ -513,6 +513,13 @@ export function App() {
     // document must exist first — it is the thing that captures.
     setPicking('choosing');
     await send({ type: 'offscreen:ensure' });
+    // This panel's size and its window's: a share of this window gets the panel
+    // cropped out of every frame (offscreen/crop.ts). Unknown = nothing cropped.
+    const win = await chrome.windows.getCurrent().catch(() => undefined);
+    const panel =
+      win?.width && win.height
+        ? { width: window.innerWidth, windowWidth: win.width, windowHeight: win.height }
+        : undefined;
     const started = await send<CaptureStartResult | undefined>({
       type: 'capture:start',
       id,
@@ -521,6 +528,7 @@ export function App() {
       // Only read when this opens a fresh walkthrough; joining an open one keeps
       // that one's mode, which is the same mode `kind` already is.
       pristine: kind === 'human',
+      ...(panel ? { panel } : {}),
     });
     // No answer at all = the offscreen document isn't there to hear us.
     if (!started) {

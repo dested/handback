@@ -1,16 +1,15 @@
 // Publish the recorder build the site hands out.
 //
-//   cd extension && npm run build
-//   pwsh -Command "Compress-Archive -Path extension/dist/* -DestinationPath extension/handback-recorder.zip -Force"
-//   bun cli/publish-recorder.ts
+//   bun run publish:extension
+//   (= cd extension && npm run build; node extension/scripts/zip-dist.mjs; bun cli/publish-recorder.ts)
 //
 // Uploads extension/handback-recorder.zip to releases/recorder/, which is the
 // prefix `/recorder` serves from. There is no "current version" constant
 // anywhere: the newest zip under that prefix IS the release, so publishing is
 // this one upload.
 //
-// Zipping stays a separate step on purpose — Bun has no zip writer, Git Bash's
-// GNU tar can't make one, and spawning Compress-Archive from bun hangs. What
+// Zipping stays a separate step on purpose — Bun has no zip writer, and
+// spawning Compress-Archive from bun hangs (zip-dist.mjs runs under node). What
 // this script does instead is refuse to upload a zip that doesn't match the
 // build sitting in dist/, which is the mistake actually worth catching.
 

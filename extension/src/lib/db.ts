@@ -1,4 +1,4 @@
-import type { OutboxEntry, Recording, Session } from './types';
+import type { OutboxEntry, Recording, RecordingFrame, Session } from './types';
 
 /**
  * The single source of truth, shared by the service worker and the side panel.
@@ -135,6 +135,14 @@ export async function deleteOutbox(id: string) {
   await tx(STORE.outbox, 'readwrite', (s) => s.delete(id));
 }
 
+/**
+ * Where a keyframe's JPEG is: under its `blobKey` (Recorder 1.12.0+, the frame
+ * rule's pick id), or under its index for a take recorded before that.
+ */
+export function frameBlobKey(recId: string, frame: Pick<RecordingFrame, 'index' | 'blobKey'>): string {
+  return `${recId}:frame:${frame.blobKey ?? frame.index}`;
+}
+
 export async function deleteRecording(id: string) {
   const recording = await getRecording(id);
   if (recording) {
@@ -144,7 +152,7 @@ export async function deleteRecording(id: string) {
       (_, i) => `${id}:micchunk:${i + 1}`,
     );
     await Promise.all([
-      ...recording.meta.frames.map((f) => blobs.delete(`${id}:frame:${f.index}`)),
+      ...recording.meta.frames.map((f) => blobs.delete(frameBlobKey(id, f))),
       ...chunks.map((key) => blobs.delete(key)),
       ...micChunks.map((key) => blobs.delete(key)),
       blobs.delete(`${id}:video`),

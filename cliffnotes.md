@@ -1,7 +1,7 @@
 # Handback — CliffNotes
 
 > Living map of the project. Read this before any coding session.
-> Last updated: 2026-10-15 (web capture + agent brief v2 on @dested/video-to-prompt — plans/2026-10-15-video-to-prompt-v2-and-brief.md). Visual language → `ui.md` · why → `decisions.md` ·
+> Last updated: 2026-10-22 (extension 1.12.0 + /record pick frames with the library's `LiveFrames` — plans/2026-10-22-live-capture.md). Visual language → `ui.md` · why → `decisions.md` ·
 > log → `updates.md`.
 >
 > **2026-08-23 mega-wave** (plans/2026-08-23-fable5-mega-wave.md): sidebar app
@@ -16,6 +16,10 @@
 > build still needs the store zip uploaded through the dashboard): capture,
 > transcription and upload all run in the offscreen document, so closing the panel never stops
 > a take (see "The panel is a window" gotcha; plans/2026-09-12-panel-and-app-handback.md).
+> **1.12.0 built, NOT published** (2026-10-22): frames from @dested/video-to-prompt 1.3.1's
+> `LiveFrames` (no cap, change boxes, close-ups), speech lines from a mic level detector, the
+> pointer drawn at each frame's own time, the panel cropped out of window shares, click/nav as
+> `info` timeline notes. Sal records a real take on the unpacked build before it ships.
 >
 > **Naming:** the product noun is **walkthrough** (renamed from "gripe" 2026-08-01, owner's
 > directive on record). Older log entries below say "gripe" historically — same object. The word
@@ -219,7 +223,8 @@ server/
                         ("close-up of frame 12 (rec-01/frames/12-0017.jpg): the screen then was
                         that frame except this region"), get_images' evidence set (a close-up
                         brings its base in just before it) + imageLabel, withBases, Refine's
-                        visionBatches. Tests: frame-labels.test.ts
+                        visionBatches, closeUpsOn (the close-ups a deleted base takes with it, for
+                        deleteFrames and remove_span). Tests: frame-labels.test.ts
   storage.ts            S3: presignPut/Get, getObjectText, deletePrefix, deleteKeys, key layout,
                         isSafePath. Honors optional S3_ENDPOINT (R2/S3-compatible, forcePathStyle)
   retention.ts          THE deletion clocks: RETENTION_DAYS=30 (resolved auto-expire via
@@ -450,10 +455,12 @@ src/
                         types.ts re-exports the library's recording shapes.
                         live.ts / live-store.ts / live-upload.ts are the WEB RECORDER (/record):
                         the extension's capture engine ported to a page (no content script, so no
-                        events/pointer/click+nav frames), its IDB `handback-web-recorder`, and the
-                        take-set → library builders → upload tail. live-rule.ts is its 64×64
-                        keep/drop rule (the extension's, unchanged): frames with no change boxes
-                        and no `sampling`, which the library's report reads as "no outlines"
+                        events/pointer/click+nav notes), its IDB `handback-web-recorder`, and the
+                        take-set → library builders → upload tail. Frames come from the library's
+                        `LiveFrames` (format 2: change boxes, close-ups, `sampling.engine 'live'`),
+                        stored under the pick key (`frameBlobKey`); voice.ts is the mic level
+                        detector that opens/closes its lines (mirrored in extension/src/offscreen/
+                        voice.ts; voice.test.ts runs one suite over both)
     capture-token.ts    useCaptureToken(kind) — the mint/re-mint-on-401 hb_ token helper shared by
                         /phone, /upload and /record (was copy-pasted in each). Stores `{token,id}`
                         in localStorage `handback.phone.token` (back-compat: an old bare `hb_`
@@ -489,11 +496,13 @@ drydock.yaml            DRYDOCK-OWNED — the deploy manifest (portal is source 
   drydock.yml           DRYDOCK-OWNED — OIDC build → ECR → predeploy → ECS deploy on push to main
 extension/              Handback Recorder — the Chrome MV3 extension (own npm workspace)
   public/manifest.json  MV3: sidePanel + activeTab/scripting/storage/tabs/offscreen; hotkey Alt+Shift+D
-  src/lib/              Shared contracts: types, messages (worker protocol), timeline math,
-                        db (IndexedDB 'handback-recorder', v2 adds the `outbox` store),
-                        bundle (buildFileSet — the in-memory gripe file set, moved out of
-                        App.tsx for the offscreen uploader), grids (contact sheets, moved
-                        from sidepanel/), report.md builder, upload (to /api/ingest
+  src/lib/              Shared contracts: types (recording shapes re-exported from
+                        @dested/video-to-prompt + `blobKey` on frames), messages (worker protocol),
+                        timeline math, db (IndexedDB 'handback-recorder', v2 adds the `outbox`
+                        store; `frameBlobKey` = key-or-index fallback), bundle (buildFileSet — the
+                        in-memory file set through the LIBRARY's report/recording.json/MANIFEST/
+                        sheet builders, as /record's live-upload.ts does), report (only
+                        `agentPrompt` now), upload (to /api/ingest
                         — XHR PUTs: live byte progress + 3-try retry, mirrors src/lib/capture/upload.ts),
                         context (GET /api/ingest/context), walkthroughs (GET /api/ingest/walkthroughs
                         — the workspace's queue, read back into the panel's home screen)
@@ -502,9 +511,12 @@ extension/              Handback Recorder — the Chrome MV3 extension (own npm 
                         red REC badge + action-click routing while a take runs. Returns `false`
                         for every `capture:*` / `transcribe:*` message — those are the
                         offscreen document's to answer
-  src/offscreen/        THE ENGINE (1.11.0): recorder.ts (screen+mic capture — getDisplayMedia
-                        runs HERE, no gesture needed; Web Audio mix + dedup, see the audio
-                        gotcha), transcription.ts (the post-take queue: transcribe.ts
+  src/offscreen/        THE ENGINE (1.12.0): recorder.ts (screen+mic capture — getDisplayMedia
+                        runs HERE, no gesture needed; Web Audio mix, see the audio gotcha; frames
+                        via the library's `LiveFrames` every 250 ms), voice.ts (mic level →
+                        openLine/closeLine), pointer.ts (10 s pointer ring + mapping, drawn through
+                        `decorate`), crop.ts (side panel cut out of a window share; *.test.ts run
+                        under root `bun run test:unit`, excluded from the extension's tsc), transcription.ts (the post-take queue: transcribe.ts
                         → transcribeCloud.ts / transcribeWorker.ts, then polish.ts; broadcasts
                         `transcribe:update`), and the uploader (drains the outbox oldest-first,
                         WAITING for the session's transcripts first — buildFileSet → pushGripe).
@@ -720,9 +732,9 @@ reaches the container on a plain push.
   capture for years, which is what `/record` is (`src/lib/capture/live.ts`, 2026-08-12). Don't read
   this bullet as "the website never captures". **/phone and /upload distill through
   @dested/video-to-prompt** (2026-10-15): pipeline changes go in the library, released as a git
-  tag, then the dep bump here. The extension is still a separate port of the old pipeline
-  (its migration is next), so an extension-side pipeline change still needs thought about the
-  library. Phone keyframes are **best-effort**: a frame-extraction failure degrades the take to
+  tag, then the dep bump here — in BOTH package.json files (root and `extension/`, its own npm
+  workspace, since 1.12.0). The extension and /record pick frames with the library's `LiveFrames`
+  and build their file sets with its builders (2026-10-22). Phone keyframes are **best-effort**: a frame-extraction failure degrades the take to
   zero frames (video + transcript still ship), never fails the run.
   The SW caches nothing and must stay that way (SSR staleness > offline); its share stash
   (IDB `handback-share`/`pending`/`current`) is a contract between `public/sw.js` and
@@ -730,13 +742,19 @@ reaches the container on a plain push.
   phone token lives in `localStorage handback.phone.token` and re-mints itself on 401.
 - **The web recorder is the extension's engine minus the content script, and the gap is a fixed
   list.** `src/lib/capture/live.ts` is a port of `extension/src/offscreen/recorder.ts` — same picker
-  constraints, same 64×64 dedup, same Web Audio mix + mic-only shadow, same length-scaled
-  `frameBudget`, same chunk-to-IDB persistence. What a page cannot have, because it comes from
-  scripts injected into the *recorded* origin: console/network `events` (so `errorCount` is always
-  0 and polish gets no error context), `pointer` on frames and the crosshair drawn from it, and the
-  `click`/`nav` forced keyframes — leaving `start`/`change`/`beat`. Its frame rule (`live-rule.ts`)
-  is the extension's and moves to the library's Selector together with the extension; its report,
-  sheets and recording.json already come from the library.
+  constraints, same frame rule (the library's `LiveFrames`, fed every `LIVE_STEP_MS` = 250 ms; no
+  frame budget anywhere since 2026-10-22), same mic level detector for its lines (`voice.ts`, one
+  copy each side), same Web Audio mix + mic-only shadow, same chunk-to-IDB persistence. What a page
+  cannot have, because it comes from scripts injected into the *recorded* origin: console/network
+  `events` (so `errorCount` is always 0 and polish gets no error context), `pointer` on frames and
+  the crosshair drawn from it, and the click/nav timeline notes. Its report, sheets and
+  recording.json come from the library, as the extension's do.
+  **Frame JPEGs live under the pick key, not the index** (`<id>:frame:<blobKey>`, both recorders):
+  `LiveFrames.frames()` renumbers while a take records (a spoken line's frame lands before frames
+  kept after it). Every read goes through `frameBlobKey()` (db.ts / live-store.ts), which falls back
+  to the index for takes recorded before the switch. Pristine (human) takes sample nothing. A
+  window share of the panel's own window is cropped (`RecordingMeta.crop`, extension only); screen
+  shares stay whole.
   Its IDB is **`handback-web-recorder`**, deliberately not the extension's `handback-recorder`:
   same origin, and the extension's worker owns that schema.
 - **A clip that reached /phone must be un-losable short of explicit discard** (2026-08-02, after
@@ -780,11 +798,13 @@ reaches the container on a plain push.
   contain `<pre>` and mono lines that never wrap — a missing `min-w-0` drags the whole page
   wider than a phone (doc `scrollWidth` 510 at a 390 viewport). Re-check `scrollWidth` at 390
   after touching any landing grid.
-- **A gripe's `errorCount` is not "how much happened".** `PageEvent` is only `error | warn |
+- **A gripe's `errorCount` is not "how much happened".** Its problems are `PageEvent` levels `error | warn |
   network` — the console/fetch tap in `extension/public/injected.js`, forwarded only while a
   recording is live (`content/index.ts:93`), and `console.log` is never captured. Clicks and
-  navigation are NOT events: they become forced keyframes (`recording:force`), so a busy
-  walkthrough legitimately reads `errorCount: 0` with a high `frameCount` — that pairing is
+  navigation are `info` notes (Recorder 1.12.0+; `recording:force` now carries `detail` and only
+  writes `click: <selector> "<text>"` / `nav: <origin+path>` onto the timeline (library 1.3.1 level) — they forced keyframes
+  before) with their own 300-note budget, and `errorCount` / the polish context count only
+  error/warn/network — so a busy walkthrough legitimately reads `errorCount: 0` — that is
   evidence the tap worked, not that it died. `droppedCount` is errors that fired on a tab other
   than the recorded one (`inScope()` in `recorder.ts`), which is what separates "the page was
   clean" from "we weren't watching". The field was called `eventCount` until 2026-07-31 and read
@@ -856,12 +876,10 @@ reaches the container on a plain push.
   DISPLAY_MEDIA. Untested on a real Chrome as of 2026-09-12 — Web Speech dictation now runs in
   the offscreen document too; if `webkitSpeechRecognition` proves unavailable there, the live
   ticker degrades to `listening…` and the post-take transcript still lands.
-- **The keyframe cap is length-scaled, and it lives in two places.** `frameBudget(durationMs)`
-  (`extension/src/offscreen/recorder.ts`) is 40 frames/min clamped to **[150, 600]** per *take* —
-  applied once in `finish()`, after dedup, as a **uniform** thin with nothing carved out of it
-  (the `reason === 'mark'` exemption went with the mark feature, 2026-08-01); survivors are
-  renumbered ascending (`t` survives, so transcript citations stay valid). It was a flat 150 until 2026-07-31.
-  The brief (2026-10-15) carries **no frame URLs**: frames are named by path in the rebuilt report's
+- **There is no keyframe cap anywhere** (since 2026-10-22). The live recorders' old
+  `frameBudget` (40/min clamped to [150, 600], a uniform thin in `finish()`) is gone with their
+  64×64 rule; that cap is why a 28-min doc read kept 600 near-identical frames. Every door now
+  picks with the library's rule and keeps what it picks. The brief (2026-10-15) carries **no frame URLs**: frames are named by path in the rebuilt report's
   timeline, `get_images` shows ≤6 per call (evidence set by default), `get_frames` pages download
   URLs. A frame is ~150–300 KB (JPEG quality 0.8 since 2026-08-25), against 2 GB/gripe and 20 GB/org.
 - **Library 1.2 frames: no cap, close-ups, `seen` spans (2026-10-22).** The library's extractor
@@ -870,7 +888,8 @@ reaches the container on a plain push.
   (0..1 of the frame) at native size, the rest of the screen was frame `of` (its `index`, same
   take). Also on disk `seenMs: [[from, to)]` (the reader calls it `seen`): other take-local spans
   when that frame is what's on screen. Never show or hand over a close-up bare: the viewer
-  composites it (frame-image.tsx), agents/models get it labelled with its base (frame-labels.ts).
+  composites it (frame-image.tsx), agents/models get it labelled with its base (frame-labels.ts),
+  and deleting its base deletes it too (`closeUpsOn`; the viewer hides it while the base is staged).
   File names are `NN-mmss.jpg` padded to two, so past frame 99 a path sort is NOT recording
   order — sort with `byFrameOrder` (mcp-format.ts).
 - **Image-bearing MCP results are capped at 25k tokens by Claude Code** (`MAX_MCP_OUTPUT_TOKENS`);
@@ -1071,10 +1090,9 @@ reaches the container on a plain push.
 - **A push to `main` does NOT ship the extension.** Deploy only moves the web app/server; the
   recorder reaches users through `releases/recorder/` in the bucket. So before (or right after) any
   push that touched `extension/`: bump the version if behavior changed, then
-  `bun run publish:extension` (build → zip → upload; the zip step shells out to `pwsh`
-  `Compress-Archive`, so it's Windows-only — on macOS zip by hand instead:
-  `cd extension/dist && zip -r ../handback-recorder.zip .` then `bun cli/publish-recorder.ts`;
-  the publish script's checks make either path safe). Skipping
+  `bun run publish:extension` (build → zip → upload; `extension/scripts/zip.mjs` uses `pwsh`
+  `Compress-Archive` where it exists and Info-ZIP `zip` otherwise, so it runs on Windows, WSL and
+  macOS alike; the publish script's checks refuse a zip older than dist). Skipping
   this leaves every install nagged as outdated — or worse, a server expecting a handshake the
   shipped recorder doesn't speak.
 - **The bucket is the release channel.** `/recorder` links `/download/recorder`, not GitHub — the

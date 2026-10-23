@@ -16,14 +16,13 @@ import {
 import type { EditSegment, EditState } from '../edit/edl'
 import { editedTranscriptLines } from '../edit/transcript'
 import { CLOUD_ID, CLOUD_LABEL, megabytes, REPORT_OPTIONS } from './distill'
-import { blobs, putTake, type LiveTake } from './live-store'
+import { blobs, frameBlobKey, putTake, type LiveFrame, type LiveTake } from './live-store'
 import { polishTranscript } from './polish'
 import { transcribeInCloud } from './transcribe'
 import { contentTypeFor, uploadWalkthrough, type CaptureFile } from './upload'
 import type {
   CaptureStage,
   DistillResult,
-  RecordingFrame,
   Session,
   StageProgress,
   TranscriptSegment,
@@ -66,6 +65,16 @@ export interface LiveUploadOptions {
 
 /** A take with no measured duration still occupies a second of the clock, as in the library's timeline. */
 const MIN_SPAN_MS = 1000
+
+/** A contact-sheet tile's caption — the library's distill writes the same one. */
+function tileLabel(frame: LiveFrame, axisStart: number): string {
+  const held =
+    frame.transient && frame.held !== undefined
+      ? ` · gone after ${(frame.held / 1000).toFixed(1)} s`
+      : ''
+  const detail = frame.detail ? ` · on ${pad2(frame.detail.of)}` : ''
+  return `${pad2(frame.index)} · ${mmss(axisStart + frame.t)}${detail}${held}`
+}
 
 /**
  * Give one take its transcript, if it doesn't already have one: decode the
@@ -193,14 +202,27 @@ export async function sendLiveWalkthrough(
     // frames, so the human path walks an empty list and says nothing about it
     // (its stage rows don't have a keyframes line to light).
     if (opts.kind !== 'human') report('frames', i, 0, label)
-    const kept: RecordingFrame[] = []
+    const kept: LiveFrame[] = []
     const gridFrames: GridFrame[] = []
+    /** Index → JPEG, so a close-up's tile can lay itself over the frame it is part of. */
+    const byIndex = new Map<number, Blob>()
     for (const frame of take.meta.frames) {
-      const blob = await blobs.get(`${take.id}:frame:${frame.index}`)
+      const blob = await blobs.get(frameBlobKey(take.id, frame))
       if (!blob) continue
+      byIndex.set(frame.index, blob)
       files.push({ path: `${dir}/${frame.file}`, blob, contentType: contentTypeFor(frame.file) })
       kept.push(frame)
-      gridFrames.push({ blob, label: `${pad2(frame.index)} · ${mmss(axisStart + frame.t)}` })
+    }
+    for (const frame of kept) {
+      const blob = byIndex.get(frame.index)
+      if (!blob) continue
+      const base = frame.detail ? byIndex.get(frame.detail.of) : undefined
+      gridFrames.push({
+        blob,
+        label: tileLabel(frame, axisStart),
+        change: frame.change,
+        ...(frame.detail && base ? { detail: { base, box: frame.detail.box } } : {}),
+      })
     }
     if (opts.kind !== 'human') report('frames', i, 1, label)
     stop()

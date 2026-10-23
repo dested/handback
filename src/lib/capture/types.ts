@@ -12,7 +12,7 @@
  * the library (decisions.md 2026-10-15). What stays in this folder is
  * Handback's own: the ingest API clients (transcribe, polish, context,
  * upload), the pending-run store, and the /record live recorder, which the
- * extension shares and which keeps its own frame rule for now.
+ * extension shares; its frame rule is the library's `LiveFrames`.
  */
 
 import type { ClipProbe, DistillStage } from '@dested/video-to-prompt'

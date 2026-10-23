@@ -140,7 +140,7 @@ function Filmstrip({ thumbs }: { thumbs: LiveThumb[] }) {
       className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:thin]"
       aria-label="captured keyframes">
       {thumbs.map((thumb) => (
-        <figure key={thumb.index} className="shrink-0">
+        <figure key={thumb.key} className="shrink-0">
           <img
             src={thumb.url}
             alt=""

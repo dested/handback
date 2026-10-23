@@ -77,14 +77,10 @@ function boot() {
   window.addEventListener('message', (event) => {
     if (event.source !== window) return;
     const data = event.data as (PageEvent & { source?: string }) | null;
-    // A route change isn't an event, just a keyframe the dedup would otherwise
-    // miss on a page that repaints into the same cream.
+    // A route change: noted on the take's timeline, so the report says the page
+    // moved even when it repainted into the same cream.
     if (data?.source === PAGE_NAV) {
-      if (recordingActive) {
-        void chrome.runtime
-          .sendMessage({ type: 'recording:force', why: 'nav', origin: location.origin })
-          .catch(() => {});
-      }
+      if (recordingActive) tell(navNote());
       return;
     }
     if (!data || data.source !== PAGE_EVENT) return;
@@ -124,8 +120,7 @@ function boot() {
       if (el !== pointerEl) {
         pointerEl = el;
         pointerSelector = el ? selectorFor(el) : undefined;
-        const text = (el?.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 80);
-        pointerText = text || undefined;
+        pointerText = el ? textOf(el) : undefined;
       }
 
       void chrome.runtime
@@ -150,6 +145,27 @@ function boot() {
     },
     { capture: true, passive: true },
   );
+
+  // ── clicks and navigations, for the timeline ────────────────────────────
+  /** A click as the timeline names it: `<selector> "<text>"`. */
+  function clickNote(target: EventTarget | null): Request {
+    const el = target instanceof Element ? target : null;
+    const text = el ? textOf(el) : undefined;
+    const detail = el ? `${selectorFor(el)}${text ? ` "${text}"` : ''}` : undefined;
+    return { type: 'recording:force', why: 'click', origin: location.origin, detail };
+  }
+
+  /** Origin and path only: a query or hash can carry a login code or a token. */
+  function navNote(): Request {
+    const detail = `${location.origin}${location.pathname}`;
+    return { type: 'recording:force', why: 'nav', origin: location.origin, detail };
+  }
+
+  /** What an element says, squeezed to one short line. */
+  function textOf(el: Element): string | undefined {
+    const text = (el.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 80);
+    return text || undefined;
+  }
 
   // ── naming what the pointer is over ─────────────────────────────────────
   const isUnique = (selector: string) => {
@@ -324,10 +340,10 @@ function boot() {
         return;
       }
       touchInk();
-      // Dedup would drop the drawn state as "the same screen"; force the keyframe.
-      // A stroke is a pointer gesture on the page, so it rides the click path —
-      // same rate limit, same reason in the report.
-      tell({ type: 'recording:force', why: 'click', origin: location.origin });
+      // The drawing changed the screen, so the frame rule keeps it; the timeline
+      // gets a note. A stroke is a pointer gesture on the page, so it rides the
+      // click path — same rate limit.
+      tell({ type: 'recording:force', why: 'click', origin: location.origin, detail: 'ink stroke' });
     };
     o.live.addEventListener('pointerup', endStroke);
     o.live.addEventListener('pointercancel', endStroke);
@@ -531,9 +547,8 @@ function boot() {
   function onRipplePointer(event: PointerEvent) {
     if (!recordingActive || liveOn || inOverlay(event)) return;
     ripple(event.clientX, event.clientY);
-    // The same condition that earns a ring earns a keyframe: whatever the click
-    // did to the screen, dedup may score it below the bar.
-    tell({ type: 'recording:force', why: 'click', origin: location.origin });
+    // The same condition that earns a ring earns a timeline note.
+    tell(clickNote(event.target));
   }
 
   function addRipples() {
@@ -566,7 +581,7 @@ function boot() {
           openDock(message.drawStart === true);
           // The dock was off, so this tab just loaded (or reloaded) inside a live
           // walkthrough — a full navigation the SPA tap never sees.
-          tell({ type: 'recording:force', why: 'nav', origin: location.origin });
+          tell(navNote());
         }
       } else {
         removeRipples();

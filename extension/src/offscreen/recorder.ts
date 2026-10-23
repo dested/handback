@@ -1,74 +1,51 @@
+import { LIVE_STEP_MS, LiveFrames, type FrameBox } from '@dested/video-to-prompt';
 import type {
   FramePointer,
   MicState,
   PageEvent,
+  PanelGeometry,
   PointerSample,
   RecorderUpdate,
-  RecordingFrame,
   RecordingMeta,
   TranscriptSegment,
 } from '../lib/types';
 import { COBALT } from '../lib/types';
 import { blobs } from '../lib/db';
 import { send } from '../lib/messages';
-import { pad2, mmssFile } from '../lib/format';
+import { panelCrop } from './crop';
+import { PointerRing, pointerOnFrame } from './pointer';
+import { rmsOf, VoiceGate } from './voice';
 
 /**
- * Screen capture, distilled while it records — claude-real-video's dedup shape
- * (sliding window of KEPT frames, forced keyframes only where the page said so:
- * clicks, navigations, and a 15 s heartbeat when the screen is
- * drifting below the dedup bar, uniform thinning past a length-scaled budget —
- * see `frameBudget`), recalibrated for
- * screen recordings. The reference compares 16×16 RGB
- * signatures by *percent* changed with an 8% bar — tuned for full-frame video.
- * On a screen recording the action usually lives in one region (a game canvas,
- * a terminal pane), and a 16×16 signature averages it into nothing: run against
- * a real capture, the original tool kept 1 frame of 22 and every reject scored
- * under 6%. So: 64×64 cells, and a frame is new when more than a handful of
- * cells changed — an absolute count, not a percent, because "how much of the
- * screen moved" is the wrong question when the answer is "one corner of it".
- * A-B-A cutaways still don't re-capture A, a static screen still adds nothing.
- * Speech is stamped where the sentence started, not where recognition finally
- * admitted what it heard.
+ * Screen capture, distilled while it records. Which frames a take keeps is
+ * @dested/video-to-prompt's rule (`LiveFrames`, plans/2026-10-22-live-capture.md): the
+ * extractor's Selector run online over the share every LIVE_STEP_MS, so a take
+ * recorded here keeps the frames a finished clip of the same screen would —
+ * change boxes, close-ups of a region that changed, a page model for scrolling,
+ * a picture for every spoken line, no cap. This file feeds it: the share's
+ * `<video>`, speech edges from a level detector on the mic (`voice.ts`), the
+ * crop that cuts the recorder's own panel out of a window share (`crop.ts`),
+ * and the pointer, drawn on each whole-screen keyframe as it was at that
+ * frame's own time (`pointer.ts`). Clicks and navigations no longer force a
+ * frame — the rule keeps what a click changed — they are noted on the timeline
+ * as `info` events instead.
  *
- * One thing the reference has no equivalent for, from an agent that read a real
+ * One thing the extractor has no equivalent for, from an agent that read a real
  * bundle: frames carry the mouse (drawn when the capture can be mapped, named by
  * selector always — "these over here" is otherwise unresolvable).
  *
- * Nothing here lives only in panel memory. Every MediaRecorder chunk is written to
- * IndexedDB as it arrives and the meta is pushed to the worker every couple of
- * seconds, so a panel that dies mid-ramble loses the last second, not the take —
- * `recording:recover` reassembles the chunks into the video.
+ * Nothing here lives only in memory. Every MediaRecorder chunk is written to
+ * IndexedDB as it arrives, every kept JPEG as it is encoded (under the rule's
+ * pick key — frame numbers shift while recording), and the meta is pushed to the
+ * worker every couple of seconds, so a document that dies mid-ramble loses the
+ * last second, not the take — `recording:recover` reassembles the chunks.
  */
 
-const SAMPLE_MS = 500; // candidate cadence — stands in for the reference's scene-detect + 1s density floor
-const SIG_SIZE = 64; // 64×64 RGB cells — fine enough that a sprite-sized change still flips whole cells
-const PIX_TOL = 25; // a cell counts as changed if any channel moves more than this
-const DEDUP_THRESHOLD = 8; // cells that must change for a frame to be new (~0.2% of 4096 — localized action counts)
-const DEDUP_WINDOW = 4; // vs the last N KEPT frames — A-B-A cutaways don't come back
-const BEAT_MS = 15000; // a minute of narration over a slowly-shifting screen must not produce zero frames
-const CLICK_FORCE_MS = 1200; // floor between click-forced keyframes — a double-click is one moment
-// The keyframe budget scales with how long the take ran, because a flat cap is
-// wrong at both ends: a 90-second walkthrough never came near the old 150, while
-// a twenty-minute one lost real detail to it. The floor keeps short takes exactly
-// as generous as they were; the ceiling keeps a marathon take inside the per-gripe
-// upload budget (a frame is ~150-300 KB at MAX_FRAME_W/JPEG_QUALITY).
-const FRAMES_PER_MIN = 40;
-const MIN_FRAME_BUDGET = 150;
-const MAX_FRAME_BUDGET = 600;
-const MAX_FRAME_W = 1920;
-const JPEG_QUALITY = 0.8; // 0.9 until 1.10.0 — frames were half the upload; UI text stays legible
-const MAX_EVENTS = 200;
-const POINTER_STALE_MS = 2500; // a pointer older than this says nothing about this frame
-const MAP_TOLERANCE = 0.02; // aspect-ratio match required before we believe a coordinate mapping
+const VOICE_MS = 50; // mic level reading cadence — the analyser window is ~43 ms at 48 kHz
+const MAX_EVENTS = 200; // console/network lines kept per take
+const MAX_NOTES = 300; // click/nav notes kept per take — their own budget, so clicking never evicts an error
+const CLICK_NOTE_MS = 1200; // floor between click notes — a double-click is one moment
 const PROGRESS_MS = 1500; // floor between meta pushes — the worker writes IndexedDB on every one
-
-/** How many keyframes a take of this length may keep after dedup. Uniform thinning
- *  past this point, so survivors stay spread across the whole recording. */
-export function frameBudget(durationMs: number): number {
-  const byLength = Math.round((durationMs / 60000) * FRAMES_PER_MIN);
-  return Math.min(MAX_FRAME_BUDGET, Math.max(MIN_FRAME_BUDGET, byLength));
-}
 
 const MIME_TYPES = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
 const AUDIO_MIME_TYPES = ['audio/webm;codecs=opus', 'audio/webm'];
@@ -122,56 +99,12 @@ export interface Ticker {
  */
 export type TickerCtor = new (handlers: TickerHandlers, lang: string) => Ticker;
 
-/**
- * Count of cells whose max channel delta exceeds PIX_TOL — the reference's
- * pct_diff, kept as a count.
- */
-function cellDiff(a: Uint8ClampedArray, b: Uint8ClampedArray): number {
-  const cells = SIG_SIZE * SIG_SIZE;
-  let changed = 0;
-  for (let i = 0; i < cells; i++) {
-    const p = i * 4;
-    const d = Math.max(
-      Math.abs(a[p] - b[p]),
-      Math.abs(a[p + 1] - b[p + 1]),
-      Math.abs(a[p + 2] - b[p + 2]),
-    );
-    if (d > PIX_TOL) changed++;
-  }
-  return changed;
-}
-
-function toJpeg(canvas: HTMLCanvasElement): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    canvas.toBlob(
-      (blob) => (blob ? resolve(blob) : reject(new Error('frame encode failed'))),
-      'image/jpeg',
-      JPEG_QUALITY,
-    );
-  });
-}
-
-/**
- * Where the pointer lands inside the captured frame, 0–1, or null when we can't
- * be sure. The capture stream never says *what* it handed us, so the frame's shape
- * is the only evidence: a frame shaped like the screen is the screen (map from
- * `screenX/Y`), a frame shaped like the viewport is the tab (map from
- * `clientX/Y`). A window capture matches neither and a second monitor pushes
- * screen coordinates out of range — both draw nothing rather than draw a lie.
- * The selector still ships in the report either way.
- */
-function mapPointer(p: PointerSample, w: number, h: number): { nx: number; ny: number } | null {
-  if (!w || !h) return null;
-  const aspect = w / h;
-  const fits = (a: number) => Math.abs(aspect - a) / a;
-  const options: { off: number; nx: number; ny: number }[] = [];
-  if (p.sw && p.sh) options.push({ off: fits(p.sw / p.sh), nx: p.sx / p.sw, ny: p.sy / p.sh });
-  if (p.vw && p.vh) options.push({ off: fits(p.vw / p.vh), nx: p.x / p.vw, ny: p.y / p.vh });
-  const best = options.filter((o) => o.off <= MAP_TOLERANCE).sort((a, b) => a.off - b.off)[0];
-  if (!best) return null;
-  const out = [best.nx, best.ny];
-  if (out.some((v) => v < -0.02 || v > 1.02)) return null;
-  return { nx: Math.min(1, Math.max(0, best.nx)), ny: Math.min(1, Math.max(0, best.ny)) };
+/** One analyser on one audio source. */
+interface Tap {
+  analyser: AnalyserNode;
+  /** Pinned to a plain ArrayBuffer: `getFloatTimeDomainData` refuses a view
+   *  that might be backed by a SharedArrayBuffer. */
+  buf: Float32Array<ArrayBuffer>;
 }
 
 /** The mouse, drawn onto the keyframe. Dark pass first so it survives a white page too. */
@@ -222,8 +155,11 @@ export class Recorder {
   /** Level tap on the system source. 'silent' vs 'live' in the HUD is the only
    *  tell for a granted-but-dead loopback (sound reaching the ears through a
    *  device Chrome isn't capturing). */
-  private sysTap: { analyser: AnalyserNode; buf: Float32Array<ArrayBuffer> } | null = null;
+  private sysTap: Tap | null = null;
   private sysHeard = false;
+  /** Level tap on the mic, read every VOICE_MS for the speech edges. */
+  private micTap: Tap | null = null;
+  private readonly voice = new VoiceGate();
   /**
    * The mic-only shadow recorder, running only when the take ALSO has system
    * audio: the webm's mixed track is what a human plays back, but Whisper must
@@ -244,23 +180,19 @@ export class Recorder {
   private events: PageEvent[] = [];
   /** Events from tabs that aren't the one being recorded — counted, not kept. */
   private dropped = 0;
-  private pointer: PointerSample | null = null;
-  private frames: RecordingFrame[] = [];
-  /** Something demanded the next sample be kept whatever dedup thinks, and what it was. */
-  private forcedWhy: 'click' | 'nav' | null = null;
-  private lastClickForce = 0;
-  /** When the last kept frame landed, ms from start — the heartbeat measures from here. */
-  private lastKeptT = 0;
-  /** Signatures of the KEPT frames only — that ring *is* the dedup window. */
-  private sigs: Uint8ClampedArray[] = [];
-  private sampled = 0;
+  private readonly pointers = new PointerRing();
+  private lastClickNote = 0;
+  /** The frame rule. Null on a pristine take, which keeps no frames. */
+  private live: LiveFrames | null = null;
+  /** Pick keys whose JPEG is on disk (`<id>:frame:<key>`). */
+  private readonly stored = new Set<number>();
+  /** The part of the share the frames show — the panel cut out of a window share. */
+  private crop: FrameBox | undefined;
   private startedAt = 0;
-
-  private sigCtx: CanvasRenderingContext2D | null = null;
-  private frameCtx: CanvasRenderingContext2D | null = null;
 
   private sampleTimer: number | null = null;
   private tickTimer: number | null = null;
+  private voiceTimer: number | null = null;
   private sampling = false;
   private pending: Promise<void> = Promise.resolve();
   private stopped: Promise<RecordingMeta> | null = null;
@@ -284,6 +216,8 @@ export class Recorder {
      * change one and change the other.
      */
     private readonly pristine = false,
+    /** The side panel's size and its window's, when Record was pressed there — see crop.ts. */
+    private readonly panel?: PanelGeometry,
   ) {}
 
   // ── lifecycle ───────────────────────────────────────────────────────────
@@ -320,12 +254,19 @@ export class Recorder {
     await video.play();
     this.video = video;
 
-    const sig = document.createElement('canvas');
-    sig.width = SIG_SIZE;
-    sig.height = SIG_SIZE;
-    this.sigCtx = sig.getContext('2d', { willReadFrequently: true });
-    this.frameCtx = document.createElement('canvas').getContext('2d');
-    if (this.frameCtx) this.frameCtx.imageSmoothingQuality = 'high';
+    if (!this.pristine) {
+      const surface = stream.getVideoTracks()[0]?.getSettings().displaySurface;
+      this.crop = panelCrop(surface, video.videoWidth, video.videoHeight, this.panel);
+      this.live = new LiveFrames({
+        // Under the pick's key, not its index: the index can shift until the take ends.
+        store: async (key, jpeg) => {
+          await blobs.set(`${this.id}:frame:${key}`, jpeg);
+          this.stored.add(key);
+        },
+        ...(this.crop ? { crop: this.crop } : {}),
+        decorate: (ctx, t, width, height) => this.drawPointer(ctx, t, width, height),
+      });
+    }
 
     // The mic is grabbed for real, not as a throwaway probe: its track is mixed
     // into the webm so the raw video carries the narration, and acquiring it
@@ -395,20 +336,22 @@ export class Recorder {
       this.dictation.start();
     }
 
-    if (!this.pristine) {
+    if (this.live) {
       this.sampleTimer = window.setInterval(() => {
         // Only replace `pending` when a sample actually starts — a tick that
         // no-ops against an in-flight sample must not mask the real promise,
-        // or finish() would thin/renumber while that sample is still writing.
+        // or finish() would run the rule's last step while this one is writing.
         if (!this.sampling) this.pending = this.sample();
-      }, SAMPLE_MS);
+      }, LIVE_STEP_MS);
+      // No mic, no tap: no lines, and the rule still keeps changes and beats.
+      if (this.micTap) this.voiceTimer = window.setInterval(() => this.listen(), VOICE_MS);
     }
     this.tickTimer = window.setInterval(() => {
       this.pollAudio();
       this.emit();
       this.saveProgress();
     }, 1000);
-    if (!this.pristine) this.pending = this.sample();
+    if (this.live) this.pending = this.sample();
   }
 
   stop(): Promise<RecordingMeta> {
@@ -442,24 +385,29 @@ export class Recorder {
       const ctx = new AudioContext();
       this.audioCtx = ctx;
       const dest = ctx.createMediaStreamDestination();
+      const tap = (source: MediaStreamAudioSourceNode): Tap => {
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 2048;
+        source.connect(analyser);
+        return { analyser, buf: new Float32Array(analyser.fftSize) };
+      };
       for (const track of [...sys, ...mic]) {
         const source = ctx.createMediaStreamSource(new MediaStream([track]));
         source.connect(dest);
         this.mixSources.push(source);
-        if (track === sys[0]) {
-          const analyser = ctx.createAnalyser();
-          analyser.fftSize = 2048;
-          source.connect(analyser);
-          this.sysTap = { analyser, buf: new Float32Array(analyser.fftSize) };
-        }
+        if (track === sys[0]) this.sysTap = tap(source);
+        if (track === mic[0]) this.micTap = tap(source);
       }
       // Extension pages are exempt from the autoplay policy, but a suspended
       // graph records silence — resume just in case.
       if (ctx.state === 'suspended') void ctx.resume().catch(() => {});
       return dest.stream.getAudioTracks();
     } catch {
+      // The raw mic still records; without a graph there is no level to read,
+      // so this take keeps changes and beats but opens no lines.
       this.mixSources = [];
       this.sysTap = null;
+      this.micTap = null;
       return mic;
     }
   }
@@ -512,31 +460,41 @@ export class Recorder {
       this.dropped++;
       return;
     }
-    this.events.push(event);
-    if (this.events.length > MAX_EVENTS) this.events.shift();
+    this.keep(event);
   }
 
   addPointer(sample: PointerSample, origin?: string) {
-    if (this.inScope(origin)) this.pointer = sample;
+    if (this.inScope(origin)) this.pointers.push(sample);
   }
 
   /**
    * The page said something happened — a click (a finished ink stroke counts as
-   * one), or a route change. Keep the next sample whatever dedup thinks. Clicks
+   * one), or a route change. It used to force a keyframe; now the rule keeps
+   * whatever the click changed, and a click that changed nothing is evidence for
+   * the timeline, not a picture. So it is noted there, as an `info` line. Clicks
    * are rate-limited: a walkthrough is mostly clicking.
    */
-  force(why: 'click' | 'nav', origin?: string) {
+  note(why: 'click' | 'nav', detail: string | undefined, origin?: string) {
     if (!this.stream) return;
-    // A pristine take keeps no frames at all, so there is nothing to force.
+    // A pristine take is the video itself; nothing reads its timeline.
     if (this.pristine) return;
     if (!this.inScope(origin)) return;
+    const now = Date.now();
     if (why === 'click') {
-      const now = Date.now();
-      if (now - this.lastClickForce < CLICK_FORCE_MS) return;
-      this.lastClickForce = now;
+      if (now - this.lastClickNote < CLICK_NOTE_MS) return;
+      this.lastClickNote = now;
     }
-    this.forcedWhy = why;
-    if (!this.sampling) this.pending = this.sample();
+    this.keep({ level: 'info', message: detail ? `${why}: ${detail}` : why, ts: now });
+  }
+
+  /** Errors and notes each have their own budget: a busy walkthrough's clicks never push out an error. */
+  private keep(event: PageEvent) {
+    this.events.push(event);
+    const isNote = event.level === 'info';
+    const count = this.events.filter((e) => (e.level === 'info') === isNote).length;
+    if (count <= (isNote ? MAX_NOTES : MAX_EVENTS)) return;
+    const oldest = this.events.findIndex((e) => (e.level === 'info') === isNote);
+    if (oldest >= 0) this.events.splice(oldest, 1);
   }
 
   /** No scope (a chrome:// tab was in front) keeps everything — better noisy than empty. */
@@ -546,100 +504,74 @@ export class Recorder {
 
   // ── sampling ────────────────────────────────────────────────────────────
 
+  /** One step of the frame rule. A frame that fails to encode or store is a missing frame, not a dead take. */
   private async sample() {
+    const live = this.live;
     const video = this.video;
-    const sigCtx = this.sigCtx;
-    const frameCtx = this.frameCtx;
-    if (this.sampling || !video || !sigCtx || !frameCtx) return;
-    if (video.readyState < 2 || !video.videoWidth || !video.videoHeight) return;
-
+    if (this.sampling || !live || !video) return;
     this.sampling = true;
-    const forced = this.forcedWhy;
-    this.forcedWhy = null;
+    const before = this.stored.size;
     try {
-      this.sampled++;
-      sigCtx.drawImage(video, 0, 0, SIG_SIZE, SIG_SIZE);
-      const sig = sigCtx.getImageData(0, 0, SIG_SIZE, SIG_SIZE).data;
-
-      const t = this.elapsed();
-      const minDist = this.sigs.length
-        ? Math.min(...this.sigs.map((k) => cellDiff(sig, k)))
-        : undefined;
-      let reason: RecordingFrame['reason'];
-      if (forced) {
-        // A click or a nav that changed literally nothing is a duplicate, and a
-        // duplicate spends one of the slots the whole walkthrough shares.
-        if (minDist !== undefined && minDist === 0) return;
-        reason = forced;
-      } else if (minDist === undefined) {
-        reason = 'start';
-      } else if (minDist <= DEDUP_THRESHOLD) {
-        // Below the bar, but the screen *is* moving and nothing has been kept in
-        // a while — a drifting low-contrast UI would otherwise go dark for minutes.
-        if (!(minDist > 0 && t - this.lastKeptT > BEAT_MS)) return;
-        reason = 'beat';
-      } else {
-        reason = 'change';
-      }
-      const dist = minDist; // changed-cell count vs the closest kept frame
-
-      const width = Math.min(video.videoWidth, MAX_FRAME_W);
-      const height = Math.round((video.videoHeight * width) / video.videoWidth);
-      const canvas = frameCtx.canvas;
-      if (canvas.width !== width || canvas.height !== height) {
-        canvas.width = width;
-        canvas.height = height;
-        frameCtx.imageSmoothingQuality = 'high';
-      }
-      frameCtx.drawImage(video, 0, 0, width, height);
-      const pointer = this.pointerNow(width, height);
-      if (pointer?.nx !== undefined && pointer.ny !== undefined) {
-        drawCrosshair(frameCtx, pointer.nx * width, pointer.ny * height, width);
-      }
-
-      const index = this.frames.length + 1;
-      await blobs.set(`${this.id}:frame:${index}`, await toJpeg(canvas));
-      this.frames.push({
-        index,
-        t,
-        file: `frames/${pad2(index)}-${mmssFile(t)}.jpg`,
-        reason,
-        ...(dist === undefined ? {} : { dist }),
-        ...(pointer ? { pointer } : {}),
-      });
-      this.lastKeptT = t;
-      this.sigs.push(sig);
-      if (this.sigs.length > DEDUP_WINDOW) this.sigs.shift();
-      this.emit();
-      this.saveProgress();
+      await live.push(this.elapsed(), video);
+    } catch {
+      /* the next step reads the screen again */
     } finally {
       this.sampling = false;
     }
+    if (this.stored.size !== before) {
+      this.emit();
+      this.saveProgress();
+    }
   }
 
-  /** The pointer as it applies to the frame being written, while it's fresh enough to mean anything. */
-  private pointerNow(width: number, height: number): FramePointer | undefined {
-    const p = this.pointer;
-    if (p && Date.now() - p.ts <= POINTER_STALE_MS) {
-      const mapped = mapPointer(p, width, height);
-      if (mapped || p.selector) return { ...(mapped ?? {}), selector: p.selector, text: p.text };
+  /** One mic reading; speech starting or stopping opens or closes the rule's line. */
+  private listen() {
+    const tap = this.micTap;
+    const live = this.live;
+    if (!tap || !live) return;
+    tap.analyser.getFloatTimeDomainData(tap.buf);
+    const edge = this.voice.push(this.elapsed(), rmsOf(tap.buf));
+    if (edge?.kind === 'open') live.openLine(edge.t);
+    else if (edge?.kind === 'close') live.closeLine(edge.t);
+  }
+
+  /**
+   * The rule's `decorate`: the pointer as it was at `t` (the keyframe's own time,
+   * which for a held candidate is earlier than now), drawn when it can be mapped
+   * and named either way. Close-ups never get here — the library skips them.
+   */
+  private drawPointer(
+    ctx: CanvasRenderingContext2D,
+    t: number,
+    width: number,
+    height: number,
+  ): FramePointer | undefined {
+    const sample = this.pointers.at(this.startedAt + t);
+    if (!sample) return undefined;
+    const pointer = pointerOnFrame(sample, width, height, this.crop);
+    if (pointer?.nx !== undefined && pointer.ny !== undefined) {
+      drawCrosshair(ctx, pointer.nx * width, pointer.ny * height, width);
     }
-    return undefined;
+    return pointer;
   }
 
   // ── persistence ─────────────────────────────────────────────────────────
 
   /**
-   * The meta as it stands right now — the same object `finish()` returns, minus
-   * the thinning pass. The worker overwrites the take's meta wholesale with it,
-   * so a panel that dies still leaves a readable take behind.
+   * The meta as it stands right now — the same object `finish()` returns. The
+   * worker overwrites the take's meta wholesale with it, so a document that dies
+   * still leaves a readable take behind: each frame names its own JPEG by key,
+   * so a snapshot's numbering never has to agree with the next one's.
    */
   private snapshot(): RecordingMeta {
+    const live = this.live;
     return {
       startedAt: this.startedAt,
       durationMs: this.elapsed(),
-      sampled: this.sampled,
-      frames: this.frames,
+      sampled: live?.sampled ?? 0,
+      frames: (live?.frames() ?? []).map(({ frame, key }) => ({ ...frame, blobKey: key })),
+      ...(live ? { sampling: live.sampling } : {}),
+      ...(this.crop ? { crop: this.crop } : {}),
       transcript: this.segments,
       events: this.events,
       ...(this.scope ? { eventScope: this.scope } : {}),
@@ -676,7 +608,9 @@ export class Recorder {
     this.stopped = Promise.reject(new Error('cancelled'));
     this.stopped.catch(() => {});
     this.teardown();
-    const frames = this.frames.map((f) => blobs.delete(`${this.id}:frame:${f.index}`));
+    // A step still writing would land its JPEG after the sweep.
+    await this.pending.catch(() => {});
+    const frames = [...this.stored].map((key) => blobs.delete(`${this.id}:frame:${key}`));
     const chunks = Array.from({ length: this.chunkSeq }, (_, i) =>
       blobs.delete(`${this.id}:chunk:${i + 1}`),
     );
@@ -688,10 +622,7 @@ export class Recorder {
 
   /** Timers, dictation, streams, the offscreen video element. Safe to call twice. */
   private teardown() {
-    if (this.sampleTimer !== null) clearInterval(this.sampleTimer);
-    if (this.tickTimer !== null) clearInterval(this.tickTimer);
-    this.sampleTimer = null;
-    this.tickTimer = null;
+    this.clearTimers();
     this.dictation?.stop();
     this.dictation = null;
     if (this.recorder && this.recorder.state !== 'inactive') this.recorder.stop();
@@ -704,48 +635,36 @@ export class Recorder {
     this.audioCtx = null;
     this.mixSources = [];
     this.sysTap = null;
+    this.micTap = null;
     this.video?.remove();
     this.stream = null;
     this.micStream = null;
     this.video = null;
   }
 
-  private async finish(): Promise<RecordingMeta> {
-    if (this.sampleTimer !== null) clearInterval(this.sampleTimer);
-    if (this.tickTimer !== null) clearInterval(this.tickTimer);
+  private clearTimers() {
+    for (const timer of [this.sampleTimer, this.tickTimer, this.voiceTimer]) {
+      if (timer !== null) clearInterval(timer);
+    }
     this.sampleTimer = null;
     this.tickTimer = null;
+    this.voiceTimer = null;
+  }
+
+  private async finish(): Promise<RecordingMeta> {
+    this.clearTimers();
     this.dictation?.stop();
     this.dictation = null;
 
-    await this.pending;
-    // The last screen state gets its fair shot through dedup, nothing more.
-    if (!this.pristine) await this.sample();
-
-    const allowed = frameBudget(this.elapsed());
-    if (this.frames.length > allowed) {
-      // A uniform thin: survivors stay spread across the whole take, so nothing
-      // is protected from it and nothing gets a run of neighbours it doesn't earn.
-      const keepIdx = new Set<number>();
-      const step = this.frames.length / allowed;
-      for (let i = 0; i < allowed; i++) keepIdx.add(Math.floor(i * step));
-      const survivors = this.frames.filter((_, i) => keepIdx.has(i));
-      const dropped = this.frames.filter((_, i) => !keepIdx.has(i));
-      await Promise.all(dropped.map((f) => blobs.delete(`${this.id}:frame:${f.index}`)));
-      // Renumber ascending: a survivor's new index is always ≤ its old one, and the
-      // slot it moves into has already been vacated — never re-key out of order.
-      for (let n = 0; n < survivors.length; n++) {
-        const f = survivors[n];
-        const newIndex = n + 1;
-        if (newIndex !== f.index) {
-          const blob = await blobs.get(`${this.id}:frame:${f.index}`);
-          if (blob) await blobs.set(`${this.id}:frame:${newIndex}`, blob);
-          await blobs.delete(`${this.id}:frame:${f.index}`);
-          f.index = newIndex;
-          f.file = `frames/${pad2(newIndex)}-${mmssFile(f.t)}.jpg`; // t survives — citations stay valid
-        }
-      }
-      this.frames = survivors;
+    await this.pending.catch(() => {});
+    // The rule's last word, while the share still shows the final screen: a line
+    // still being spoken closes here, and the end state gets its frame.
+    const live = this.live;
+    if (live) {
+      const t = this.elapsed();
+      const edge = this.voice.finish(t);
+      if (edge) live.closeLine(edge.t);
+      await live.finish(t, this.video).catch(() => {});
     }
 
     const recorder = this.recorder;
@@ -779,6 +698,7 @@ export class Recorder {
     this.audioCtx = null;
     this.mixSources = [];
     this.sysTap = null;
+    this.micTap = null;
     this.video?.remove();
     this.stream = null;
     this.micStream = null;
@@ -796,7 +716,7 @@ export class Recorder {
   private emit() {
     this.handlers.onUpdate({
       elapsedMs: this.elapsed(),
-      frameCount: this.frames.length,
+      frameCount: this.stored.size,
       segmentCount: this.segments.length,
       interim: this.interim,
       micState: this.micState,

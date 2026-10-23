@@ -1,4 +1,4 @@
-import type { Recording } from './types'
+import type { Recording, RecordingFrame, RecordingMeta } from './types'
 
 /**
  * Where a web recording lives while it is being made.
@@ -29,14 +29,32 @@ const STORE = {
 } as const
 
 /**
+ * One keyframe as the web recorder stores it: the library's frame plus where its
+ * JPEG is. `LiveFrames` renumbers frames while a take records (a spoken line's
+ * frame lands before frames kept after it), so the JPEG lives at
+ * `<id>:frame:<blobKey>`, never at the index. Takes recorded before the move to
+ * `LiveFrames` (2026-10-22) have no `blobKey`: theirs is at the index — read it
+ * through `frameBlobKey()`.
+ */
+export interface LiveFrame extends RecordingFrame {
+  blobKey?: number
+}
+
+/**
  * A take as it sits on disk. It IS a `Recording` — the shape `buildReport`,
  * `buildRecordingJson` and `uploadWalkthrough` all read — plus the mic-shadow
- * bookkeeping only a live capture has.
+ * bookkeeping only a live capture has and each frame's blob key.
  */
-export interface LiveTake extends Recording {
+export interface LiveTake extends Omit<Recording, 'meta'> {
+  meta: Omit<RecordingMeta, 'frames'> & { frames: LiveFrame[] }
   /** Count of `<id>:micchunk:<n>` blobs written, `n` from 1. */
   micChunks?: number
   micMime?: string
+}
+
+/** Where a keyframe's JPEG is: under its `blobKey`, or under its index for a take from before that. */
+export function frameBlobKey(takeId: string, frame: Pick<LiveFrame, 'index' | 'blobKey'>): string {
+  return `${takeId}:frame:${frame.blobKey ?? frame.index}`
 }
 
 /** The walkthrough being assembled: what it's called and where it's going. */
@@ -95,8 +113,9 @@ async function tx<T>(
 
 /**
  * Blob keys are the extension's, character for character —
- * `<id>:chunk:<n>`, `<id>:micchunk:<n>`, `<id>:frame:<index>`, `<id>:video`,
- * `<id>:mic` — so the recovery and teardown rules read the same in both places.
+ * `<id>:chunk:<n>`, `<id>:micchunk:<n>`, `<id>:frame:<key>` (see
+ * `frameBlobKey`), `<id>:video`, `<id>:mic` — so the recovery and teardown
+ * rules read the same in both places.
  */
 export const blobs = {
   get: (key: string) => tx<Blob | undefined>(STORE.blobs, 'readonly', (s) => s.get(key)),
@@ -116,7 +135,7 @@ export async function listTakes(): Promise<LiveTake[]> {
 /** Take, frames, chunks and assembled media — everything the id owns. */
 export async function deleteTake(take: LiveTake): Promise<void> {
   const keys = [
-    ...take.meta.frames.map((f) => `${take.id}:frame:${f.index}`),
+    ...take.meta.frames.map((f) => frameBlobKey(take.id, f)),
     ...Array.from({ length: take.chunks }, (_, i) => `${take.id}:chunk:${i + 1}`),
     ...Array.from({ length: take.micChunks ?? 0 }, (_, i) => `${take.id}:micchunk:${i + 1}`),
     `${take.id}:video`,

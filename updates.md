@@ -2,6 +2,25 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-10-22 — extension 1.12.0 + /record on the library's frame rule (LiveFrames)
+Asked: move the extension onto the new capture rule; Sal publishes the store and self-hosted builds.
+Both recorders feed @dested/video-to-prompt 1.3.1's LiveFrames every 250 ms: no frame cap,
+change boxes, close-ups, a picture per spoken line from a mic level detector (voice.ts, both sides),
+the pointer drawn at each frame's own time (pointer.ts), the side panel cropped from a share of its
+own window (crop.ts), clicks/navs as `info` notes instead of forced frames (nav: origin + path).
+JPEGs under the pick key with an index fallback for old takes. The extension bundle uses the
+library's builders (its grids.ts and report builders gone); live-rule.ts gone. Library 1.3.1 adds
+the `info` level. pack:store and zip:extension zip with Info-ZIP where there's no pwsh. Headless:
+/record 15 s take → 11 frames incl. a close-up; extension 18 s with a speech WAV → 20 frames, a
+narration frame stored out of index order. 73 unit tests. Store zip:
+W:\code\handback\extension\handback-recorder-store.zip (not published).
+Touched: extension/{src/offscreen/{recorder,voice,pointer,crop,index,polish}.ts, src/lib/{bundle,db,
+messages,report,types,upload}.ts, src/content/index.ts, src/sidepanel/{App,Parts}.tsx, scripts/
+{pack-store,zip,zip-dist}.mjs, manifest.json, package.json, package-lock.json, tsconfig.json},
+src/lib/capture/{live,live-store,live-upload,voice,types}.ts, src/components/record/panel.tsx,
+cli/{push,publish-recorder}.ts, package.json, bun.lock, cliffnotes.md, decisions.md,
+plans/2026-10-22-live-capture.md
+
 ## 2026-10-22 — deleting a frame takes its close-ups along
 Asked (1.2.0 follow-up): a close-up whose base is deleted is a crop of nothing. deleteFrames reads each
 touched take's recording.json and adds the close-ups resting on a deleted base; the agent's remove_span

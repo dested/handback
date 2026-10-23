@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { blobs } from '../lib/db';
+import { blobs, frameBlobKey } from '../lib/db';
 import { mmss, plural } from '../lib/format';
 import { send } from '../lib/messages';
 import { saveTake } from './save';
@@ -147,9 +147,10 @@ function PartCard({
         setVideoUrl(vUrl);
         return;
       }
-      const first = rec.meta.frames[0];
+      // A close-up is only part of the screen; the poster is the whole of it.
+      const first = rec.meta.frames.find((f) => !f.detail);
       if (!first) return;
-      const frame = await blobs.get(`${rec.id}:frame:${first.index}`).catch(() => undefined);
+      const frame = await blobs.get(frameBlobKey(rec.id, first)).catch(() => undefined);
       if (dead || !frame) return;
       pUrl = URL.createObjectURL(frame);
       setPosterUrl(pUrl);

@@ -1,38 +1,28 @@
+import type {
+  RecordingFrame as LibRecordingFrame,
+  RecordingMeta as LibRecordingMeta,
+} from '@dested/video-to-prompt';
+
 /**
  * A gripe is a narrated screen recording, taken in one or more sittings, and
  * everything here describes one: the takes, what was said over them, the frames
  * that survived dedup, and what the page complained about while it was running.
  *
- * Semantics are ported from the original Gripe extension and must not drift —
- * the Handback cloud viewer and report reader consume exactly these shapes.
+ * The recording shapes are @dested/video-to-prompt's (since Recorder 1.12.0): the
+ * library builds the report, recording.json and the sheets from them, and the
+ * Handback cloud viewer and report reader consume exactly those fields.
  */
 
-export interface PageEvent {
-  level: 'error' | 'warn' | 'network';
-  message: string;
-  detail?: string;
-  ts: number;
-}
+export type { PageEvent, TranscriptSegment } from '@dested/video-to-prompt';
 
 /**
  * Which engine wrote the transcript that shipped. `groq` is the server's
  * hosted pass (fast, audio leaves the machine); `whisper` is the on-device
  * fallback — same model family, minutes instead of seconds, nothing uploaded.
  * The report cites this, so it is a fact about the recording, not a setting.
+ * (The recording shape itself takes any engine id — see the library's.)
  */
 export type TranscriberId = 'whisper' | 'groq';
-
-export interface TranscriptSegment {
-  /** ms from recording start — where the speaker *started* the line */
-  t: number;
-  /** Spoken length in ms when the transcriber reported one. A line covers a window, not an instant. */
-  d?: number;
-  /** Position on the gripe's unified axis, ms. Set only when a human moved it; absent = computed from t. */
-  tl?: number;
-  text: string;
-  /** 1-based speaker rank AFTER normalization (rank 1 = most talk time); absent when diarization didn't run. */
-  speaker?: number;
-}
 
 /** How far the post-recording transcription pass has got, stage and a 0–100 pct (−1 = indeterminate). */
 export interface TranscribeProgress {
@@ -71,6 +61,15 @@ export interface RecorderUpdate {
   sysAudio: 'none' | 'silent' | 'live';
 }
 
+/** What the side panel reports about itself at Record, for cutting it out of a window share (offscreen/crop.ts). CSS px. */
+export interface PanelGeometry {
+  /** The panel's `innerWidth`. */
+  width: number;
+  /** The Chrome window holding it, outer size. */
+  windowWidth: number;
+  windowHeight: number;
+}
+
 /** Where the mouse was, sampled by the recorded tab while a walkthrough runs. All lengths are CSS px. */
 export interface PointerSample {
   /** Absolute ms — the panel converts it to recording-relative. */
@@ -91,64 +90,23 @@ export interface PointerSample {
   text?: string;
 }
 
-/** The pointer as it applies to one keyframe. */
-export interface FramePointer {
-  /** Position inside the frame, 0–1. Absent when the capture couldn't be mapped (window capture, second monitor). */
-  nx?: number;
-  ny?: number;
-  /** What the cursor was over, in the recorded tab. */
-  selector?: string;
-  text?: string;
+export type { FramePointer } from '@dested/video-to-prompt';
+
+/**
+ * One keyframe as this recorder stores it: the library's frame (format 2 —
+ * change boxes, close-ups, `seen` spans) plus where its JPEG is. `LiveFrames`
+ * renumbers frames while a take records (a spoken line's frame lands before
+ * frames kept after it), so the JPEG lives at `<id>:frame:<blobKey>`, never at
+ * the index. Takes recorded before Recorder 1.12.0 have no `blobKey`: their JPEG is at
+ * the index — read it through `frameBlobKey()` (lib/db.ts).
+ */
+export interface RecordingFrame extends LibRecordingFrame {
+  blobKey?: number;
 }
 
-export interface RecordingFrame {
-  index: number;
-  /** ms from recording start */
-  t: number;
-  /** Path relative to the gripe folder’s take dir, e.g. frames/03-0125.jpg */
-  file: string;
-  /**
-   * Why this frame exists: first frame, dedup said "new", a click just happened
-   * in the recorded tab (drawing a stroke counts as one), the page navigated (SPA
-   * route or full load), or the heartbeat fired — nothing had been kept for a
-   * while and the screen wasn't strictly identical.
-   */
-  reason: 'start' | 'change' | 'click' | 'nav' | 'beat';
-  /** Changed-cell count (of 64×64) vs the closest of the last kept frames (absent on the first). */
-  dist?: number;
-  /** Mouse at capture time, when the recorded tab was reporting it. */
-  pointer?: FramePointer;
-  /** Position on the gripe's unified axis, ms. Set only when a human moved it; absent = computed from t. */
-  tl?: number;
-}
-
-export interface RecordingMeta {
-  startedAt: number;
-  durationMs: number;
-  /** Candidate frames examined; frames[] is what survived dedup. */
-  sampled: number;
+/** The library's take meta, its frames carrying their blob keys. */
+export interface RecordingMeta extends Omit<LibRecordingMeta, 'frames'> {
   frames: RecordingFrame[];
-  transcript: TranscriptSegment[];
-  /** Set when a real transcription pass replaced the live Web Speech lines; absent = Web Speech or none. */
-  transcriber?: TranscriberId;
-  /**
-   * The server's cleanup pass rewrote the wording — product nouns spelled
-   * right, sentences punctuated, filler dropped. Timings are the transcriber's
-   * either way. The report says so, because a reader deserves to know a model
-   * touched the words.
-   */
-  polished?: boolean;
-  /** Bumped on every content mutation; a line edit against a stale rev is skipped. */
-  rev?: number;
-  /** True once a human read the transcript back and said it was right. Reset when Whisper replaces it. */
-  reviewed?: boolean;
-  /** Console/network events forwarded by content scripts while recording. ts is absolute. */
-  events: PageEvent[];
-  /** Origin the events are scoped to — the tab that was in front at Record. Absent = no scope (kept everything). */
-  eventScope?: string;
-  /** Events from other origins that were thrown away; reported rather than hidden. */
-  droppedEvents?: number;
-  videoFile: string;
 }
 
 /**
@@ -339,8 +297,3 @@ export function activeLink(settings: Settings): ServerLink | null {
 
 /** The reviewer's-pen cobalt — Handback's one accent. Never orange, never dark UI. */
 export const COBALT = '#2f56d8';
-
-/** Contact sheet shape. The sheet builder and the report that cites the sheets must agree. */
-export const GRID_COLS = 3;
-export const GRID_ROWS = 3;
-export const GRID_PER_SHEET = GRID_COLS * GRID_ROWS;

@@ -13,7 +13,7 @@
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { execFileSync } from 'node:child_process';
+import { zipDir } from './zip.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const dist = resolve(root, 'dist');
@@ -36,14 +36,9 @@ if (manifest.description && manifest.description.length > 132) {
 }
 writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
 
-execFileSync(
-  'pwsh',
-  [
-    '-NoProfile',
-    '-Command',
-    `Compress-Archive -Path '${stage}/*' -DestinationPath '${outZip}' -Force`,
-  ],
-  { stdio: 'inherit' },
-);
-rmSync(stage, { recursive: true, force: true });
+try {
+  zipDir(stage, outZip);
+} finally {
+  rmSync(stage, { recursive: true, force: true });
+}
 console.log(`wrote ${outZip}`);

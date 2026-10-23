@@ -155,6 +155,7 @@ async function startCapture(
     msg.id,
     speechSupported ? Dictation : null,
     msg.pristine,
+    msg.panel,
   );
   // Seed `live` BEFORE awaiting start, so a capture:state that races the start
   // sees a take in progress rather than "nothing recording".
@@ -250,8 +251,8 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
     case 'transcribe:state':
       sendResponse(transcriptionState());
       return false;
-    // The recorded tab's telemetry and pointer, and the forces that overrule
-    // dedup — the recorder keeps only what came from the tab it's scoped to.
+    // The recorded tab's telemetry, pointer, and clicks/navigations — the
+    // recorder keeps only what came from the tab it's scoped to.
     case 'recording:event':
       live?.recorder.addEvent(message.event, message.origin);
       return false;
@@ -259,7 +260,7 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
       live?.recorder.addPointer(message.sample, message.origin);
       return false;
     case 'recording:force':
-      live?.recorder.force(message.why, message.origin);
+      live?.recorder.note(message.why, message.detail, message.origin);
       return false;
     // The on-page dock's `s`. The offscreen document owns the recorder now, so it acts.
     case 'recording:stop':

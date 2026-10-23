@@ -1,5 +1,6 @@
 import type {
   PageEvent,
+  PanelGeometry,
   PointerSample,
   RecorderUpdate,
   RecordingMeta,
@@ -83,16 +84,25 @@ export type Request =
   // sender's own, so the panel can drop everything outside the recorded tab.
   | { type: 'recording:event'; event: PageEvent; origin: string }
   | { type: 'recording:pointer'; sample: PointerSample; origin: string }
-  // A click or an SPA route change — force a keyframe the dedup would call
-  // identical. An ink stroke finishing on the page is a click for this purpose:
-  // the drawing is on screen and dedup would score it as the same screen.
-  | { type: 'recording:force'; why: 'click' | 'nav'; origin: string }
+  // A click or a route change, noted on the take's timeline as an `info` event
+  // (`click: <selector> "<text>"`, `nav: <url>`). It forced a keyframe until
+  // 1.12.0; the frame rule now keeps whatever it changed. An ink stroke finishing
+  // on the page rides the click path. The type name is kept from those days.
+  | { type: 'recording:force'; why: 'click' | 'nav'; origin: string; detail?: string }
   // The on-page toolbar's stop button. The offscreen document owns the recorder
   // now, so it acts; the background just answers ok.
   | { type: 'recording:stop' }
   // panel→offscreen. The offscreen document runs Chrome's picker (getDisplayMedia needs no gesture
   // there) and does the capture, so closing the panel changes nothing.
-  | { type: 'capture:start'; id: string; lang: string; scope: string; pristine: boolean }
+  // `panel` is the panel's own size and its window's, so a share of that window can crop it out.
+  | {
+      type: 'capture:start';
+      id: string;
+      lang: string;
+      scope: string;
+      pristine: boolean;
+      panel?: PanelGeometry;
+    }
   | { type: 'capture:stop' }
   | { type: 'capture:cancel'; id: string }
   // panel→offscreen on mount: is something recording right now? Reattaches the live readout.

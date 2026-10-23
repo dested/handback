@@ -1,41 +1,31 @@
-import { frameBudget, mmssFile, pad2 } from '@dested/video-to-prompt'
-import {
-  BEAT_MS,
-  cellDiff,
-  DEDUP_THRESHOLD,
-  DEDUP_WINDOW,
-  JPEG_QUALITY,
-  MAX_FRAME_W,
-  SIG_SIZE,
-  toJpeg,
-} from './live-rule'
+import { LIVE_STEP_MS, LiveFrames } from '@dested/video-to-prompt'
 import { blobs, putTake, type LiveTake } from './live-store'
-import type { RecordingFrame, RecordingMeta } from './types'
+import { rmsOf, VoiceGate } from './voice'
 
 /**
  * Screen capture in a plain tab — the extension's `Recorder`
- * (`extension/src/sidepanel/recorder.ts`) with the half a web page can't have
+ * (`extension/src/offscreen/recorder.ts`) with the half a web page can't have
  * taken out, and nothing else changed.
  *
  * What is identical, because it is all plain web platform: the picker call and
- * its constraints, the 64×64 keep/drop decision and every constant it reads
- * (`live-rule.ts`), the 15 s heartbeat, the
- * length-scaled frame budget and its uniform thin, the Web Audio mix of app
- * audio with a raw mic, the mic-only shadow recorder that transcription hears
- * instead of that mix, and chunk-by-chunk persistence so a dead tab loses the
- * last second rather than the take.
+ * its constraints, the frame rule (@dested/video-to-prompt's `LiveFrames`, the
+ * extractor's Selector run online over the share every LIVE_STEP_MS, so a take
+ * keeps what a finished clip of the same screen would — change boxes, close-ups,
+ * a picture per spoken line, no cap), the speech edges that rule hears from a
+ * level detector on the mic (`voice.ts`), the Web Audio mix of app audio with a
+ * raw mic, the mic-only shadow recorder that transcription hears instead of that
+ * mix, and chunk-by-chunk persistence so a dead tab loses the last second rather
+ * than the take.
  *
  * What is gone, because it arrived from `extension/src/content/*` injected into
  * the recorded page — which no page can do to another origin: console and
  * network events, pointer telemetry and the crosshair drawn from it, and the
- * clicks and navigations that forced a keyframe. So a web take carries
- * `events: []`, no `pointer` on any frame, and only the `start` / `change` /
- * `beat` reasons — the same three `/phone` produces, and everything downstream
- * already reads that. Live dictation goes with them; it never wrote the shipped
- * transcript, and a level tap answers the question it actually answered.
+ * click and navigation notes. So a web take carries `events: []` and no
+ * `pointer` on any frame. Live dictation goes with them; it never wrote the
+ * shipped transcript, and a level tap answers the question it actually answered.
  */
 
-const SAMPLE_MS = 500 // candidate cadence — free here, the share was going to paint the frame anyway
+const VOICE_MS = 50 // mic level reading cadence — the analyser window is ~43 ms at 48 kHz
 const PROGRESS_MS = 1500 // floor between meta writes — this is IndexedDB, not a render
 
 const MIME_TYPES = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm']
@@ -86,7 +76,8 @@ export interface LiveUpdate {
  * is an object URL the page owns and must revoke when the take ends.
  */
 export interface LiveThumb {
-  index: number
+  /** The frame rule's pick key — what names the JPEG on disk. Stable; the frame's index is not. */
+  key: number
   t: number
   url: string
 }
@@ -160,18 +151,19 @@ export class LiveRecorder {
   private micChunkSeq = 0
   private micState: MicState = 'off'
 
-  private frames: RecordingFrame[] = []
-  private sigs: Uint8ClampedArray[] = []
-  private lastKeptT = 0
-  private sampled = 0
+  /** The frame rule. Null on a pristine take, which keeps no frames. */
+  private live: LiveFrames | null = null
+  /** Pick keys whose JPEG is on disk (`<id>:frame:<key>`). */
+  private readonly stored = new Set<number>()
+  /** JPEGs stored since the filmstrip last heard, until their frame's time is known. */
+  private readonly fresh = new Map<number, Blob>()
+  private readonly voice = new VoiceGate()
   private startedAt = 0
   private lastProgress = 0
 
-  private sigCtx: CanvasRenderingContext2D | null = null
-  private frameCtx: CanvasRenderingContext2D | null = null
-
   private sampleTimer: number | null = null
   private tickTimer: number | null = null
+  private voiceTimer: number | null = null
   private sampling = false
   private pending: Promise<void> = Promise.resolve()
   private stopped: Promise<LiveTake> | null = null
@@ -219,12 +211,16 @@ export class LiveRecorder {
     await video.play()
     this.video = video
 
-    const sig = document.createElement('canvas')
-    sig.width = SIG_SIZE
-    sig.height = SIG_SIZE
-    this.sigCtx = sig.getContext('2d', { willReadFrequently: true })
-    this.frameCtx = document.createElement('canvas').getContext('2d')
-    if (this.frameCtx) this.frameCtx.imageSmoothingQuality = 'high'
+    if (!this.pristine) {
+      this.live = new LiveFrames({
+        // Under the pick's key, not its index: the index can shift until the take ends.
+        store: async (key, jpeg) => {
+          await blobs.set(`${this.id}:frame:${key}`, jpeg)
+          this.stored.add(key)
+          if (this.handlers.onFrame) this.fresh.set(key, jpeg)
+        },
+      })
+    }
 
     // The mic is grabbed for real, not as a probe: its track is mixed into the
     // webm so the raw video carries the narration. Raw constraints — see
@@ -242,7 +238,7 @@ export class LiveRecorder {
     // 1440p ≈ 7 Mbps — clamped [3,8] Mbps so a 4K share doesn't fill the disk.
     // Non-pristine (a distill source, read once for keyframes and never watched)
     // is capped at 1 Mbps instead of Chrome's default. Throttled 2026-08-12 to
-    // cut storage + egress; mirror any change in extension/src/sidepanel/recorder.ts.
+    // cut storage + egress; mirror any change in extension/src/offscreen/recorder.ts.
     const bitrate = this.pristine
       ? Math.round(Math.min(8e6, Math.max(3e6, video.videoWidth * video.videoHeight * 2)))
       : 1_000_000
@@ -275,20 +271,22 @@ export class LiveRecorder {
     // row recovers as nothing at all.
     await putTake(this.snapshot())
 
-    if (!this.pristine) {
+    if (this.live) {
       this.sampleTimer = window.setInterval(() => {
         // Only replace `pending` when a sample actually starts — a tick that
         // no-ops against an in-flight sample must not mask the real promise, or
-        // finish() would thin and renumber while that sample is still writing.
+        // finish() would run the rule's last step while this one is writing.
         if (!this.sampling) this.pending = this.sample()
-      }, SAMPLE_MS)
+      }, LIVE_STEP_MS)
+      // No mic, no tap: no lines, and the rule still keeps changes and beats.
+      if (this.micTap) this.voiceTimer = window.setInterval(() => this.listen(), VOICE_MS)
     }
     this.tickTimer = window.setInterval(() => {
       this.pollAudio()
       this.emit()
       void this.saveProgress()
     }, 1000)
-    if (!this.pristine) this.pending = this.sample()
+    if (this.live) this.pending = this.sample()
     this.emit()
   }
 
@@ -345,6 +343,8 @@ export class LiveRecorder {
       if (ctx.state === 'suspended') void ctx.resume().catch(() => {})
       return dest.stream.getAudioTracks()
     } catch {
+      // The raw mic still records; without a graph there is no level to read,
+      // so this take keeps changes and beats but opens no lines.
       this.mixSources = []
       this.sysTap = null
       this.micTap = null
@@ -398,81 +398,69 @@ export class LiveRecorder {
 
   // ── sampling ────────────────────────────────────────────────────────────
 
+  /** One step of the frame rule. A frame that fails to encode or store is a missing frame, not a dead take. */
   private async sample(): Promise<void> {
+    const live = this.live
     const video = this.video
-    const sigCtx = this.sigCtx
-    const frameCtx = this.frameCtx
-    if (this.sampling || !video || !sigCtx || !frameCtx) return
-    if (video.readyState < 2 || !video.videoWidth || !video.videoHeight) return
-
+    if (this.sampling || !live || !video) return
     this.sampling = true
+    const before = this.stored.size
     try {
-      this.sampled++
-      sigCtx.drawImage(video, 0, 0, SIG_SIZE, SIG_SIZE)
-      const sig = sigCtx.getImageData(0, 0, SIG_SIZE, SIG_SIZE).data
-
-      const t = this.elapsed()
-      const minDist = this.sigs.length
-        ? Math.min(...this.sigs.map((k) => cellDiff(sig, k)))
-        : undefined
-      let reason: RecordingFrame['reason']
-      if (minDist === undefined) {
-        reason = 'start'
-      } else if (minDist <= DEDUP_THRESHOLD) {
-        // Below the bar, but the screen *is* moving and nothing has been kept in
-        // a while — a drifting low-contrast UI would otherwise go dark for minutes.
-        if (!(minDist > 0 && t - this.lastKeptT > BEAT_MS)) return
-        reason = 'beat'
-      } else {
-        reason = 'change'
-      }
-
-      const width = Math.min(video.videoWidth, MAX_FRAME_W)
-      const height = Math.round((video.videoHeight * width) / video.videoWidth)
-      const canvas = frameCtx.canvas
-      if (canvas.width !== width || canvas.height !== height) {
-        canvas.width = width
-        canvas.height = height
-        frameCtx.imageSmoothingQuality = 'high'
-      }
-      frameCtx.drawImage(video, 0, 0, width, height)
-
-      const index = this.frames.length + 1
-      const jpeg = await toJpeg(canvas, JPEG_QUALITY)
-      await blobs.set(`${this.id}:frame:${index}`, jpeg)
-      this.frames.push({
-        index,
-        t,
-        file: `frames/${pad2(index)}-${mmssFile(t)}.jpg`,
-        reason,
-        ...(minDist === undefined ? {} : { dist: minDist }),
-      })
-      this.lastKeptT = t
-      this.sigs.push(sig)
-      if (this.sigs.length > DEDUP_WINDOW) this.sigs.shift()
-      // The same JPEG that just went to disk, handed to the filmstrip. The page
-      // owns this URL and revokes it when the take ends.
-      this.handlers.onFrame?.({ index, t, url: URL.createObjectURL(jpeg) })
-      this.emit()
-      void this.saveProgress()
+      await live.push(this.elapsed(), video)
+    } catch {
+      /* the next step reads the screen again */
     } finally {
       this.sampling = false
+    }
+    if (this.stored.size !== before) {
+      this.thumbs()
+      this.emit()
+      void this.saveProgress()
+    }
+  }
+
+  /** One mic reading; speech starting or stopping opens or closes the rule's line. */
+  private listen(): void {
+    const tap = this.micTap
+    const live = this.live
+    if (!tap || !live) return
+    tap.analyser.getFloatTimeDomainData(tap.buf)
+    const edge = this.voice.push(this.elapsed(), rmsOf(tap.buf))
+    if (edge?.kind === 'open') live.openLine(edge.t)
+    else if (edge?.kind === 'close') live.closeLine(edge.t)
+  }
+
+  /**
+   * The JPEGs that just went to disk, handed to the filmstrip once the rule says
+   * when each was on screen. The page owns these URLs and revokes them when the
+   * take ends.
+   */
+  private thumbs(): void {
+    const onFrame = this.handlers.onFrame
+    if (!onFrame || !this.fresh.size || !this.live) return
+    for (const { frame, key } of this.live.frames()) {
+      const jpeg = this.fresh.get(key)
+      if (!jpeg) continue
+      this.fresh.delete(key)
+      onFrame({ key, t: frame.t, url: URL.createObjectURL(jpeg) })
     }
   }
 
   // ── persistence ─────────────────────────────────────────────────────────
 
   /**
-   * The take as it stands right now — what `finish()` returns, minus the
-   * thinning pass. Written whole, so a tab that dies still leaves a readable
-   * take behind.
+   * The take as it stands right now — what `finish()` returns. Written whole,
+   * so a tab that dies still leaves a readable take behind: each frame names its
+   * own JPEG by key, so a snapshot's numbering never has to agree with the next.
    */
   private snapshot(): LiveTake {
-    const meta: RecordingMeta = {
+    const live = this.live
+    const meta: LiveTake['meta'] = {
       startedAt: this.startedAt,
       durationMs: this.elapsed(),
-      sampled: this.sampled,
-      frames: this.frames,
+      sampled: live?.sampled ?? 0,
+      frames: (live?.frames() ?? []).map(({ frame, key }) => ({ ...frame, blobKey: key })),
+      ...(live ? { sampling: live.sampling } : {}),
       transcript: [],
       // Nothing tapped a console here — see the header. An empty list is the
       // honest answer, and the one `/phone` also gives.
@@ -512,8 +500,10 @@ export class LiveRecorder {
     this.stopped = Promise.reject(new Error('cancelled'))
     this.stopped.catch(() => {})
     this.teardown()
+    // A step still writing would land its JPEG after the sweep.
+    await this.pending.catch(() => {})
     const keys = [
-      ...this.frames.map((f) => `${this.id}:frame:${f.index}`),
+      ...[...this.stored].map((key) => `${this.id}:frame:${key}`),
       ...Array.from({ length: this.chunkSeq }, (_, i) => `${this.id}:chunk:${i + 1}`),
       ...Array.from({ length: this.micChunkSeq }, (_, i) => `${this.id}:micchunk:${i + 1}`),
     ]
@@ -522,10 +512,7 @@ export class LiveRecorder {
 
   /** Timers, streams, the offscreen video element. Safe to call twice. */
   private teardown(): void {
-    if (this.sampleTimer !== null) clearInterval(this.sampleTimer)
-    if (this.tickTimer !== null) clearInterval(this.tickTimer)
-    this.sampleTimer = null
-    this.tickTimer = null
+    this.clearTimers()
     if (this.recorder && this.recorder.state !== 'inactive') this.recorder.stop()
     this.recorder = null
     if (this.micRecorder && this.micRecorder.state !== 'inactive') this.micRecorder.stop()
@@ -547,40 +534,28 @@ export class LiveRecorder {
     this.video = null
   }
 
-  private async finish(): Promise<LiveTake> {
-    if (this.sampleTimer !== null) clearInterval(this.sampleTimer)
-    if (this.tickTimer !== null) clearInterval(this.tickTimer)
+  private clearTimers(): void {
+    for (const timer of [this.sampleTimer, this.tickTimer, this.voiceTimer]) {
+      if (timer !== null) clearInterval(timer)
+    }
     this.sampleTimer = null
     this.tickTimer = null
+    this.voiceTimer = null
+  }
 
-    await this.pending
-    // The last screen state gets its fair shot through dedup, nothing more.
-    if (!this.pristine) await this.sample()
+  private async finish(): Promise<LiveTake> {
+    this.clearTimers()
 
-    const allowed = frameBudget(this.elapsed())
-    if (this.frames.length > allowed) {
-      // A uniform thin: survivors stay spread across the whole take, so nothing
-      // is protected from it and nothing gets a run of neighbours it doesn't earn.
-      const keepIdx = new Set<number>()
-      const step = this.frames.length / allowed
-      for (let i = 0; i < allowed; i++) keepIdx.add(Math.floor(i * step))
-      const survivors = this.frames.filter((_, i) => keepIdx.has(i))
-      const dropped = this.frames.filter((_, i) => !keepIdx.has(i))
-      await Promise.all(dropped.map((f) => blobs.delete(`${this.id}:frame:${f.index}`)))
-      // Renumber ascending: a survivor's new index is always ≤ its old one, and
-      // the slot it moves into has already been vacated — never re-key out of order.
-      for (let n = 0; n < survivors.length; n++) {
-        const frame = survivors[n]
-        const newIndex = n + 1
-        if (newIndex !== frame.index) {
-          const blob = await blobs.get(`${this.id}:frame:${frame.index}`)
-          if (blob) await blobs.set(`${this.id}:frame:${newIndex}`, blob)
-          await blobs.delete(`${this.id}:frame:${frame.index}`)
-          frame.index = newIndex
-          frame.file = `frames/${pad2(newIndex)}-${mmssFile(frame.t)}.jpg` // t survives — citations stay valid
-        }
-      }
-      this.frames = survivors
+    await this.pending.catch(() => {})
+    // The rule's last word, while the share still shows the final screen: a line
+    // still being spoken closes here, and the end state gets its frame.
+    const live = this.live
+    if (live) {
+      const t = this.elapsed()
+      const edge = this.voice.finish(t)
+      if (edge) live.closeLine(edge.t)
+      await live.finish(t, this.video).catch(() => {})
+      this.thumbs()
     }
 
     const recorder = this.recorder
@@ -626,7 +601,7 @@ export class LiveRecorder {
   private emit(): void {
     this.handlers.onUpdate({
       elapsedMs: this.elapsed(),
-      frameCount: this.frames.length,
+      frameCount: this.stored.size,
       micState: this.micState,
       micAudio: this.sourceState(this.micTap, this.micState === 'listening'),
       sysAudio: this.sourceState(this.sysTap, this.hasSystemAudio),

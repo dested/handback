@@ -2,6 +2,19 @@
 
 > ADR-lite: what was decided, why, what was rejected. Append-only.
 
+## 2026-10-22 — Live recorders pick frames with the library's LiveFrames; no frame cap anywhere
+
+The extension and /record kept their own 64×64 rule with a length-scaled cap (600 at 15+ min), and
+the cap is why long takes kept 600 near-identical frames. Both now run @dested/video-to-prompt's
+`LiveFrames` (the extractor's Selector, online, every 250 ms) and build their file sets with its
+builders, so every door ships the same format 2 frames: change boxes, close-ups, `seenMs`. Frames
+are stored under the pick key, never the index. Speech lines come from a mic level detector, not
+dictation finals (late, and absent when recognition fails). Clicks and navigations stop forcing
+frames: the rule keeps what a click changed, and the click itself is an `info` timeline note
+(library 1.3.1) that no error count includes. Nav notes carry origin + path only. Rejected: keeping
+a cap "for upload size" (corpus: every long take keeps fewer frames than the old cap did, e.g. qg
+572, Dawn Patrol 524, toothio 178, with nothing lost on the takes audited).
+
 ## 2026-10-15 — Web capture runs on @dested/video-to-prompt; the copy is gone
 **Why:** /phone, /upload and /record each carried a port of the pipeline (frames, sheets, audio,
 report, format) that had to be mirrored by hand into the extension and the library, and had fallen
