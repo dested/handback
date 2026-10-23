@@ -13,7 +13,7 @@ dictation finals (late, and absent when recognition fails). Clicks and navigatio
 frames: the rule keeps what a click changed, and the click itself is an `info` timeline note
 (library 1.3.1) that no error count includes. Nav notes carry origin + path only. Rejected: keeping
 a cap "for upload size" (corpus: every long take keeps fewer frames than the old cap did, e.g. qg
-572, Dawn Patrol 524, toothio 178, with nothing lost on the takes audited).
+572, Dawn Patrol 524, toothio 178, and less lost than before on every one: Dawn Patrol 0.6 view-seconds of 1796, old 2.6, the rest 0).
 
 ## 2026-10-15 — Web capture runs on @dested/video-to-prompt; the copy is gone
 **Why:** /phone, /upload and /record each carried a port of the pipeline (frames, sheets, audio,

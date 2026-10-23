@@ -20,7 +20,8 @@ a page model for scrolling, close-ups, video found per block); 1.3.0 ships it fo
 
 Measured on the corpus, real pipeline, old live recorder vs 1.2.0:
 qg 600 → 572, w606 239 → 53, w1315 84 → 90, toothio 600 (2145 uncapped) → 178,
-Phoenix 58 → 60 and 150 → 81, Dawn Patrol 600 → 524; nothing lost on any.
+Phoenix 58 → 60 and 150 → 81, Dawn Patrol 600 → 524. Lost view-seconds: 0 on all but Dawn Patrol,
+which drops from 2.6 to 0.6 of 1796; repeats there 218 → 79.
 
 ## The library API (1.3.0, `github:dested/video-to-prompt#v1.3.0`)
 
