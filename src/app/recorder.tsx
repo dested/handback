@@ -37,8 +37,9 @@ const RECORDER_TOKEN_ID_KEY = 'handback.recorder.tokenId'
  *  - Self-hosted zip / load-unpacked: keeps the `key`, which pins it to the
  *    fixed ID. Still what dev and the `/download/recorder` zip produce.
  */
+const STORE_EXTENSION_ID = 'bdhajcllnjcnihcbobhaecldgjlhfdhd'
 const EXTENSION_IDS = [
-  'bdhajcllnjcnihcbobhaecldgjlhfdhd', // Chrome Web Store
+  STORE_EXTENSION_ID, // Chrome Web Store
   'gmggnebbenlmpakojgocnjfcnpmifdci', // self-hosted zip / load-unpacked (manifest `key`)
 ] as const
 /** The live Chrome Web Store listing; null would render the zip path instead. */
@@ -321,7 +322,12 @@ export function RecorderPage() {
           <div className="space-y-4">
             {presence ? (
               <>
-                <PresenceIndicator presence={presence} checked={checked} latest={latest} />
+                <PresenceIndicator
+                  presence={presence}
+                  checked={checked}
+                  latest={latest}
+                  fromStore={extensionId === STORE_EXTENSION_ID}
+                />
                 <details className="group">
                   <summary className="text-muted-foreground hover:text-foreground cursor-pointer list-none text-sm underline decoration-dotted underline-offset-4 marker:content-['']">
                     Reinstall or update it
@@ -526,15 +532,12 @@ function InstallInstructions({ latest }: { latest: string | null }) {
           target="_blank"
           rel="noreferrer"
           className="bg-cobalt inline-flex h-8 items-center gap-2 rounded-md px-3 text-[13px] font-medium text-white hover:bg-cobalt/90">
-          Add to Chrome
+          Download from the Chrome Web Store
         </a>
+        {/* The store review lags the bucket by days on each release. The zip is
+            always the newest build, so it stays one click away. */}
         <p className="text-muted-foreground mt-3 text-sm">
-          Chrome will ask to confirm — the recorder only runs when you hit Record.
-        </p>
-        {/* The store review lags the bucket by days. The zip is always the newest
-            build, so it stays one click away even once the listing exists. */}
-        <p className="text-muted-foreground mt-3 text-sm">
-          Ahead of the store?{' '}
+          Or skip the store:{' '}
           <a href={DOWNLOAD_URL} className="text-cobalt underline underline-offset-4">
             Download <code className="font-mono text-xs">handback-recorder.zip</code>
             {latest ? ` (${latest})` : ''}
@@ -582,11 +585,11 @@ function InstallInstructions({ latest }: { latest: string | null }) {
 }
 
 /**
- * Nothing installed from a zip ever updates itself — that's the one thing the
- * Web Store would do for us. So the page does it: the extension reports its
- * version over the ping, the server reports what it's handing out, and a stale
- * install gets told. Both are `x.y.z` from the same manifest, so a plain
- * numeric compare is the whole comparison.
+ * Nothing installed from a zip ever updates itself; a store install does. So
+ * for zip installs the page does it: the extension reports its version over the
+ * ping, the server reports what it's handing out, and a stale install gets told.
+ * Both are `x.y.z` from the same manifest, so a plain numeric compare is the
+ * whole comparison.
  */
 function isOutdated(installed: string, latest: string): boolean {
   const a = installed.split('.').map(Number)
@@ -604,13 +607,17 @@ function PresenceIndicator({
   presence,
   checked,
   latest,
+  fromStore = false,
 }: {
   presence: Presence | null
   checked: boolean
   latest?: string | null
+  fromStore?: boolean
 }) {
   if (presence) {
-    const stale = latest ? isOutdated(presence.version, latest) : false
+    // A store install updates itself, and the bucket leads the store review, so
+    // pointing it at the zip would only install a second, unlinked copy.
+    const stale = !fromStore && latest ? isOutdated(presence.version, latest) : false
     return (
       <div className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">
@@ -620,15 +627,35 @@ function PresenceIndicator({
         {stale && (
           <div className="border-review/40 bg-review-wash rounded-md border p-3 text-sm">
             <p className="text-review font-medium">Version {latest} is available.</p>
-            <p className="text-muted-foreground mt-1">
-              A zip install doesn't update itself.{' '}
-              <a href={DOWNLOAD_URL} className="text-cobalt underline underline-offset-4">
-                Download {latest}
-              </a>
-              , then hit reload on the extension at{' '}
-              <code className="font-mono text-xs">chrome://extensions</code> — your link survives
-              the update.
-            </p>
+            {STORE_URL ? (
+              <p className="text-muted-foreground mt-1">
+                A zip install doesn't update itself.{' '}
+                <a
+                  href={STORE_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-cobalt underline underline-offset-4">
+                  Download it from the Chrome Web Store
+                </a>{' '}
+                and it keeps itself current: remove this copy at{' '}
+                <code className="font-mono text-xs">chrome://extensions</code>, then link the store
+                one below. Or{' '}
+                <a href={DOWNLOAD_URL} className="text-cobalt underline underline-offset-4">
+                  download the {latest} zip
+                </a>{' '}
+                and hit reload on this one — your link survives that.
+              </p>
+            ) : (
+              <p className="text-muted-foreground mt-1">
+                A zip install doesn't update itself.{' '}
+                <a href={DOWNLOAD_URL} className="text-cobalt underline underline-offset-4">
+                  Download {latest}
+                </a>
+                , then hit reload on the extension at{' '}
+                <code className="font-mono text-xs">chrome://extensions</code> — your link survives
+                the update.
+              </p>
+            )}
           </div>
         )}
       </div>

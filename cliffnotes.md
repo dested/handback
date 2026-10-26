@@ -1,7 +1,7 @@
 # Handback — CliffNotes
 
 > Living map of the project. Read this before any coding session.
-> Last updated: 2026-10-22 (extension 1.12.0 + /record pick frames with the library's `LiveFrames` — plans/2026-10-22-live-capture.md). Visual language → `ui.md` · why → `decisions.md` ·
+> Last updated: 2026-10-26 (1.12.0 live on the Web Store; /recorder installs from the store first). Visual language → `ui.md` · why → `decisions.md` ·
 > log → `updates.md`.
 >
 > **2026-08-23 mega-wave** (plans/2026-08-23-fable5-mega-wave.md): sidebar app
@@ -16,10 +16,10 @@
 > build still needs the store zip uploaded through the dashboard): capture,
 > transcription and upload all run in the offscreen document, so closing the panel never stops
 > a take (see "The panel is a window" gotcha; plans/2026-09-12-panel-and-app-handback.md).
-> **1.12.0 built, NOT published** (2026-10-22): frames from @dested/video-to-prompt 1.3.1's
+> **1.12.0 PUBLISHED 2026-10-23, LIVE ON THE WEB STORE 2026-10-26** (releases/recorder/handback-recorder-1.12.0.zip): frames from @dested/video-to-prompt 1.3.1's
 > `LiveFrames` (no cap, change boxes, close-ups), speech lines from a mic level detector, the
 > pointer drawn at each frame's own time, the panel cropped out of window shares, click/nav as
-> `info` timeline notes. Sal records a real take on the unpacked build before it ships.
+> `info` timeline notes.
 >
 > **Naming:** the product noun is **walkthrough** (renamed from "gripe" 2026-08-01, owner's
 > directive on record). Older log entries below say "gripe" historically — same object. The word
@@ -306,8 +306,8 @@ src/
                         left mid-recording is rebuilt from its chunks). Nav label "Record".
                         Third kind "just talk": mic-only voice note (in-memory blob, NO IDB)
                         sent through the phone distill pipeline with a pre-supplied probe
-    recorder.tsx        /recorder — THE recorder onboarding: install (STORE_URL now set → "Add to
-                        Chrome" button; zip/load-unpacked collapses behind a disclosure), live
+    recorder.tsx        /recorder — THE recorder onboarding: install ("Download from the Chrome
+                        Web Store" button, zip/load-unpacked one line under it), live
                         install ping across BOTH extension ids (`EXTENSION_IDS`: store + self-hosted),
                         one-click Link to whichever id answered (token minted + handed over, nothing
                         pasted). Two numbered steps; "Then just record" is unnumbered
@@ -1086,7 +1086,8 @@ reaches the container on a plain push.
   is installed — absence means "not installed", not "not Chrome". If Chrome ever reassigns the store id
   (e.g. a fresh listing), add the new one to `EXTENSION_IDS`.
 - **`STORE_URL` is set** in `src/app/recorder.tsx` (the live listing) → the install step renders the
-  "Add to Chrome" button with an always-visible "Ahead of the store? Download handback-recorder.zip (latest)" line under it (the bucket leads the store review by days), and the whole install step collapses behind a disclosure once the extension answers a ping.
+  "Download from the Chrome Web Store" button with an always-visible "Or skip the store: Download handback-recorder.zip (latest)" line under it (the bucket leads the store review by days on every release, and Sal asked 2026-09-13 for the zip to stay one click away), and the whole install step collapses behind a disclosure once the extension answers a ping.
+  **The version nag knows which id answered:** a store install (`STORE_EXTENSION_ID`) never gets it (Chrome updates it, and a zip would land as a second, unlinked copy under the other id); a stale zip install is sent to the store first (remove the unpacked copy, link the store one), the zip second.
 - **A push to `main` does NOT ship the extension.** Deploy only moves the web app/server; the
   recorder reaches users through `releases/recorder/` in the bucket. So before (or right after) any
   push that touched `extension/`: bump the version if behavior changed, then
@@ -1103,8 +1104,8 @@ reaches the container on a plain push.
   zipping `extension/dist` (the script refuses a zip that's missing, or older than the build in
   `dist/`, or whose version disagrees with `package.json`). Off-store Chrome installs never
   auto-update, so `/recorder` compares the version the extension reports over `handback:ping`
-  against this and nags — that comparison is the only update mechanism there is until the Web
-  Store listing exists; don't drop it when adding one.
+  against this and nags zip installs — their only update mechanism; store installs are exempt.
+  Don't drop it.
 - **Bun hangs on a streamed S3 `Body`.** `createReadStream` into `PutObjectCommand` never resolves
   and prints nothing — buffer the file instead (`cli/publish-recorder.ts`). Spawning
   `Compress-Archive` from bun hangs the same way, which is why zipping is a documented shell step

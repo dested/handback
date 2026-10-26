@@ -2,6 +2,19 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-10-26 — /recorder installs from the Chrome Web Store (1.12.0 live there)
+Asked: "1.12 is live on the store — update the extension page to say download from chrome store".
+Install button now "Download from the Chrome Web Store"; zip line reworded "Or skip the store:" (kept
+per 2026-09-13); the "Chrome will ask to confirm" hint cut. Version nag: store installs exempt (they
+auto-update; a zip would be a second, unlinked copy), stale zip installs sent to the store first.
+Typecheck green; not rendered (dev server down). Board + qa down (board.localhost answering HTML), so
+no task and no QA flow yet.
+Touched: src/app/recorder.tsx, cliffnotes.md
+
+## 2026-10-23 — recorder 1.12.0 published (self-hosted)
+Asked: ship 1.12 self-hosted and hand over the store zip. `bun run publish:extension` →
+releases/recorder/handback-recorder-1.12.0.zip; `pack:store` rebuilt extension/handback-recorder-store.zip (1.12.0) for the dashboard.
+
 ## 2026-10-22 — extension 1.12.0 + /record on the library's frame rule (LiveFrames)
 Asked: move the extension onto the new capture rule; Sal publishes the store and self-hosted builds.
 Both recorders feed @dested/video-to-prompt 1.3.1's LiveFrames every 250 ms: no frame cap,
