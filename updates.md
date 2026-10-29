@@ -2,6 +2,14 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-10-28 — Admins can mark accounts verified
+Asked: "i need to be able to mark people as verified asap". New `admin.setEmailVerified` (requireAdmin,
+flips `User.emailVerified` either way). The verified/unverified pill on /admin/users (new Email column)
+and /admin/users/:id is now the toggle. Every gate (declare, /transcribe, /polish, tokens.create) reads
+the row live, so it takes effect on the person's next call, no re-login. Typecheck green; not rendered
+(dev server down).
+Touched: server/router.ts, src/app/admin/users.tsx, src/app/admin/user.tsx, cliffnotes.md
+
 ## 2026-10-26 — /recorder installs from the Chrome Web Store (1.12.0 live there)
 Asked: "1.12 is live on the store — update the extension page to say download from chrome store".
 Install button now "Download from the Chrome Web Store"; zip line reworded "Or skip the store:" (kept

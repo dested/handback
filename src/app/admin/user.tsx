@@ -41,6 +41,9 @@ export function AdminUserPage() {
   }
   const setFeature = useMutation(trpc.admin.setFeature.mutationOptions({ onSuccess: invalidate }))
   const setAdmin = useMutation(trpc.admin.setAdmin.mutationOptions({ onSuccess: invalidate }))
+  const setVerified = useMutation(
+    trpc.admin.setEmailVerified.mutationOptions({ onSuccess: invalidate })
+  )
 
   if (user.isPending) return <Loading />
   if (user.isError) return <ErrorText message={user.error.message} />
@@ -56,11 +59,20 @@ export function AdminUserPage() {
         <span className="text-muted-foreground font-mono text-xs">
           joined {fmtDate(u.createdAt)}
         </span>
-        {!u.emailVerified && (
-          <span className="bg-review-wash text-review rounded px-1.5 py-0.5 text-xs">
-            unverified
-          </span>
-        )}
+        <button
+          type="button"
+          aria-pressed={u.emailVerified}
+          disabled={setVerified.isPending}
+          onClick={() => setVerified.mutate({ userId: u.id, verified: !u.emailVerified })}
+          className={cn(
+            'rounded px-1.5 py-0.5 text-xs transition-colors',
+            u.emailVerified
+              ? 'bg-approve-wash text-approve'
+              : 'bg-review-wash text-review hover:text-foreground'
+          )}>
+          {u.emailVerified ? 'verified' : 'unverified'}
+        </button>
+        {setVerified.isError && <ErrorText message={setVerified.error.message} />}
         {u.isAdmin && (
           <span className="bg-cobalt-wash text-cobalt rounded px-1.5 py-0.5 text-xs">admin</span>
         )}

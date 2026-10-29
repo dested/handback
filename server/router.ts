@@ -3751,6 +3751,21 @@ const adminRouter = router({
       await prisma.user.update({ where: { id: input.userId }, data: { isAdmin: input.isAdmin } })
       return { ok: true }
     }),
+
+  /**
+   * Vouch for an account by hand — the upload/AI/token gates read
+   * `emailVerified` live from the row, so this takes effect on their next call.
+   */
+  setEmailVerified: protectedProcedure
+    .input(z.object({ userId: z.string(), verified: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      await requireAdmin(ctx.session.user.id)
+      await prisma.user.update({
+        where: { id: input.userId },
+        data: { emailVerified: input.verified },
+      })
+      return { ok: true }
+    }),
 })
 
 /**

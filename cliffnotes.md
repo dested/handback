@@ -319,8 +319,8 @@ src/
     join.tsx            /join/:inviteId — peek + accept
     admin/              /admin — the platform-admin console, its own sidebar shell (nested routes):
                         layout.tsx (gate + sidebar frame), overview.tsx (counts, status mix,
-                        latest accounts/uploads), users.tsx + user.tsx (search, team/admin
-                        toggles, per-account detail: tokens, teams, walkthroughs by space),
+                        latest accounts/uploads), users.tsx + user.tsx (search, verified/team/
+                        admin toggles, per-account detail: tokens, teams, walkthroughs by space),
                         teams.tsx + team.tsx (all teams w/ seats·storage; roster, invites,
                         projects, seat-limit editor, add/remove members + role switch + invite
                         revoke, delete team), walkthroughs.tsx (platform
@@ -1173,8 +1173,8 @@ reaches the container on a plain push.
   `cloud` block so recorders can self-configure. **Deploy ordering matters**: the `monthly_usage`
   table must exist before this code serves (Drydock predeploy `db push` handles a normal push;
   `handback_test` needs its own `DATABASE_URL=…/handback_test bunx prisma db push` like any
-  schema change). Existing unverified alpha accounts hit the upload gate — flip `email_verified`
-  or have them verify; check RESEND_API_KEY is set in prod first.
+  schema change). Existing unverified alpha accounts hit the upload gate — flip them with the verified toggle on
+  /admin/users (`admin.setEmailVerified`) or have them verify; check RESEND_API_KEY is set in prod first.
 - **Security headers live in server.ts** (one middleware): X-Frame-Options DENY, nosniff,
   Referrer-Policy, Permissions-Policy (camera/geolocation denied — mic and display-capture
   deliberately untouched, the recorder needs them), HSTS only when serving https. There is NO CSP

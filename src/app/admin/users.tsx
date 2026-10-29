@@ -27,6 +27,9 @@ export function AdminUsersPage() {
   }
   const setFeature = useMutation(trpc.admin.setFeature.mutationOptions({ onSuccess: invalidate }))
   const setAdmin = useMutation(trpc.admin.setAdmin.mutationOptions({ onSuccess: invalidate }))
+  const setVerified = useMutation(
+    trpc.admin.setEmailVerified.mutationOptions({ onSuccess: invalidate })
+  )
 
   return (
     <div className="space-y-8">
@@ -64,6 +67,7 @@ export function AdminUsersPage() {
                   <Th>Member</Th>
                   <Th className="w-28">Joined</Th>
                   <Th className="w-64">Teams</Th>
+                  <Th className="w-28">Email</Th>
                   <Th className="w-24">Team</Th>
                   <Th className="w-24">Admin</Th>
                   <Th className="w-20" />
@@ -85,10 +89,7 @@ export function AdminUsersPage() {
                             <span className="text-muted-foreground font-normal"> · you</span>
                           )}
                         </p>
-                        <p className="text-muted-foreground truncate">
-                          {u.email}
-                          {!u.emailVerified && ' · unverified'}
-                        </p>
+                        <p className="text-muted-foreground truncate">{u.email}</p>
                       </Td>
                       <Td className="text-muted-foreground font-mono text-xs">
                         {fmtDate(u.createdAt)}
@@ -107,6 +108,23 @@ export function AdminUsersPage() {
                             ))
                           )}
                         </div>
+                      </Td>
+                      <Td>
+                        <button
+                          type="button"
+                          aria-pressed={u.emailVerified}
+                          disabled={setVerified.isPending}
+                          onClick={() =>
+                            setVerified.mutate({ userId: u.id, verified: !u.emailVerified })
+                          }
+                          className={cn(
+                            'rounded px-2 py-0.5 text-xs font-medium transition-colors',
+                            u.emailVerified
+                              ? 'bg-approve-wash text-approve'
+                              : 'bg-review-wash text-review hover:text-foreground'
+                          )}>
+                          {u.emailVerified ? 'verified' : 'unverified'}
+                        </button>
                       </Td>
                       <Td>
                         {u.isAdmin ? (
@@ -168,6 +186,7 @@ export function AdminUsersPage() {
 
         {setFeature.isError && <ErrorText message={setFeature.error.message} />}
         {setAdmin.isError && <ErrorText message={setAdmin.error.message} />}
+        {setVerified.isError && <ErrorText message={setVerified.error.message} />}
       </section>
     </div>
   )
