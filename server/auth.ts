@@ -50,6 +50,11 @@ export const auth = betterAuth({
     window: 60,
     max: 20,
     customRules: {
+      // A cookie-authenticated read with nothing to guess. Every client-side
+      // navigation and loader revalidation calls it, so an active person (or a
+      // few people behind one NAT) blew through the 20/min default, the 429 read
+      // as "no session", and the app bounced them to /sign-in. 2026-11-03 incident.
+      '/get-session': false,
       // Credential stuffing and sign-up spam are the two that actually cost us.
       '/sign-in/email': { window: 60, max: 5 },
       '/sign-up/email': { window: 60 * 60, max: 5 },
