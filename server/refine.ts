@@ -763,7 +763,7 @@ export async function runRefine(
       if (take.interrupted) {
         health.push({
           severity: 'info',
-          text: `part ${partN} was interrupted mid-recording`,
+          text: `part ${partN} is flagged as possibly interrupted, which recorders before 1.12.1 also set on normal stops`,
           atMs: offset,
         })
       }

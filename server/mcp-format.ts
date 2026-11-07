@@ -267,13 +267,21 @@ function fileListing(files: FormattableWalkthrough['files'], rebuilt: boolean): 
   return out
 }
 
+/** The report library's line for a flagged take. Recorders before 1.12.1 set that flag on
+ *  takes that stopped normally, and old rows can't be told apart, so the claim can't stand. */
+const RECORDER_DIED = /_\(interrupted — the recorder died mid-recording; [^)]*\)_/g
+const POSSIBLY_INTERRUPTED =
+  '_(A take here is flagged as possibly interrupted. Treat that as a hint: recorders before 1.12.1 also set it on takes that stopped normally. Check how the transcript ends before assuming anything is missing.)_'
+
 /** The whole brief. */
 export function formatWalkthrough(walkthrough: FormattableWalkthrough): string {
   const w = walkthrough
   const framing = intentFraming(w.intent)
   // A server from before 2026-10-15 sends one document in reportMd.
   const modern = w.recordingMd !== undefined
-  const recording = modern ? (w.recordingMd ?? null) : w.reportMd
+  const recording =
+    (modern ? (w.recordingMd ?? null) : w.reportMd)?.replace(RECORDER_DIED, POSSIBLY_INTERRUPTED) ??
+    null
   const task = modern ? (w.briefMd ?? null) : null
   const working = modern ? (w.refinedBriefMd ?? null) : null
   const rebuilt = w.recordingRebuilt === true

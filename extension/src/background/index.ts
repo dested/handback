@@ -560,6 +560,10 @@ chrome.runtime.onMessage.addListener((message: Request, _sender, sendResponse) =
       case 'recording:recover': {
         const rec = await getRecording(message.id);
         if (!rec) return { ok: false };
+        // The panel decides from its own copy of the store, which lags a normal stop:
+        // it can still see this take as recording after recording:finish landed. The
+        // store is the truth, and a finished take has nothing to recover.
+        if (rec.state !== 'recording') return { ok: true, recovered: false };
         const parts: Blob[] = [];
         for (let n = 1; n <= rec.chunks; n++) {
           const chunk = await blobs.get(`${message.id}:chunk:${n}`);
@@ -599,7 +603,7 @@ chrome.runtime.onMessage.addListener((message: Request, _sender, sendResponse) =
         // held it died with the worker. Stop the toolbar saying REC and re-arm the click.
         await setRecordingActive(false);
         await broadcast();
-        return { ok: true };
+        return { ok: true, recovered: true };
       }
       case 'recording:setActive': {
         await setRecordingActive(message.active);

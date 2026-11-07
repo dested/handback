@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { buildReport, readRecordingJson } from '@dested/video-to-prompt'
 import {
   byFrameOrder,
   formatWalkthrough,
@@ -130,6 +131,36 @@ describe('formatWalkthrough', () => {
     expect(brief).toContain('--- the recording ---\n\nLEGACY')
     expect(brief).not.toContain('--- working brief ---')
     expect(brief).toContain('--- removed from this walkthrough ---')
+  })
+
+  test('a flagged take reads as a hint, never as a dead recorder', () => {
+    const read = readRecordingJson({
+      format: 'video-to-prompt/2',
+      recording: {
+        dir: 'rec-01',
+        durationMs: 30000,
+        frames: [{ index: 1, tMs: 0, file: 'frames/01-0000.jpg', reason: 'start' }],
+        transcript: [],
+        events: [],
+      },
+    })
+    if (!read) throw new Error('fixture did not parse')
+    const session = {
+      id: 'w1',
+      name: 'Checkout',
+      slug: 'checkout',
+      createdAt: 0,
+      updatedAt: 0,
+      origin: '',
+      recCount: 1,
+    }
+    // The library's own sentence, so a change to it fails here rather than in a brief.
+    const recordingMd = buildReport(session, [{ ...read.recording, interrupted: true }])
+    expect(recordingMd).toContain('the recorder died')
+
+    const brief = formatWalkthrough({ ...modern, recordingMd })
+    expect(brief).not.toContain('the recorder died')
+    expect(brief).toContain('flagged as possibly interrupted')
   })
 })
 

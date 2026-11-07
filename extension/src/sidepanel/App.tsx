@@ -446,8 +446,20 @@ export function App() {
     if (!orphan) return;
     recovering.current.add(orphan.id);
     void (async () => {
-      await send({ type: 'recording:recover', id: orphan.id });
+      // `liveId` lags too: it is set only after recording:start answers, so a refresh
+      // landing first shows a running take with no live id. Ask the recorder itself.
+      const live = await send<CaptureState>({ type: 'capture:state' }).catch(() => null);
+      if (live?.id === orphan.id) {
+        recovering.current.delete(orphan.id);
+        setLiveId(live.id);
+        return;
+      }
+      const result = await send<{ ok: boolean; recovered?: boolean }>({
+        type: 'recording:recover',
+        id: orphan.id,
+      });
       await refresh();
+      if (!result?.recovered) return;
       void send({ type: 'transcribe:enqueue', id: orphan.id }).catch(() => {});
       say('recovered an interrupted recording');
     })();
