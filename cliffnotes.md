@@ -16,6 +16,7 @@
 > build still needs the store zip uploaded through the dashboard): capture,
 > transcription and upload all run in the offscreen document, so closing the panel never stops
 > a take (see "The panel is a window" gotcha; plans/2026-09-12-panel-and-app-handback.md).
+> **1.12.1 BUILT 2026-11-07, NOT YET ON THE WEB STORE OR releases/recorder/** (extension/handback-recorder-store.zip): stops flagging normal stops as interrupted. The server side already calls the flag a hint.
 > **1.12.0 PUBLISHED 2026-10-23, LIVE ON THE WEB STORE 2026-10-26** (releases/recorder/handback-recorder-1.12.0.zip): frames from @dested/video-to-prompt 1.3.1's
 > `LiveFrames` (no cap, change boxes, close-ups), speech lines from a mic level detector, the
 > pointer drawn at each frame's own time, the panel cropped out of window shares, click/nav as
@@ -1292,7 +1293,7 @@ reaches the container on a plain push.
 > `plans/2026-08-12-marketing-plan.md` → the "⏭ Next actions" section at the top is the ordered
 > checklist: ① record the real demo loop (beat sheet: `plans/2026-08-23-demo-video.md`) → Claude
 > cuts the ~60s Remotion version; ② submit the MCP directory pack
-> (`plans/2026-08-23-mcp-directory-pack.md`); ③ rotate the pasted keys + R2 token cleanup;
+> (`plans/2026-08-23-mcp-directory-pack.md`); ③ rotate the pasted keys (Sal confirmed rotated, 2026-11-07) + R2 token cleanup;
 > ④ verify the OG card renders before any announcement; ⑤ community groundwork starts now
 > (2–3 weeks lead time). X posts come from @dested in Sal's voice (memory: sal-twitter-voice).
 

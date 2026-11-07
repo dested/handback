@@ -2,6 +2,10 @@
 
 > Terse log of every task: what was asked → what was done. Newest first.
 
+## 2026-11-07 — False "recorder died" flag and untrusted-content labels (rebuild question page, Sal's yes)
+Normal stops raced the side panel, which called recording:recover on a finished take: interrupted set, duration cut to the last keyframe. Reproduced on real 1.12.0 in Chromium with the capture emulated: 30 of 30 stops flagged, 0 of 30 on 1.12.1, true orphans still recover. Briefs now call the flag a hint because old rows can't be told apart. Briefs also label recording content untrusted and let an agent skip an unsafe key point. Recorder 1.12.1 still needs the Web Store upload.
+Touched: extension/src/background/index.ts, extension/src/sidepanel/App.tsx, extension/public/manifest.json, extension/package.json, extension/handback-recorder-store.zip, server/mcp-format.ts, server/mcp-format.test.ts, server/refine.ts, cliffnotes.md
+
 ## 2026-10-28 — Admins can mark accounts verified
 Asked: "i need to be able to mark people as verified asap". New `admin.setEmailVerified` (requireAdmin,
 flips `User.emailVerified` either way). The verified/unverified pill on /admin/users (new Email column)
